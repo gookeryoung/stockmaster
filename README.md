@@ -89,8 +89,8 @@ make doctor         # 环境自检（依赖/编码/路径）
 ### 2.5 开发模式
 
 ```bash
-make dev            # 一条命令启动后端(8770) + 前端 Vite(5173)，各自独立窗口
-make dev-stop       # 停止上述进程并释放端口
+make dev            # 一条命令在当前控制台启动后端(8770) + 前端 Vite(5173)，Ctrl+C 一并停止
+make dev-stop       # 清理遗留的开发进程并释放端口
 ```
 
 - 前端界面： http://127.0.0.1:5173 （Vite 已把 `/api` 代理到后端 8770）
@@ -244,8 +244,8 @@ cd frontend; pnpm exec tsc --noEmit; pnpm build
 | `make frontend-sync` / `make frontend-build` | 安装前端依赖 / 构建前端 |
 | `make backend` (`serve`) | 启动服务（默认 `127.0.0.1:8770`，可用 `DEV_PORT=` 覆盖） |
 | `make frontend-dev` | 仅启动前端 Vite（`--host 127.0.0.1 --strictPort`） |
-| `make dev` | **启动开发环境**（后端 + 前端，各自独立窗口） |
-| `make dev-stop` | 停止开发环境并释放端口 |
+| `make dev` | **启动开发环境**（后端 + 前端，当前控制台内前台运行，Ctrl+C 一并停止） |
+| `make dev-stop` | 清理遗留的开发服务进程并释放端口 |
 | `make doctor` (`typecheck`) | 环境自检：依赖、控制台编码、路径、数据源配置 |
 | `make stats` | 数据库概况（证券数、日线行数、最新行情日、模型数） |
 | `make data-quality` | **数据质量体检**：覆盖率、缺口、陈旧、异常、复权一致性 |
@@ -254,6 +254,8 @@ cd frontend; pnpm exec tsc --noEmit; pnpm build
 | `make lint` / `make format` | ruff 检查 / 自动格式化 |
 | `make check-fast` / `make check` | 轻量静态门禁 / 全套门禁 |
 | `make clean` | 清理构建产物与缓存（`.venv` / `data` / `node_modules` 始终保留） |
+| `make pub` | 上传 `dist/*` 到 PyPI（需先 `make build` 并配置 PyPI 凭证） |
+| `make push` | 推送当前分支到所有远程仓库（含 tags） |
 | `make bump` | 版本号 bump（`bump-my-version`，同步 pyproject 与 `__init__`） |
 
 ### 6.2 数据质量体检
