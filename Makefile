@@ -31,7 +31,7 @@ endif
 
 .PHONY: help sync serve backend frontend-dev dev dev-stop init frontend-sync fs frontend-typecheck ft \
         frontend-build fb build b clean c test cov test-network lint format format-check \
-        typecheck check-fast check bump patch minor major stats doctor acceptance pack-cache-clean
+        typecheck check-fast check bump patch minor major stats doctor data-quality acceptance pack-cache-clean
 
 # 帮助文本由 scripts/make_help.py 渲染：该脚本会按终端代码页选择输出编码，
 # 因此中文控制台与 UTF-8 终端都能正确显示。
@@ -82,6 +82,9 @@ stats: | sync ## 显示数据库概况（证券数/日线行数/最新行情日/
 
 doctor: ## 环境自检（Python/依赖/控制台编码/路径/数据源配置）
 	uv run stockmaster doctor
+
+data-quality: ## 数据质量体检（覆盖率/缺口/陈旧/异常/复权一致性）
+	uv run stockmaster data-quality
 
 # ── 前端 ─────────────────────────────────────────────────────
 

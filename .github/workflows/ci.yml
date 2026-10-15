@@ -1,0 +1,151 @@
+name: CI
+
+# Runs on every push and PR; the release job only runs for version tags.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs for the same ref, so pushes do not queue up.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep output predictable across runners (the app also detects the console code
+  # page, but CI logs are UTF-8).
+  SM_CONSOLE_ENCODING: utf-8
+  PYTHON_VERSION: "3.13"
+  NODE_VERSION: "22"
+
+jobs:
+  backend:
+    name: 后端 · lint + 测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: 安装 Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: 安装依赖
+        run: uv sync --extra dev --frozen
+
+      - name: 代码风格检查（ruff check + format）
+        run: |
+          uv run ruff check backend scripts --cache-dir .ruff_cache
+          uv run ruff format --check backend scripts --cache-dir .ruff_cache
+
+      - name: 单元与集成测试
+        # Network-marked contract tests are excluded: they depend on live public
+        # data sources, which would make CI flaky and slow.
+        run: uv run pytest -n auto -m "not network" --cov=app --cov-report=term --cov-fail-under=75
+
+      - name: 构建 wheel 与 sdist
+        run: uv build
+
+      - name: 上传分发包
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  frontend:
+    name: 前端 · 类型检查 + 构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # Lockfile is v9.0; pnpm 10 handles that format.
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      - name: TypeScript 类型检查
+        run: pnpm typecheck
+        working-directory: frontend
+
+      - name: 构建
+        run: pnpm build
+        working-directory: frontend
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          if-no-files-found: error
+
+  release:
+    name: 发布 · GitHub Release
+    # Only for version tags, and only when both build jobs passed.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to create the release; scoped to this job only.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载已构建的分发包
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: 下载前端产物
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist/
+
+      - name: 打包前端产物
+        run: |
+          cd frontend-dist && zip -r ../dist/stockmaster-frontend.zip . && cd ..
+
+      - name: 生成校验和
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Tag name is taken from the ref, e.g. v0.1.0.
+          name: StockMaster ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/*
+          body: |
+            ## StockMaster ${{ github.ref_name }}
+
+            A 股日线量化分析工作台（数据获取 · 分析 · 预测 · 预警 · 回测）。
+
+            构建产物：
+            - `stockmaster-*.whl` / `*.tar.gz` — Python 分发包
+            - `stockmaster-frontend.zip` — 前端构建产物（由后端托管）
+            - `SHA256SUMS.txt` — 校验和
+
+            > 本工具仅供量化研究参考，不构成投资建议。

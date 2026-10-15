@@ -185,6 +185,33 @@ def system_status(session: Session = Depends(db_session)):
     )
 
 
+@router.get("/system/data-quality")
+def data_quality(
+    adjust: str = Query(default="qfq", pattern="^(qfq|raw)$"),
+    codes: str | None = Query(default=None, description="逗号分隔的代码；留空按最近更新抽样"),
+    max_symbols: int = Query(default=200, ge=1, le=5000),
+    stale_days: int = Query(default=5, ge=0, le=365),
+    only_problems: bool = Query(default=False),
+    session: Session = Depends(db_session),
+):
+    """Data quality report: coverage, gaps, staleness, anomalies, adjustment breaks.
+
+    Returns whole-market coverage counts plus bounded per-symbol detail. Pass
+    ``only_problems=true`` to keep the payload small when polling.
+    """
+    from app.sync.quality import check_data_quality
+
+    code_list = [c.strip() for c in (codes or "").split(",") if c.strip()]
+    report = check_data_quality(
+        session,
+        codes=code_list or None,
+        adjust=adjust,
+        stale_days=stale_days,
+        max_symbols=max_symbols,
+    )
+    return report.as_dict(only_problems=only_problems)
+
+
 @router.post("/system/jobs/{job_name}", response_model=JobResult)
 def run_job(
     job_name: str,

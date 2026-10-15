@@ -20,21 +20,48 @@ from app.providers.base import (
 )
 
 
+def synthesize_params(code: str) -> tuple[float, float]:
+    """Derive a symbol-specific (start_price, daily_return) pair from the code.
+
+    Symbols must **not** share one series: cross-sectional factors standardise
+    values *across* symbols on a given date, so identical series give zero
+    dispersion, undefined z-scores and no composite score. A naive hash-modulo
+    scheme collides easily (e.g. ``000001.SZ`` and ``601318.SH``), which silently
+    reintroduces that problem, so the digit sum is spread over two moduli and the
+    price/return pairs use coprime-ish steps.
+    """
+    digits = [ord(c) for c in code]
+    h = sum(digits)
+    h2 = sum(d * (i + 3) for i, d in enumerate(digits))
+
+    start_price = 8.0 + (h % 47) * 4.3
+    daily_return = -0.003 + (h2 % 29) * 0.00028
+    return start_price, daily_return
+
+
 def synthetic_bars(
     code: str,
     start: date,
     end: date,
     *,
-    start_price: float = 100.0,
-    daily_return: float = 0.001,
+    start_price: float | None = None,
+    daily_return: float | None = None,
     adjust: str = ADJUST_RAW,
     source: str = "mock",
 ) -> list[Bar]:
     """Deterministic geometric price series over calendar days.
 
-    Only weekdays are emitted, which keeps weekday/date logic exercised without
-    pretending to be a real trading calendar.
+    Only weekdays are emitted, which exercises weekday/date logic without
+    pretending to be a real trading calendar. Price level and drift are derived
+    from ``code`` unless overridden, so different symbols produce different series
+    (see :func:`synthesize_params`).
     """
+    derived_price, derived_return = synthesize_params(normalize(code))
+    if start_price is None:
+        start_price = derived_price
+    if daily_return is None:
+        daily_return = derived_return
+
     bars: list[Bar] = []
     price = start_price
     day = start

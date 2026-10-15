@@ -74,6 +74,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="环境自检（依赖、编码、配置、数据目录）")
     _add_common(doctor)
+
+    quality = sub.add_parser("data-quality", help="数据质量体检（缺口/异常/陈旧/复权一致性）")
+    _add_common(quality)
+    quality.add_argument("--codes", default="", help="逗号分隔的代码；留空表示按最近更新抽样")
+    quality.add_argument("--adjust", default="qfq", choices=["qfq", "raw"], help="检查哪一套序列")
+    quality.add_argument("--max-symbols", type=int, default=200, help="逐只检查的标的上限")
+    quality.add_argument("--stale-days", type=int, default=5, help="落后多少天算陈旧")
+    quality.add_argument(
+        "--min-usable-share", type=float, default=0.0, help="可用标的占比低于该值时以非零码退出（可用于门禁，如 0.5）"
+    )
     return parser
 
 
@@ -99,6 +109,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "doctor":
         return _doctor()
+
+    if command == "data-quality":
+        return _data_quality(args)
 
     if command == "sync-calendar":
         from app.jobs.tasks import job_sync_calendar
@@ -182,6 +195,69 @@ def _doctor() -> int:
         return 1
 
     print("  依赖检查     : 全部可用")
+    return 0
+
+
+def _data_quality(args) -> int:
+    """Print a data quality report, optionally failing when coverage is too low.
+
+    Exit code is non-zero when ``--min-usable-share`` is set and the usable share
+    falls below it, so this can gate a pipeline or CI job.
+    """
+    from app.db import session_scope
+    from app.sync.quality import check_data_quality, summarize_for_log
+
+    codes = [c.strip() for c in getattr(args, "codes", "").split(",") if c.strip()]
+
+    with session_scope() as session:
+        report = check_data_quality(
+            session,
+            codes=codes or None,
+            adjust=args.adjust,
+            stale_days=args.stale_days,
+            max_symbols=args.max_symbols,
+        )
+
+    coverage = report.coverage or {}
+
+    print("数据质量体检")
+    print(f"  检查序列     : {report.adjust}")
+    print(f"  全市场最新日 : {report.latest_market_date or '无'}")
+    print(f"  交易日历天数 : {report.calendar_sessions or '未同步'}")
+    print(
+        "  覆盖率       : "
+        f"可用 {coverage.get('stocks_usable', 0)} / {coverage.get('stocks_total', 0)} 只"
+        f"（{coverage.get('usable_share', 0):.1%}），"
+        f"未同步 {coverage.get('stocks_without_series', 0)} 只"
+    )
+    print(f"  逐只检查     : {report.checked} 只，健康 {report.healthy_symbols}，问题 {report.unhealthy_symbols}")
+    print(f"  错误/警告    : {report.error_count} / {report.warning_count}")
+
+    issues = report.issue_counts()
+    if issues:
+        print("  问题分布     :")
+        for kind, count in issues.items():
+            print(f"    - {kind}: {count}")
+
+    for finding in report.global_findings:
+        print(f"  [全局/{finding.severity}] {finding.message}")
+
+    problems = [s for s in report.symbols if s.findings]
+    if problems:
+        print("  问题标的（最多 10 条）:")
+        for symbol in problems[:10]:
+            kinds = ", ".join(f.kind for f in symbol.findings)
+            print(f"    - {symbol.code} ({symbol.name}) bars={symbol.bars}: {kinds}")
+
+    print(f"  {summarize_for_log(report)}")
+
+    threshold = getattr(args, "min_usable_share", 0.0) or 0.0
+    if threshold > 0 and coverage.get("usable_share", 0.0) < threshold:
+        print(
+            f"[失败] 可用占比 {coverage.get('usable_share', 0):.1%} "
+            f"低于阈值 {threshold:.1%}；请先补齐数据（sync-daily --full）。"
+        )
+        return 1
     return 0
 
 
