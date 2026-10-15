@@ -46,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     daily.add_argument("--full", action="store_true", help="全市场回补")
     daily.add_argument("--resume", action="store_true", default=True, help="断点续传（默认开启）")
     daily.add_argument("--workers", type=int, default=4, help="并发取数线程数")
+    daily.add_argument("--retries", type=int, default=2, help="失败标的的重试轮数")
 
     analytics = sub.add_parser("analytics", help="计算指标与因子")
     _add_common(analytics)
@@ -338,6 +339,7 @@ def _sync_daily(args) -> int:
         end=end,
         workers=args.workers,
         resume=args.resume,
+        retries=args.retries,
     )
     payload = report.as_dict()
     print(

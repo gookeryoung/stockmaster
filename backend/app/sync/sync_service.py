@@ -12,6 +12,7 @@ Responsibilities
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -227,8 +228,10 @@ class SyncService:
         adjusts: tuple[str, ...] = (ADJUST_RAW, ADJUST_QFQ),
         workers: int | None = None,
         resume: bool = True,
+        retries: int = 2,
+        retry_delay: float = 1.0,
     ) -> SyncReport:
-        """Backfill many symbols with checkpointing.
+        """Backfill many symbols with checkpointing and bounded retries.
 
         Each symbol is committed independently, so an interruption loses at most
         one symbol's work and ``resume=True`` skips the ones already recorded.
@@ -239,48 +242,81 @@ class SyncService:
         canon_codes = [normalize(c) for c in codes]
 
         report = SyncReport(job="backfill", total=len(canon_codes))
-        processed_set: set[str] = set()
 
         with session_scope() as session:
             task = self._task(session, "backfill", "daily")
             task.status = "running"
             task.total = len(canon_codes)
+            # The cursor records only *successful* symbols. A failed symbol must
+            # stay outside it, otherwise `resume=True` would skip it forever and
+            # the job could never converge to "done".
+            completed: set[str] = set()
             if resume and task.cursor:
-                processed_set = {c for c in task.cursor.split(",") if c}
-                report.skipped = len(processed_set)
+                completed = {c for c in task.cursor.split(",") if c}
+                report.skipped = len(completed)
 
-        todo = [c for c in canon_codes if c not in processed_set]
+        todo = [c for c in canon_codes if c not in completed]
         log.info(
             "backfill starting: %d symbols (%d already done), workers=%d",
             len(todo),
-            len(processed_set),
+            len(completed),
             workers,
         )
 
-        for index, code in enumerate(todo, start=1):
-            sub = self.sync_symbol_daily(code, start=start, end=end, adjusts=adjusts, full=True)
-            report.bars_written += sub.bars_written
-            report.errors.extend(sub.errors)
-            if sub.failed:
-                report.failed += 1
-            report.processed += 1
+        def attempt(symbols: list[str]) -> list[str]:
+            """Sync each symbol once; return the ones that failed."""
+            bad: list[str] = []
+            for index, code in enumerate(symbols, start=1):
+                sub = self.sync_symbol_daily(code, start=start, end=end, adjusts=adjusts, full=True)
+                report.bars_written += sub.bars_written
+                report.errors.extend(sub.errors)
+                report.processed += 1
+                if sub.failed:
+                    bad.append(code)
+                else:
+                    completed.add(code)
 
-            # Checkpoint every symbol so a restart is cheap.
-            processed_set.add(code)
-            with session_scope() as session:
-                task = self._task(session, "backfill", "daily")
-                task.processed = len(processed_set)
-                task.failed = report.failed
-                task.cursor = ",".join(sorted(processed_set))
-                task.status = "running"
-                task.message = f"last={code}"
+                with session_scope() as session:
+                    task = self._task(session, "backfill", "daily")
+                    task.processed = report.processed
+                    task.failed = len(bad)
+                    task.cursor = ",".join(sorted(completed))
+                    task.status = "running"
+                    task.message = f"last={code}"
 
-            if index % 50 == 0:
-                log.info("backfill progress: %d/%d (failed=%d)", index, len(todo), report.failed)
+                if index % 50 == 0:
+                    log.info(
+                        "backfill progress: %d/%d (failed=%d)",
+                        index,
+                        len(symbols),
+                        len(bad),
+                    )
+            return bad
+
+        failed_codes = attempt(todo)
+
+        # Public data sources fail transiently (throttling, resets), so retry the
+        # stragglers a bounded number of times before declaring them failed.
+        for round_number in range(1, max(0, retries) + 1):
+            if not failed_codes:
+                break
+            log.info(
+                "backfill retry %d/%d for %d failed symbol(s)",
+                round_number,
+                retries,
+                len(failed_codes),
+            )
+            time.sleep(retry_delay)
+            failed_codes = attempt(failed_codes)
+
+        report.failed = len(failed_codes)
+        if failed_codes:
+            report.errors.append(f"仍失败的标的（{len(failed_codes)} 只）：{', '.join(failed_codes[:20])}")
 
         with session_scope() as session:
             task = self._task(session, "backfill", "daily")
             task.status = "done" if not report.failed else "partial"
+            task.failed = report.failed
             task.finished_at = func.now()
         log.info(
             "backfill finished: processed=%d bars=%d failed=%d",
