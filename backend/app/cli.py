@@ -8,6 +8,7 @@ this path supports checkpointed resume.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from datetime import date
 
@@ -70,6 +71,14 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=None)
     serve.add_argument("--reload", action="store_true")
 
+    parser_dev = sub.add_parser("dev", help="开发模式：同一控制台内同时运行后端与前端")
+    _add_common(parser_dev)
+    parser_dev.add_argument("--host", default=None, help="绑定地址（默认 127.0.0.1）")
+    parser_dev.add_argument("--port", type=int, default=None, help="后端端口（默认 8770）")
+    parser_dev.add_argument("--frontend-port", type=int, default=None, help="前端端口（默认 5173）")
+    parser_dev.add_argument("--no-frontend", action="store_true", help="只启动后端")
+    parser_dev.add_argument("--no-reload", action="store_true", help="关闭后端热重载")
+
     stats = sub.add_parser("stats", help="显示数据概况")
     _add_common(stats)
 
@@ -110,6 +119,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "doctor":
         return _doctor()
+
+    if command == "dev":
+        return _dev(args)
 
     if command == "data-quality":
         return _data_quality(args)
@@ -352,6 +364,50 @@ def _sync_daily(args) -> int:
             print("  -", message)
     get_registry().close()
     return 0 if payload["failed"] == 0 else 1
+
+
+def _dev(args) -> int:
+    """Run backend and frontend together in the current console.
+
+    Signal handling lives here rather than in `run_dev`, because
+    `signal.signal()` only works on the main thread — installing it deeper would
+    silently fail whenever the orchestrator is hosted, leaving Ctrl+C unhandled.
+    """
+    import signal
+    import threading
+
+    from app.config import settings
+    from app.dev_server import run_dev
+
+    host = args.host or settings.host
+    port = args.port or settings.port
+    frontend_port = args.frontend_port or 5173
+
+    stop_event = threading.Event()
+    previous: dict[int, object] = {}
+
+    def request_stop(*_args) -> None:
+        # Just flag it: the orchestrator performs an ordered tree shutdown.
+        stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(ValueError, OSError, AttributeError):
+            # Fails off the main thread or on platforms lacking the signal.
+            previous[sig] = signal.signal(sig, request_stop)
+
+    try:
+        return run_dev(
+            host=host,
+            port=port,
+            frontend_port=frontend_port,
+            with_frontend=not args.no_frontend,
+            reload=not args.no_reload,
+            stop_event=stop_event,
+        )
+    finally:
+        for sig, handler in previous.items():
+            with contextlib.suppress(ValueError, OSError):
+                signal.signal(sig, handler)
 
 
 def _serve(args) -> int:

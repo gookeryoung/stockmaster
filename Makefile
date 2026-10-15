@@ -31,7 +31,8 @@ endif
 
 .PHONY: help sync serve backend frontend-dev dev dev-stop init frontend-sync fs frontend-typecheck ft \
         frontend-build fb build b clean c test cov test-network lint format format-check \
-        typecheck check-fast check bump patch minor major stats doctor data-quality acceptance pack-cache-clean
+        typecheck check-fast check bump patch minor major stats doctor data-quality acceptance \
+        pub push pack-cache-clean
 
 # 帮助文本由 scripts/make_help.py 渲染：该脚本会按终端代码页选择输出编码，
 # 因此中文控制台与 UTF-8 终端都能正确显示。
@@ -71,10 +72,12 @@ serve: backend ## backend 的别名
 frontend-dev: | frontend-sync ## 仅启动前端 Vite 开发服务器（代理 /api 到后端）
 	cd frontend && pnpm exec vite --host $(DEV_HOST) --port $(FRONTEND_PORT) --strictPort
 
-dev: ## 启动开发环境（后端 + 前端，各自独立窗口，便于分别查看日志与停止）
-	pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -BackendPort $(DEV_PORT) -FrontendPort $(FRONTEND_PORT)
+# 与 cndb 的 `uv run cndb dev` 一致：在当前控制台前台同时运行前后端，
+# Ctrl+C 一并停止；不会另开窗口，因此无需再去关闭多余的控制台。
+dev: ## 启动开发环境（后端 + 前端，当前控制台内前台运行，Ctrl+C 一并停止）
+	uv run stockmaster dev --host $(DEV_HOST) --port $(DEV_PORT) --frontend-port $(FRONTEND_PORT)
 
-dev-stop: ## 停止开发环境（释放 $(DEV_PORT) / $(FRONTEND_PORT) 端口上的进程）
+dev-stop: ## 清理遗留的开发服务进程（释放 $(DEV_PORT) / $(FRONTEND_PORT) 端口）
 	pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Stop -BackendPort $(DEV_PORT) -FrontendPort $(FRONTEND_PORT)
 
 stats: | sync ## 显示数据库概况（证券数/日线行数/最新行情日/模型数）
@@ -144,6 +147,16 @@ bump: ## 版本号 bump（默认 patch，用法：make bump [minor|major]）
 
 patch minor major:
 	@:
+
+# 推送到 PyPI 需要凭证（TWINE_USERNAME / TWINE_PASSWORD 或 ~/.pypirc）。
+# 当前仓库未配置 PyPI token，故 CI 里走的是 GitHub Release，而不是本目标。
+pub: ## 上传 dist/* 到 PyPI（需先 make build，并配置 PyPI 凭证）
+	@uv run python scripts/say.py "[pub] 检查 PyPI 凭证（TWINE_USERNAME/TWINE_PASSWORD 或 ~/.pypirc）"
+	uvx $(UVX_INDEX) twine check dist/*
+	uvx $(UVX_INDEX) twine upload dist/*
+
+push: ## 推送当前分支到所有远程（含 tags）
+	uv run python scripts/push_all.py
 
 pack-cache-clean: ## 清理 uv 缓存（uv cache clean）
 	uv cache clean
