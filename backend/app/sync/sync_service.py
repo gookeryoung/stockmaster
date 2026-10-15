@@ -28,6 +28,7 @@ from app.providers.base import ADJUST_QFQ, ADJUST_RAW
 from app.providers.registry import ProviderRegistry, get_registry
 from app.sync import repository as repo
 from app.sync.adjust import ex_date_set, recover_adjust_ratio
+from app.sync.indices import parse_constituent_codes
 
 log = get_logger(__name__)
 
@@ -152,12 +153,7 @@ class SyncService:
 
         codes: list[str] = []
         if df is not None and len(df) > 0:
-            # The frame carries a share-code column; find it by content.
-            for column in df.columns:
-                series = df[column].astype(str)
-                if series.str.fullmatch(r"\d{6}").all():
-                    codes = [normalize(c) for c in series.tolist()]
-                    break
+            codes = parse_constituent_codes(df, digits)
         if not codes:
             report.errors.append("no constituent codes parsed")
             report.failed = 1

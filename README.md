@@ -61,39 +61,50 @@ cd ..
 
 ### 2.4 首次数据初始化（重要）
 
-打开页面后进入 **设置** 页，按顺序点击任务；或直接用 CLI：
+打开页面后进入 **设置** 页，按顺序点击任务；或直接用 CLI（经 `uv run` 调用，无需手动激活虚拟环境）：
 
-```powershell
-.venv\Scripts\python.exe -m app.cli --version
+```bash
+uv run stockmaster sync-calendar      # 交易日历
+uv run stockmaster sync-instruments   # 证券主数据
+uv run stockmaster sync-daily         # 核心池日线（几分钟内可用）
+uv run stockmaster analytics          # 指标与因子
+uv run stockmaster train              # 训练模型（默认梯度提升，1 日周期）
+uv run stockmaster predict            # 批量预测
+```
 
-# 核心池（约几百只，几分钟内可用）
-.venv\Scripts\python.exe -m app.cli sync-calendar
-.venv\Scripts\python.exe -m app.cli sync-instruments
-.venv\Scripts\python.exe -m app.cli sync-daily
+不带 `sync-xxx` 前缀的等价写法也可用 `make`：
 
-# 指标与因子
-.venv\Scripts\python.exe -m app.cli analytics
-
-# 训练与预测
-.venv\Scripts\python.exe -m app.cli train --algo hist_gbdt --horizon 1
-.venv\Scripts\python.exe -m app.cli predict
+```bash
+make init           # 建库
+make stats          # 查看数据概况
+make doctor         # 环境自检（依赖/编码/路径）
 ```
 
 > **全市场回补**（耗时较长，可中断续传）：
-> ```powershell
-> .venv\Scripts\python.exe -m app.cli sync-daily --full
+> ```bash
+> uv run stockmaster sync-daily --full
 > ```
 > 实测：8 只标的 × 2.8 年约 105 秒。全市场 5500+ 只建议分批进行，命令支持断点续传。
 
-### 2.5 开发模式（前端热更新）
+### 2.5 开发模式
 
-```powershell
-# 终端 1：后端
-.venv\Scripts\python.exe -m app.cli serve --reload
-
-# 终端 2：前端（Vite 代理 /api 到 8770）
-cd frontend; pnpm dev     # http://127.0.0.1:5173
+```bash
+make dev            # 一条命令启动后端(8770) + 前端 Vite(5173)，各自独立窗口
+make dev-stop       # 停止上述进程并释放端口
 ```
+
+- 前端界面： http://127.0.0.1:5173 （Vite 已把 `/api` 代理到后端 8770）
+- API 文档： http://127.0.0.1:8770/docs
+- Vite 以 `--host 127.0.0.1 --strictPort` 启动：**端口被占用会直接报错**，而不是
+  悄悄换到 5174——否则脚本打印的 URL 会与实际不符。
+- 也可分别启动：`make backend`（仅后端）与 `make frontend-dev`（仅前端）。
+
+> 前提：`make` 可用（Windows 上建议安装 [Gow](https://github.com/bmatcuk/gow)
+> 或 Git Bash 自带的 make）。若没有 `make`，直接用上面的 `uv run stockmaster ...`
+> 与 `.\scripts\run.ps1` 即可，功能完全一致。
+
+前端热更新：`make dev` 中的 Vite 已启用 HMR，改动 `frontend/src` 会即时生效。
+后端如需热重载，用 `uv run stockmaster serve --reload`。
 
 ---
 
@@ -196,20 +207,37 @@ cd frontend; pnpm exec tsc --noEmit; pnpm build
 
 ### 6.1 全部 Make 命令
 
-运行 `make help` 可随时查看。常用命令：
+运行 `make help` 可随时查看（帮助文本会按控制台代码页选择编码，中文控制台与 UTF-8 终端都不乱码）。
 
 | 命令 | 说明 |
 |---|---|
 | `make sync` / `make init` | 安装后端依赖 / 初始化数据库 |
 | `make frontend-sync` / `make frontend-build` | 安装前端依赖 / 构建前端 |
-| `make serve` | 启动服务（默认 `127.0.0.1:8770`，可用 `DEV_PORT=` 覆盖） |
-| `make dev` | 显示开发模式两终端启动方式 |
+| `make backend` (`serve`) | 启动服务（默认 `127.0.0.1:8770`，可用 `DEV_PORT=` 覆盖） |
+| `make frontend-dev` | 仅启动前端 Vite（`--host 127.0.0.1 --strictPort`） |
+| `make dev` | **启动开发环境**（后端 + 前端，各自独立窗口） |
+| `make dev-stop` | 停止开发环境并释放端口 |
+| `make doctor` (`typecheck`) | 环境自检：依赖、控制台编码、路径、数据源配置 |
 | `make stats` | 数据库概况（证券数、日线行数、最新行情日、模型数） |
+| `make test` / `make cov` / `make test-network` | 离线测试 / 覆盖率 / 网络契约测试 |
 | `make acceptance` | 端到端实盘验收 |
-| `make clean` | 清理构建产物与缓存 |
+| `make lint` / `make format` | ruff 检查 / 自动格式化 |
+| `make check-fast` / `make check` | 轻量静态门禁 / 全套门禁 |
+| `make clean` | 清理构建产物与缓存（`.venv` / `data` / `node_modules` 始终保留） |
 | `make bump` | 版本号 bump（`bump-my-version`，同步 pyproject 与 `__init__`） |
 
-### 6.2 Git 钩子（可选）
+### 6.2 中文乱码说明（Windows）
+
+中文 Windows 控制台默认代码页为 **936(GBK)**，而现代终端（Windows Terminal / VS Code）
+多为 **65001(UTF-8)**。同一段字节在其中一边必然乱码，因此本项目：
+
+- 统一在输出前探测当前控制台代码页并按其编码输出
+  （见 `backend/app/core/console.py`；`make doctor` 会显示实际取值）；
+- `Makefile` **不使用内联 Python** 输出中文（内联 `python -c` 是新进程，编码不可控），
+  改为调用 `stockmaster` CLI 与 `scripts/*.py`；
+- 可用 `SM_CONSOLE_ENCODING` 强制指定（例如 CI 里设为 `utf-8`）。
+
+### 6.3 Git 钩子（可选）
 
 ```bash
 uv run --with prek prek install --force   # 安装钩子

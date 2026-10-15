@@ -6,6 +6,7 @@ app runs out of the box on a single machine. See ``.env.example``.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -105,6 +106,16 @@ class Settings(BaseSettings):
     @property
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
+
+    @property
+    def console_encoding_override(self) -> str:
+        """Explicit console encoding override (``SM_CONSOLE_ENCODING``).
+
+        Read straight from the environment rather than through the ``SM_``-prefixed
+        settings model, because the console helper must work before settings are
+        resolved. Surfaced here purely for diagnostics.
+        """
+        return os.environ.get("SM_CONSOLE_ENCODING", "").strip()
 
     def ensure_dirs(self) -> None:
         """Create the data directories if missing."""

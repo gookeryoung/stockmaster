@@ -66,6 +66,31 @@ class TestSymbols:
         assert infer_exchange("300750") == "SZ"
         assert infer_exchange("830799") == "BJ"
 
+    @pytest.mark.parametrize(
+        ("code", "expected"),
+        [
+            # Newly issued ranges that appear in real CSI constituent data.
+            # Enumerating only historical prefixes raised on 302132, and a single
+            # unrecognised code aborted an entire index sync.
+            ("302132", "SZ"),
+            ("301001", "SZ"),
+            ("001270", "SZ"),
+            ("003816", "SZ"),
+            ("201872", "SZ"),
+            ("920000", "BJ"),
+            ("889999", "BJ"),
+            ("605599", "SH"),
+            ("689009", "SH"),
+        ],
+    )
+    def test_infer_exchange_accepts_extended_prefixes(self, code, expected):
+        assert infer_exchange(code) == expected
+
+    @pytest.mark.parametrize("code", ["399006", "999999", "123456", "30213"])
+    def test_infer_exchange_rejects_unknown_prefixes(self, code):
+        with pytest.raises(DataError):
+            infer_exchange(code)
+
     def test_split(self):
         assert split("600519.SH") == ("600519", "SH")
 

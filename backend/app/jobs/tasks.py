@@ -80,24 +80,42 @@ def _default_universe() -> list[str]:
     """The set of symbols the daily pipeline processes.
 
     Preference order: explicit watchlist, then index members, then all known
-    instruments. This keeps a fresh install useful without a full backfill.
+    instruments — always restricted to symbols that actually have stored bars.
+
+    That last constraint matters: a cloud-sourced index-constituent list can
+    contain codes that were never synced (or were mis-parsed). Returning them
+    would make every downstream job find "no data" and fail with a confusing
+    message instead of falling back to a usable universe.
     """
     with session_scope() as session:
         from sqlalchemy import select
 
-        from app.db.models import Instrument, WatchlistItem
+        from app.db.models import DailyBar, Instrument, WatchlistItem
 
-        watched = list(session.execute(select(WatchlistItem.code)).scalars().all())
+        def with_bars(candidates: list[str]) -> list[str]:
+            if not candidates:
+                return []
+            stored = set(
+                session.execute(select(DailyBar.code).where(DailyBar.code.in_(candidates)).distinct()).scalars().all()
+            )
+            return [c for c in candidates if c in stored]
+
+        watched = with_bars(list(session.execute(select(WatchlistItem.code)).scalars().all()))
         if watched:
             return watched
-        members = repo.index_members(session, "000300.SH")
+
+        members = with_bars(repo.index_members(session, "000300.SH"))
         if members:
             return members
-        return list(
-            session.execute(select(Instrument.code).where(Instrument.status == 1, Instrument.is_index.is_(False)))
-            .scalars()
-            .all()
+
+        known = with_bars(
+            list(
+                session.execute(select(Instrument.code).where(Instrument.status == 1, Instrument.is_index.is_(False)))
+                .scalars()
+                .all()
+            )
         )
+        return known
 
 
 def job_sync_index_daily(index_codes: tuple[str, ...] = ("000300.SH", "000905.SH", "000001.SH")) -> dict:

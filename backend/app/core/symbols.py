@@ -18,8 +18,14 @@ import re
 
 from app.core.errors import DataError
 
+# Exchange prefixes, kept broad enough to accept newly issued ranges.
+#
+# Enumerating only historically common prefixes is fragile: real index data already
+# contains codes such as ``302132`` (深市) that older lists omit, and one
+# unrecognised code was enough to abort an entire index-constituent sync.
 _SH_RE = re.compile(r"^(600|601|603|605|688|689|900)\d{3}$")
-_SZ_RE = re.compile(r"^(000|001|002|003|300|301|200)\d{3}$")
+_SH_INDEX_RE = re.compile(r"^000\d{3}$")
+_SZ_RE = re.compile(r"^(000|001|002|003|300|301|302|200|201)\d{3}$")
 _BJ_RE = re.compile(r"^(43|83|87|88|920)\d{3,}$")
 
 EXCHANGE_CN = {"SH": "上海", "SZ": "深圳", "BJ": "北京"}
@@ -27,6 +33,11 @@ EXCHANGE_CN = {"SH": "上海", "SZ": "深圳", "BJ": "北京"}
 
 def infer_exchange(code: str) -> str:
     """Infer the exchange for a bare 6-digit A-share code.
+
+    Only 6-digit codes are accepted. Ambiguous ``000xxx`` values are treated as
+    Shenzhen constituents, because that is the overwhelmingly common case; CSI
+    index codes (``000300``) share the shape and must be handled explicitly by the
+    caller (see :mod:`app.sync.indices`).
 
     Raises:
         DataError: if the code matches no known A-share/B-share prefix.

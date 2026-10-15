@@ -8,28 +8,14 @@ this path supports checkpointed resume.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import sys
 from datetime import date
 
 from app import __version__
+from app.core.console import prefer_console_encoding
 from app.core.logging import get_logger, setup_logging
 
 log = get_logger(__name__)
-
-
-def _force_utf8_stdout() -> None:
-    """Make CLI output UTF-8 regardless of the console code page.
-
-    When stdout is a pipe (e.g. `make stats`), Python picks the locale encoding —
-    on a Chinese Windows console that is GBK, which mangles the Chinese labels.
-    Reconfiguring to UTF-8 keeps output identical whether run directly or piped.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            with contextlib.suppress(ValueError, OSError):
-                reconfigure(encoding="utf-8", errors="replace")
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -85,11 +71,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     stats = sub.add_parser("stats", help="显示数据概况")
     _add_common(stats)
+
+    doctor = sub.add_parser("doctor", help="环境自检（依赖、编码、配置、数据目录）")
+    _add_common(doctor)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    _force_utf8_stdout()
+    prefer_console_encoding()
     args = build_parser().parse_args(argv)
     setup_logging(getattr(args, "log_level", "INFO"))
 
@@ -107,6 +96,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "stats":
         return _stats()
+
+    if command == "doctor":
+        return _doctor()
 
     if command == "sync-calendar":
         from app.jobs.tasks import job_sync_calendar
@@ -153,6 +145,44 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"未知命令：{command}", file=sys.stderr)
     return 2
+
+
+def _doctor() -> int:
+    """Environment self-check.
+
+    Reports the resolved console encoding because a wrong code page is the single
+    most confusing failure mode on Windows: everything works yet the Chinese
+    labels render as mojibake.
+    """
+    import platform
+
+    from app.config import REPO_ROOT, settings
+    from app.core.console import detect_console_encoding, locale_encoding
+
+    print("StockMaster 环境自检")
+    print(f"  Python       : {platform.python_version()} ({platform.system()} {platform.release()})")
+    print(f"  项目根目录   : {REPO_ROOT}")
+    print(f"  数据目录     : {settings.data_path}  (存在: {settings.data_path.exists()})")
+    print(f"  数据库       : {settings.db_path}  (存在: {settings.db_path.exists()})")
+    print(f"  控制台编码   : {detect_console_encoding()}  (进程 locale: {locale_encoding()})")
+    if settings.console_encoding_override:
+        print(f"  编码覆盖     : SM_CONSOLE_ENCODING={settings.console_encoding_override}")
+    print(f"  调度器       : {'启用' if settings.scheduler_enabled else '禁用'}")
+    print(f"  数据源优先级 : {', '.join(settings.provider_priority)}")
+    print(f"  超时/重试    : {settings.provider_timeout}s / {settings.provider_max_retries} 次")
+
+    missing: list[str] = []
+    for module in ("fastapi", "sqlalchemy", "pandas", "numpy", "sklearn", "baostock", "akshare", "apscheduler"):
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append(module)
+    if missing:
+        print(f"  [警告] 缺少依赖：{', '.join(missing)}（执行 make sync）")
+        return 1
+
+    print("  依赖检查     : 全部可用")
+    return 0
 
 
 def _stats() -> int:

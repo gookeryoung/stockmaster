@@ -5,7 +5,6 @@ This is the strongest available evidence that the system works: real baostock
 data, real indicators/factors, real model training, real backtest.
 """
 
-import contextlib
 import sys
 import time
 import warnings
@@ -13,18 +12,10 @@ import warnings
 sys.path.insert(0, "backend")
 warnings.filterwarnings("ignore")
 
-# Piped stdout defaults to the console code page (GBK on zh-CN Windows), which
-# would mangle the Chinese labels below. Force UTF-8 so output is identical
-# whether the script runs directly or through `make acceptance`.
-for _stream in (sys.stdout, sys.stderr):
-    _reconfigure = getattr(_stream, "reconfigure", None)
-    if _reconfigure is not None:
-        with contextlib.suppress(ValueError, OSError):
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from datetime import date
 
 from app.config import settings
+from app.core.console import prefer_console_encoding
 from app.db import init_db, session_scope
 from app.providers.registry import get_registry
 from app.sync import repository as repo
@@ -36,6 +27,10 @@ END = date.today()
 
 results: dict[str, object] = {}
 failures: list[str] = []
+
+# Encode for whatever terminal is consuming this output, so the Chinese labels
+# stay readable in both a GBK console and a UTF-8 terminal.
+prefer_console_encoding()
 
 
 def check(name: str, condition: bool, detail: str = "") -> None:

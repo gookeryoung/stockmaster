@@ -12,7 +12,13 @@ export default defineConfig({
     },
   },
   server: {
+    // Bind explicitly: Vite's default ("localhost") resolves to ::1 only, so
+    // http://127.0.0.1:5173 would be refused and any tooling that uses the IPv4
+    // form would fail. Pinning 127.0.0.1 keeps the printed URL, the proxy target
+    // and the browser all on the same address family.
+    host: "127.0.0.1",
     port: 5173,
+    strictPort: true,
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8770",

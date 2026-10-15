@@ -1,8 +1,7 @@
 # Makefile - stockmaster 项目快捷命令
 # 运行 `make help` 查看所有可用命令
 #
-# 约定与 cndb 项目一致：所有 Python 命令经 `uv run` 执行，避免依赖手动激活虚拟环境；
-# 中文输出统一通过 `sys.stdout.reconfigure(encoding='utf-8')` 保证在 Windows GBK 控制台不乱码。
+# 约定与 cndb 项目一致：所有 Python 命令经 `uv run` 执行，避免依赖手动激活虚拟环境。
 
 PACKAGE := app
 COV_THRESHOLD := 75
@@ -20,38 +19,69 @@ CPUS := $(shell nproc 2>/dev/null || echo 4)
 endif
 PYTEST_JOBS := $(if $(filter 0 1,$(CPUS)),2,$(if $(filter 2 3,$(CPUS)),4,8))
 
-.PHONY: help sync serve dev init frontend-sync fs frontend-typecheck ft frontend-build fb \
-        build b clean c test cov test-network lint format format-check typecheck check-fast check \
-        bump patch minor major stats acceptance pack-cache-clean
+# ── 控制台编码 ───────────────────────────────────────────────
+# 中文 Windows 控制台默认代码页为 936(GBK)，而 UTF-8 终端为 65001。
+# 若不做处理，`make` 管道中的中文会按错误编码解码而乱码。
+# 这里在解析阶段探测一次并导出，供所有子进程（含 make_help.py）使用；
+# 探测逻辑放在脚本里而非内联，避免 shell 引号被 sh 改写导致 CreateProcess 失败。
+SM_CONSOLE_ENCODING ?= $(shell uv run python scripts/make_help.py --print-encoding 2>/dev/null)
+ifneq ($(strip $(SM_CONSOLE_ENCODING)),)
+export SM_CONSOLE_ENCODING
+endif
 
+.PHONY: help sync serve backend frontend-dev dev dev-stop init frontend-sync fs frontend-typecheck ft \
+        frontend-build fb build b clean c test cov test-network lint format format-check \
+        typecheck check-fast check bump patch minor major stats doctor acceptance pack-cache-clean
+
+# 帮助文本由 scripts/make_help.py 渲染：该脚本会按终端代码页选择输出编码，
+# 因此中文控制台与 UTF-8 终端都能正确显示。
 help: ## 显示帮助信息
-	@uv run python -c "import sys; sys.stdout.reconfigure(encoding='utf-8', errors='replace'); import re;ms=[(m.group(1),m.group(2).strip()) for f in sys.argv[1:] for l in open(f,encoding='utf-8') if (m:=re.match(r'^([a-zA-Z][\w -]*):.*?##\s*(.*)',l))];[print(f'  {n:<18} {d}') for n,d in ms]" $(MAKEFILE_LIST)
+	@uv run python scripts/make_help.py $(MAKEFILE_LIST)
 
 # ── 环境 ─────────────────────────────────────────────────────
 
 sync: ## 安装/更新后端依赖（uv sync --extra dev）
 	uv sync --extra dev
-	@uv run python -c "import sys; sys.stdout.reconfigure(encoding='utf-8'); print('[sync] 后端依赖就绪（含 lint 与 test 工具链）')"
+	@uv run stockmaster doctor
 
 init: sync ## 初始化数据库（建表，幂等）
 	uv run stockmaster init
 
+# 用 make 的 wildcard 判断目录，避免内联 Python（内联脚本的输出编码不可控，
+# 在 GBK 控制台下中文会乱码）
+ifeq ($(wildcard frontend/node_modules),)
+FRONTEND_NEEDS_INSTALL := 1
+endif
+
 frontend-sync fs: ## 安装前端依赖（pnpm install，已存在 node_modules 则跳过）
-	@uv run python -c "import sys; sys.stdout.reconfigure(encoding='utf-8', errors='replace'); import os,subprocess;\
-print('[frontend] node_modules 已存在，跳过 pnpm install') if os.path.isdir('frontend/node_modules') else (\
-print('[frontend] 未安装依赖，开始 pnpm install ...'),\
-subprocess.run(['pnpm','install'],cwd='frontend',check=True))"
+ifdef FRONTEND_NEEDS_INSTALL
+	uv run python scripts/say.py "[frontend] 未安装依赖，开始 pnpm install ..."
+	cd frontend && pnpm install
+else
+	uv run python scripts/say.py "[frontend] node_modules 已存在，跳过 pnpm install"
+endif
 
 # ── 运行 ─────────────────────────────────────────────────────
 
-serve: | sync ## 启动服务（后端 API + 已构建前端，单端口）
+backend: ## 仅启动后端 API（生产模式：托管已构建前端）
 	uv run stockmaster serve --host $(DEV_HOST) --port $(DEV_PORT)
 
-dev: ## 开发模式说明（Vite 与后端需两个终端，以便各自热更新）
-	@uv run python -c "import sys; sys.stdout.reconfigure(encoding='utf-8'); print('开发模式需要两个终端：'); print('  终端1: make serve DEV_PORT=$(DEV_PORT)'); print('  终端2: cd frontend && pnpm dev   # http://127.0.0.1:$(FRONTEND_PORT)'); print('Vite 已配置将 /api 代理到 http://127.0.0.1:$(DEV_PORT)')"
+serve: backend ## backend 的别名
+
+frontend-dev: | frontend-sync ## 仅启动前端 Vite 开发服务器（代理 /api 到后端）
+	cd frontend && pnpm exec vite --host $(DEV_HOST) --port $(FRONTEND_PORT) --strictPort
+
+dev: ## 启动开发环境（后端 + 前端，各自独立窗口，便于分别查看日志与停止）
+	pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -BackendPort $(DEV_PORT) -FrontendPort $(FRONTEND_PORT)
+
+dev-stop: ## 停止开发环境（释放 $(DEV_PORT) / $(FRONTEND_PORT) 端口上的进程）
+	pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Stop -BackendPort $(DEV_PORT) -FrontendPort $(FRONTEND_PORT)
 
 stats: | sync ## 显示数据库概况（证券数/日线行数/最新行情日/模型数）
 	uv run stockmaster stats
+
+doctor: ## 环境自检（Python/依赖/控制台编码/路径/数据源配置）
+	uv run stockmaster doctor
 
 # ── 前端 ─────────────────────────────────────────────────────
 
@@ -70,8 +100,8 @@ lint: ## 后端代码风格检查（ruff check + format 校验）
 	uv run ruff check backend scripts --cache-dir .ruff_cache
 	uv run ruff format --check backend scripts --cache-dir .ruff_cache
 
-typecheck: ## 后端类型检查（当前以 ruff 规则覆盖；预留独立类型检查入口）
-	@uv run python -c "import sys; sys.stdout.reconfigure(encoding='utf-8'); print('[typecheck] 未配置独立类型检查器（cndb 用 pyrefly，本项目暂由 ruff 规则覆盖）')"
+typecheck: ## 环境与配置自检（依赖/编码/路径；暂无独立类型检查器）
+	uv run stockmaster doctor
 
 format: ## 后端代码自动格式化（ruff format）
 	uv run ruff format backend scripts --cache-dir .ruff_cache
@@ -84,7 +114,7 @@ test: ## 运行测试（不含覆盖率；网络测试默认跳过）
 
 cov: ## 运行测试并生成覆盖率报告（HTML + 终端门槛）
 	uv run pytest -n $(PYTEST_JOBS) --cov=$(PACKAGE) --cov-report=term-missing --cov-report=html --cov-fail-under=$(COV_THRESHOLD)
-	@uv run python -c "import sys; sys.stdout.reconfigure(encoding='utf-8'); print('覆盖率报告：htmlcov/index.html')"
+	uv run python scripts/say.py "覆盖率报告：htmlcov/index.html"
 
 test-network: ## 运行网络契约测试（实盘数据源，需联网）
 	uv run pytest -m network -v
@@ -97,13 +127,9 @@ check: ## 运行全套门禁（lint + 前端类型检查 + 测试 + 覆盖率）
 
 # ── 清理与发布 ───────────────────────────────────────────────
 
-clean c: ## 清理构建产物与缓存
-	@uv run python -c "import sys; sys.stdout.reconfigure(encoding='utf-8', errors='replace'); import shutil,pathlib,glob;\
-pts=['build','dist','wheels','*.egg-info','htmlcov','.coverage','.coverage.*','coverage.xml','.ruff_cache','.pytest_cache','.mypy_cache'];\
-[shutil.rmtree(m,ignore_errors=True) if pathlib.Path(m).is_dir() else pathlib.Path(m).unlink(missing_ok=True) for p in pts for m in glob.glob(p)];\
-[shutil.rmtree(d,ignore_errors=True) for base in ('backend','scripts') for d in pathlib.Path(base).rglob('__pycache__')];\
-[f.unlink(missing_ok=True) for base in ('backend','scripts') for f in pathlib.Path(base).rglob('*') if f.suffix in ('.pyc','.pyo')];\
-print('[clean] 已清理构建产物与缓存')"
+clean c: ## 清理构建产物与缓存（.venv / data / node_modules 始终保留）
+	uv run python scripts/clean.py
+	uv run python scripts/say.py "如需预演（只列不删）： uv run python scripts/clean.py --dry-run"
 
 BUMP_PART := $(filter-out bump,$(MAKECMDGOALS))
 
