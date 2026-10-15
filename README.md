@@ -158,10 +158,11 @@ stockmaster/
 │  ├─ alert/        # 规则引擎 + 去重 + 推送通道
 │  ├─ jobs/         # 流水线任务 + APScheduler
 │  ├─ api/v1/       # FastAPI 路由
-│  └─ cli.py        # 命令行（全市场回补等）
+│  └─ cli.py        # 命令行（回补/体检/训练等）
+├─ .github/workflows/ci.yml  # CI（后端+前端）与 tag 触发的 Release
 ├─ frontend/src/    # React + ECharts 工作台
-├─ backend/tests/   # 374 项离线测试 + 12 项网络契约测试
-└─ scripts/         # 启动、验收脚本
+├─ backend/tests/   # 448 项测试（含 12 项网络契约测试，默认跳过）
+└─ scripts/         # 启动、开发、清理、验收脚本
 ```
 
 ---
@@ -202,7 +203,7 @@ make check           # 全套门禁（lint + 前端类型检查 + 测试 + 覆�
 cd frontend; pnpm exec tsc --noEmit; pnpm build
 ```
 
-当前状态：**374 项离线测试通过（12 项网络测试默认跳过）**，12 项网络契约测试实盘通过，
+当前状态：**448 项测试通过（12 项网络契约测试默认跳过）**，网络契约测试可实盘通过，
 覆盖率 **76.25%**，实盘端到端验收全部通过。
 
 ### 6.1 全部 Make 命令
@@ -219,14 +220,37 @@ cd frontend; pnpm exec tsc --noEmit; pnpm build
 | `make dev-stop` | 停止开发环境并释放端口 |
 | `make doctor` (`typecheck`) | 环境自检：依赖、控制台编码、路径、数据源配置 |
 | `make stats` | 数据库概况（证券数、日线行数、最新行情日、模型数） |
+| `make data-quality` | **数据质量体检**：覆盖率、缺口、陈旧、异常、复权一致性 |
 | `make test` / `make cov` / `make test-network` | 离线测试 / 覆盖率 / 网络契约测试 |
-| `make acceptance` | 端到端实盘验收 |
+| `make acceptance` | 端到端实盘验收（真实数据源，需联网） |
 | `make lint` / `make format` | ruff 检查 / 自动格式化 |
 | `make check-fast` / `make check` | 轻量静态门禁 / 全套门禁 |
 | `make clean` | 清理构建产物与缓存（`.venv` / `data` / `node_modules` 始终保留） |
 | `make bump` | 版本号 bump（`bump-my-version`，同步 pyproject 与 `__init__`） |
 
-### 6.2 中文乱码说明（Windows）
+### 6.2 数据质量体检
+
+数据问题大多是**静默**的：某只标的停更、前复权序列停留在旧基准、历史没抓全，
+都不会报错，只会让指标、因子、预测和回测悄悄算错。`data-quality` 把这些显式化。
+
+```bash
+make data-quality                                            # 全市场覆盖率 + 抽样逐只检查
+uv run stockmaster data-quality --codes 600519.SH,000001.SZ  # 指定标的
+uv run stockmaster data-quality --min-usable-share 0.5       # 作为门禁（低于则退出码 1）
+```
+
+检出项：`missing_history`、`missing_qfq`、`orphan_qfq`、`short_history`、
+`sparse`、`gap`、`stale`、`ohlc_invalid`、`extreme_return`、`qfq_discontinuity`。
+
+报告分两层：
+
+- **coverage（全市场）** —— 可用/未同步/滞后数量与占比。这是"我到底有多少数据"的
+  直接答案，且**不受逐只扫描上限影响**。
+- **逐只 findings** —— 带具体日期与数值，每条结论都可复核。
+
+也可通过 `GET /api/v1/system/data-quality` 获取（`only_problems=true` 便于轮询）。
+
+### 6.3 中文乱码说明（Windows）
 
 中文 Windows 控制台默认代码页为 **936(GBK)**，而现代终端（Windows Terminal / VS Code）
 多为 **65001(UTF-8)**。同一段字节在其中一边必然乱码，因此本项目：
@@ -237,7 +261,26 @@ cd frontend; pnpm exec tsc --noEmit; pnpm build
   改为调用 `stockmaster` CLI 与 `scripts/*.py`；
 - 可用 `SM_CONSOLE_ENCODING` 强制指定（例如 CI 里设为 `utf-8`）。
 
-### 6.3 Git 钩子（可选）
+### 6.4 CI / CD
+
+`.github/workflows/ci.yml` 在 push / PR 时运行，tag 触发发布：
+
+| Job | 内容 |
+|---|---|
+| `backend` | `uv sync --frozen` → ruff check + format → `pytest -m "not network"`（覆盖率门槛 75%）→ `uv build` |
+| `frontend` | `pnpm install --frozen-lockfile` → `tsc --noEmit` → `vite build` |
+| `release` | 仅 `v*` tag：汇总 wheel/sdist + 前端 zip + `SHA256SUMS.txt`，创建 GitHub Release |
+
+设计取舍：
+
+- **网络契约测试不进 CI**。它们依赖公开数据源（baostock/腾讯/新浪），在 CI 上会带来
+  不确定性；需要时用 `make test-network` 本地手动运行。
+- **发布只用仓库自带的 `GITHUB_TOKEN`**，`permissions: contents: write` 仅授予
+  release job，不依赖任何外部密钥。
+- 版本号由 `make bump` 维护（同步 `pyproject.toml` 与 `app/__init__.py`），
+  打出的 tag 形如 `v0.1.1`，即触发发布。
+
+### 6.5 Git 钩子（可选）
 
 ```bash
 uv run --with prek prek install --force   # 安装钩子
