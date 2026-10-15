@@ -108,12 +108,22 @@ class TestHealthAndDocs:
     def test_docs_render(self, client):
         assert client.get("/docs").status_code == 200
 
-    def test_api_only_root_explains_state(self, client):
-        # Without a frontend build the root must explain how to get one.
+    def test_root_serves_ui_or_explains_absence(self, client):
+        """Root must either serve the built SPA or explain how to build it.
+
+        The app is expected to work both with and without `frontend/dist`, so the
+        assertion adapts to the current build state rather than pinning one mode.
+        """
+        from app.main import FRONTEND_DIST
+
         response = client.get("/")
         assert response.status_code == 200
-        body = response.json()
-        assert body["mode"] == "api-only"
+        if FRONTEND_DIST.exists():
+            assert "text/html" in (response.headers.get("content-type") or "")
+            assert b"root" in response.content
+        else:
+            body = response.json()
+            assert body["mode"] == "api-only"
 
 
 class TestInstruments:
