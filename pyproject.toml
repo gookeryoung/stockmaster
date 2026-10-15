@@ -1,6 +1,6 @@
 [project]
 name = "stockmaster"
-version = "0.1.0"
+version = "0.1.1"
 description = "A-share daily-bar quantitative analysis workbench: data, analysis, prediction, alerts"
 readme = "README.md"
 license = "MIT"
@@ -79,7 +79,7 @@ exclude = [
 ]
 
 [tool.bumpversion]
-current_version = "0.1.0"
+current_version = "0.1.1"
 commit = true
 # ASCII-only message: bump-my-version mangles non-ASCII templates under a GBK
 # locale (observed as mojibake in the generated commit message).
