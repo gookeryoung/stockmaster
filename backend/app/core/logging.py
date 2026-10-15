@@ -11,7 +11,7 @@ _FORMAT = "%(asctime)s | %(levelname)-7s | %(name)-28s | %(message)s"
 
 def setup_logging(level: str = "INFO") -> None:
     """Configure root logging once (idempotent)."""
-    global _CONFIGURED
+    global _CONFIGURED  # noqa: PLW0603
     if _CONFIGURED:
         return
     handler = logging.StreamHandler(sys.stdout)

@@ -13,13 +13,12 @@ The single most important property here is **point-in-time correctness**:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
 
 import numpy as np
 import pandas as pd
 
 from app.core.logging import get_logger
-from app.factors.compute import RAW_FACTOR_COLUMNS, compute_factors
+from app.factors.compute import compute_factors
 from app.indicators.compute import compute_indicators
 
 log = get_logger(__name__)
@@ -31,16 +30,31 @@ log = get_logger(__name__)
 #: engines with slightly different smoothing, so only the factor version is kept
 #: in the feature set to avoid a near-duplicate column.
 FEATURE_COLUMNS: tuple[str, ...] = (
-    "ret_1", "ret_5", "ret_20",
-    "ma5_gap", "ma20_gap", "ma60_gap",
-    "macd_dif_n", "macd_hist_n", "rsi_14",
-    "kdj_k", "kdj_d",
-    "boll_pos", "atr_pct",
+    "ret_1",
+    "ret_5",
+    "ret_20",
+    "ma5_gap",
+    "ma20_gap",
+    "ma60_gap",
+    "macd_dif_n",
+    "macd_hist_n",
+    "rsi_14",
+    "kdj_k",
+    "kdj_d",
+    "boll_pos",
+    "atr_pct",
     "vol_ratio_log",
-    "mom_20", "mom_60", "mom_120",
-    "vol_20", "vol_60",
-    "turnover_20", "amount_log_20", "amihud_20",
-    "ma_bull", "breakout_20", "dist_high_252",
+    "mom_20",
+    "mom_60",
+    "mom_120",
+    "vol_20",
+    "vol_60",
+    "turnover_20",
+    "amount_log_20",
+    "amihud_20",
+    "ma_bull",
+    "breakout_20",
+    "dist_high_252",
 )
 
 #: Minimum number of non-null features required to keep a row.
@@ -66,13 +80,11 @@ class Dataset:
 
     def describe(self) -> dict:
         base_rate = (
-            float(self.frame[self.label_column].mean())
-            if len(self.frame) and self.label_column in self.frame
-            else None
+            float(self.frame[self.label_column].mean()) if len(self.frame) and self.label_column in self.frame else None
         )
         return {
             "rows": len(self.frame),
-            "symbols": int(self.frame["code"].nunique()) if len(self.frame) else 0,
+            "symbols": self.frame["code"].nunique() if len(self.frame) else 0,
             "date_min": str(self.dates.min()) if len(self.frame) else None,
             "date_max": str(self.dates.max()) if len(self.frame) else None,
             "horizon": self.horizon,
@@ -128,9 +140,19 @@ def build_symbol_features(bars: pd.DataFrame) -> pd.DataFrame:
     # Log-compress the volume ratio so extreme spikes do not dominate.
     out["vol_ratio_log"] = np.log1p(indicators["vol_ratio"].clip(lower=0.0))
 
-    for column in ("mom_20", "mom_60", "mom_120", "vol_20", "vol_60",
-                   "turnover_20", "amount_log_20", "amihud_20",
-                   "ma_bull", "breakout_20", "dist_high_252"):
+    for column in (
+        "mom_20",
+        "mom_60",
+        "mom_120",
+        "vol_20",
+        "vol_60",
+        "turnover_20",
+        "amount_log_20",
+        "amihud_20",
+        "ma_bull",
+        "breakout_20",
+        "dist_high_252",
+    ):
         out[column] = factors[column]
 
     return out
@@ -271,9 +293,9 @@ def chronological_split(
     dates = np.array(sorted(counts.index))
     n_dates = len(dates)
 
-    test_count = max(1, int(round(n_dates * test_fraction)))
+    test_count = max(1, round(n_dates * test_fraction))
     if validation_fraction and validation_fraction > 0:
-        val_count = max(1, int(round(n_dates * validation_fraction)))
+        val_count = max(1, round(n_dates * validation_fraction))
     else:
         val_count = 0
 
@@ -281,7 +303,9 @@ def chronological_split(
         # Not enough history to partition meaningfully; keep everything in train.
         empty = frame.iloc[0:0]
         return Split(
-            train=frame.copy(), validation=empty, test=empty,
+            train=frame.copy(),
+            validation=empty,
+            test=empty,
             horizon=dataset.horizon,
         )
 
@@ -294,21 +318,15 @@ def chronological_split(
     buffer = embargo_days if embargo_days is not None else 0
 
     train_values = dates[dates < validation_start]
-    validation_values = (
-        dates[(dates >= validation_start) & (dates < test_start)] if val_count else []
-    )
+    validation_values = dates[(dates >= validation_start) & (dates < test_start)] if val_count else []
     test_values = dates[dates >= test_start]
 
     # Purge the tail of each earlier partition: those rows' labels are computed
     # from prices inside the following partition.
     purge_train = dataset.horizon + buffer
-    kept_train_values = (
-        train_values[:-purge_train] if len(train_values) > purge_train else train_values[:0]
-    )
+    kept_train_values = train_values[:-purge_train] if len(train_values) > purge_train else train_values[:0]
     kept_validation_values = (
-        validation_values[:-purge_train]
-        if len(validation_values) > purge_train
-        else validation_values[:0]
+        validation_values[:-purge_train] if len(validation_values) > purge_train else validation_values[:0]
     )
 
     def select(days) -> pd.DataFrame:

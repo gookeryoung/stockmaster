@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-import numpy as np
-import pandas as pd
 import pytest
 from sqlalchemy import select
 
@@ -41,21 +39,21 @@ def business_days(n: int, start: date = date(2026, 1, 5)) -> list[date]:
 
 def ctx(**overrides) -> RuleContext:
     """A minimal context for rule-level tests."""
-    base = dict(
-        code="600519.SH",
-        name="测试",
-        trade_date=date(2026, 1, 5),
-        close=100.0,
-        preclose=99.0,
-        open=99.5,
-        high=101.0,
-        low=99.0,
-        volume=1_000_000.0,
-        amount=1e8,
-        pct_chg=1.01,
-        turn=2.0,
-        is_st=False,
-    )
+    base = {
+        "code": "600519.SH",
+        "name": "测试",
+        "trade_date": date(2026, 1, 5),
+        "close": 100.0,
+        "preclose": 99.0,
+        "open": 99.5,
+        "high": 101.0,
+        "low": 99.0,
+        "volume": 1_000_000.0,
+        "amount": 1e8,
+        "pct_chg": 1.01,
+        "turn": 2.0,
+        "is_st": False,
+    }
     base.update(overrides)
     return RuleContext(**base)
 
@@ -112,7 +110,7 @@ class TestRuleEvaluation:
     def test_price_cross_above(self):
         from app.alert.engine import evaluate_rule
 
-        fired, message, snapshot = evaluate_rule(
+        fired, message, _snapshot = evaluate_rule(
             ctx(close=110.0), "price_cross", {"threshold": 105, "direction": "above"}
         )
         assert fired and "110.00" in message
@@ -120,17 +118,13 @@ class TestRuleEvaluation:
     def test_price_cross_below(self):
         from app.alert.engine import evaluate_rule
 
-        fired, _, _ = evaluate_rule(
-            ctx(close=90.0), "price_cross", {"threshold": 95, "direction": "below"}
-        )
+        fired, _, _ = evaluate_rule(ctx(close=90.0), "price_cross", {"threshold": 95, "direction": "below"})
         assert fired
 
     def test_price_cross_not_triggered(self):
         from app.alert.engine import evaluate_rule
 
-        fired, message, _ = evaluate_rule(
-            ctx(close=100.0), "price_cross", {"threshold": 105, "direction": "above"}
-        )
+        fired, message, _ = evaluate_rule(ctx(close=100.0), "price_cross", {"threshold": 105, "direction": "above"})
         assert not fired and message == ""
 
     def test_pct_change_uses_derived_value(self):
@@ -163,9 +157,7 @@ class TestRuleEvaluation:
     def test_missing_value_does_not_trigger(self):
         from app.alert.engine import evaluate_rule
 
-        fired, _, _ = evaluate_rule(
-            ctx(indicators={}), "volume_ratio", {"threshold": 2.0}
-        )
+        fired, _, _ = evaluate_rule(ctx(indicators={}), "volume_ratio", {"threshold": 2.0})
         assert not fired
 
     def test_ma_golden_cross(self):
@@ -233,17 +225,13 @@ class TestRuleEvaluation:
 
         history = [{"high": 10.0, "low": 9.0, "close": 9.5} for _ in range(20)]
         history[-1] = {"high": 15.0, "low": 9.0, "close": 14.0}
-        fired, message, _ = evaluate_rule(
-            ctx(history=history), "new_high", {"window": 10, "direction": "high"}
-        )
+        fired, message, _ = evaluate_rule(ctx(history=history), "new_high", {"window": 10, "direction": "high"})
         assert fired and "新高" in message
 
     def test_new_high_insufficient_history(self):
         from app.alert.engine import evaluate_rule
 
-        fired, _, _ = evaluate_rule(
-            ctx(history=[{"high": 10.0, "low": 9.0}]), "new_high", {"window": 20}
-        )
+        fired, _, _ = evaluate_rule(ctx(history=[{"high": 10.0, "low": 9.0}]), "new_high", {"window": 20})
         assert not fired
 
     def test_prediction_threshold(self):
@@ -260,9 +248,7 @@ class TestRuleEvaluation:
         from app.alert.engine import evaluate_rule
 
         history = [{"close": 100.0}] * 30 + [{"close": 80.0}]
-        fired, message, snapshot = evaluate_rule(
-            ctx(history=history), "drawdown", {"window": 60, "threshold": 10.0}
-        )
+        fired, _message, snapshot = evaluate_rule(ctx(history=history), "drawdown", {"window": 60, "threshold": 10.0})
         assert fired
         assert snapshot["drawdown_pct"] == pytest.approx(20.0)
 
@@ -279,9 +265,7 @@ class TestRuleEvaluation:
     def test_turnover(self):
         from app.alert.engine import evaluate_rule
 
-        fired, _, _ = evaluate_rule(
-            ctx(turn=8.0), "turnover", {"direction": "above", "threshold": 5.0}
-        )
+        fired, _, _ = evaluate_rule(ctx(turn=8.0), "turnover", {"direction": "above", "threshold": 5.0})
         assert fired
 
 

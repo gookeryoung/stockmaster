@@ -35,8 +35,20 @@ _ADJUST_ARG = {ADJUST_RAW: "", ADJUST_QFQ: "qfq", ADJUST_HFQ: "hfq"}
 # Documented positional layout of stock_zh_a_spot:
 # 代码 名称 最新价 涨跌额 涨跌幅 买入 卖出 昨收 今开 最高 最低 成交量 成交额 时间戳
 _SPOT_FIELDS = (
-    "code", "name", "price", "change", "pct_chg", "bid", "ask",
-    "preclose", "open", "high", "low", "volume", "amount", "quote_time",
+    "code",
+    "name",
+    "price",
+    "change",
+    "pct_chg",
+    "bid",
+    "ask",
+    "preclose",
+    "open",
+    "high",
+    "low",
+    "volume",
+    "amount",
+    "quote_time",
 )
 
 
@@ -50,7 +62,7 @@ class SinaProvider(BaseProvider):
 
     @staticmethod
     def _ak():
-        import akshare as ak  # noqa: PLC0415
+        import akshare as ak
 
         return ak
 
@@ -70,7 +82,7 @@ class SinaProvider(BaseProvider):
             out = float(value)
         except (TypeError, ValueError):
             return None
-        return None if out != out else out  # noqa: PLR0124
+        return None if out != out else out  # noqa: PLR0124 - NaN check
 
     def fetch_daily(
         self,
@@ -91,7 +103,7 @@ class SinaProvider(BaseProvider):
                 end_date=end.strftime("%Y%m%d"),
                 adjust=_ADJUST_ARG[adjust],
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ProviderError(f"sina daily {symbol} failed: {exc}") from exc
 
         if df is None or len(df) == 0:
@@ -105,7 +117,7 @@ class SinaProvider(BaseProvider):
                 h = self._f(row.get("high"))
                 lo = self._f(row.get("low"))
                 c = self._f(row.get("close"))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
             if None in (o, h, lo, c):
                 continue
@@ -114,7 +126,10 @@ class SinaProvider(BaseProvider):
                 Bar(
                     code=canon,
                     trade_date=day,
-                    open=o, high=h, low=lo, close=c,
+                    open=o,
+                    high=h,
+                    low=lo,
+                    close=c,
                     volume=self._f(row.get("volume")) or 0.0,
                     amount=self._f(row.get("amount")) or 0.0,
                     turn=self._f(row.get("turnover")),
@@ -132,7 +147,7 @@ class SinaProvider(BaseProvider):
         ak = self._ak()
         try:
             df = ak.stock_zh_index_daily(symbol=symbol)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ProviderError(f"sina index {symbol} failed: {exc}") from exc
         if df is None or len(df) == 0:
             return []
@@ -165,7 +180,7 @@ class SinaProvider(BaseProvider):
         ak = self._ak()
         try:
             df = ak.tool_trade_date_hist_sina()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ProviderError(f"sina calendar failed: {exc}") from exc
         if df is None or len(df) == 0:
             return []
@@ -181,7 +196,7 @@ class SinaProvider(BaseProvider):
         ak = self._ak()
         try:
             df = ak.stock_info_a_code_name()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ProviderError(f"sina instrument list failed: {exc}") from exc
         if df is None or len(df) == 0:
             return []
@@ -213,7 +228,7 @@ class SinaProvider(BaseProvider):
         ak = self._ak()
         try:
             df = ak.stock_zh_a_spot()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ProviderError(f"sina snapshot failed: {exc}") from exc
         if df is None or len(df) == 0:
             return []
@@ -275,6 +290,6 @@ class SinaProvider(BaseProvider):
             end = date.today()
             bars = self.fetch_daily("600519.SH", end, end, ADJUST_QFQ)
             return isinstance(bars, list)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.debug("sina health check failed: %s", exc)
             return False

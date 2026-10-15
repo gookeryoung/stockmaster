@@ -68,19 +68,13 @@ def upsert_instruments(session: Session, items: Iterable[InstrumentInfo]) -> int
             index_elements=[Instrument.code],
             set_={
                 # Never overwrite a known name with a blank one.
-                "name": func.coalesce(
-                    func.nullif(stmt.excluded.name, ""), Instrument.name
-                ),
+                "name": func.coalesce(func.nullif(stmt.excluded.name, ""), Instrument.name),
                 "market": stmt.excluded.market,
-                "board": func.coalesce(
-                    func.nullif(stmt.excluded.board, ""), Instrument.board
-                ),
+                "board": func.coalesce(func.nullif(stmt.excluded.board, ""), Instrument.board),
                 "is_index": stmt.excluded.is_index,
                 "status": stmt.excluded.status,
                 "list_date": func.coalesce(stmt.excluded.list_date, Instrument.list_date),
-                "delist_date": func.coalesce(
-                    stmt.excluded.delist_date, Instrument.delist_date
-                ),
+                "delist_date": func.coalesce(stmt.excluded.delist_date, Instrument.delist_date),
                 "source": stmt.excluded.source,
             },
         )
@@ -114,10 +108,7 @@ def upsert_index_constituents(
 ) -> int:
     if not codes:
         return 0
-    rows = [
-        {"index_code": index_code, "code": c, "as_of": as_of, "source": source}
-        for c in codes
-    ]
+    rows = [{"index_code": index_code, "code": c, "as_of": as_of, "source": source} for c in codes]
     written = 0
     for chunk in _chunks(rows, 500):
         stmt = sqlite_insert(IndexConstituent).values(list(chunk))
@@ -141,11 +132,17 @@ def upsert_index_constituents(
 
 
 def _bar_rows(code: str, bars: Sequence[Bar], adjust: str) -> list[dict]:
+    """Build insert rows for one symbol/adjust pair.
+
+    ``code`` is authoritative rather than ``bar.code``: the caller already
+    normalised the symbol, so this keeps a stray provider-side spelling from
+    writing rows under an unexpected key.
+    """
     rows = []
     for b in bars:
         rows.append(
             {
-                "code": b.code,
+                "code": code,
                 "trade_date": b.trade_date,
                 "adjust": adjust,
                 "open": float(b.open),
@@ -207,9 +204,7 @@ def upsert_daily_bars(
     return written
 
 
-def upsert_adjust_factors(
-    session: Session, code: str, factors: Sequence[AdjustFactor]
-) -> int:
+def upsert_adjust_factors(session: Session, code: str, factors: Sequence[AdjustFactor]) -> int:
     if not factors:
         return 0
     rows = [
@@ -244,7 +239,10 @@ def upsert_adjust_factors(
 
 
 def delete_bars(
-    session: Session, code: str, adjust: str, start: date | None = None,
+    session: Session,
+    code: str,
+    adjust: str,
+    start: date | None = None,
     end: date | None = None,
 ) -> int:
     """Remove bars for a symbol/adjust, optionally within a date window.
@@ -292,9 +290,7 @@ def get_bars(
 
 
 def last_bar_date(session: Session, code: str, adjust: str = "raw") -> date | None:
-    stmt = select(func.max(DailyBar.trade_date)).where(
-        DailyBar.code == code, DailyBar.adjust == adjust
-    )
+    stmt = select(func.max(DailyBar.trade_date)).where(DailyBar.code == code, DailyBar.adjust == adjust)
     return session.execute(stmt).scalar()
 
 
@@ -348,20 +344,14 @@ def list_instruments(
 
 
 def get_adjust_factors(session: Session, code: str) -> list[AdjustFactor]:
-    stmt = (
-        select(AdjustFactor)
-        .where(AdjustFactor.code == code)
-        .order_by(AdjustFactor.ex_date)
-    )
+    stmt = select(AdjustFactor).where(AdjustFactor.code == code).order_by(AdjustFactor.ex_date)
     return list(session.execute(stmt).scalars())
 
 
 def index_members(session: Session, index_code: str) -> list[str]:
     """Members of an index as of the most recent snapshot on record."""
     latest = session.execute(
-        select(func.max(IndexConstituent.as_of)).where(
-            IndexConstituent.index_code == index_code
-        )
+        select(func.max(IndexConstituent.as_of)).where(IndexConstituent.index_code == index_code)
     ).scalar()
     if latest is None:
         return []

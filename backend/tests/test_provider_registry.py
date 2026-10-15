@@ -105,16 +105,13 @@ class TestFailover:
             def fetch_daily(self, code, start, end, adjust="raw"):
                 return "not-a-list"
 
-        reg = ProviderRegistry(
-            [WrongType(), MockProvider(name="right")], order=["wrong", "right"]
-        )
+        reg = ProviderRegistry([WrongType(), MockProvider(name="right")], order=["wrong", "right"])
         bars = reg.fetch_daily("600519.SH", *window)
         assert isinstance(bars, list) and bars
         assert reg._states["wrong"].failures == 1
 
     def test_unconfigured_provider_is_appended_to_order(self):
-        reg = ProviderRegistry([MockProvider(name="a"), MockProvider(name="b")],
-                               order=["a"])
+        reg = ProviderRegistry([MockProvider(name="a"), MockProvider(name="b")], order=["a"])
         assert reg.order == ["a", "b"]
 
     def test_close_is_idempotent(self):
@@ -150,9 +147,7 @@ class TestMockProvider:
     def test_calendar_matches_weekdays(self):
         p = MockProvider()
         days = p.fetch_calendar(date(2026, 1, 1), date(2026, 1, 31))
-        expected = [
-            d for d in synthetic_bars("600519.SH", date(2026, 1, 1), date(2026, 1, 31))
-        ]
+        expected = list(synthetic_bars("600519.SH", date(2026, 1, 1), date(2026, 1, 31)))
         assert days == [b.trade_date for b in expected]
         assert all(d.weekday() < 5 for d in days)
 

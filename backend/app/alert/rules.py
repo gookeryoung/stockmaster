@@ -16,10 +16,10 @@ from typing import Any
 from app.core.errors import DataError
 
 __all__ = [
-    "RuleContext",
     "RULE_TYPES",
-    "normalize_params",
+    "RuleContext",
     "describe_rule",
+    "normalize_params",
 ]
 
 
@@ -193,10 +193,7 @@ def normalize_params(rule_type: str, raw: dict | str | None) -> dict:
         DataError: for an unknown rule type or a missing required parameter.
     """
     if rule_type not in RULE_TYPES:
-        raise DataError(
-            f"unknown rule_type {rule_type!r}; expected one of "
-            f"{', '.join(sorted(RULE_TYPES))}"
-        )
+        raise DataError(f"unknown rule_type {rule_type!r}; expected one of {', '.join(sorted(RULE_TYPES))}")
 
     if isinstance(raw, str):
         try:
@@ -224,9 +221,7 @@ def normalize_params(rule_type: str, raw: dict | str | None) -> dict:
             elif spec["type"] == "str":
                 value = str(value)
             if "choices" in spec and value not in spec["choices"]:
-                raise DataError(
-                    f"parameter {key!r} must be one of {spec['choices']}, got {value!r}"
-                )
+                raise DataError(f"parameter {key!r} must be one of {spec['choices']}, got {value!r}")
             out[key] = value
         elif "default" in spec:
             out[key] = spec["default"]
@@ -236,9 +231,7 @@ def normalize_params(rule_type: str, raw: dict | str | None) -> dict:
     # Reject unknown keys so typos surface instead of being silently ignored.
     unknown = set(params) - set(schema)
     if unknown:
-        raise DataError(
-            f"unknown parameters for {rule_type!r}: {', '.join(sorted(unknown))}"
-        )
+        raise DataError(f"unknown parameters for {rule_type!r}: {', '.join(sorted(unknown))}")
     return out
 
 

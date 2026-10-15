@@ -41,7 +41,7 @@ def make_bars(
         day += timedelta(days=1)
 
     closes = start_price * (1 + daily_return) ** np.arange(n)
-    precloses = [start_price] + list(closes[:-1])
+    precloses = [start_price, *list(closes[:-1])]
     return pd.DataFrame(
         {
             "trade_date": dates,
@@ -98,16 +98,12 @@ class TestBasicExecution:
 
     def test_cash_never_goes_negative(self):
         bars = make_bars("600519.SH", n=40)
-        result = run_backtest(
-            {"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}}
-        )
+        result = run_backtest({"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}})
         assert (result.equity["cash"] >= -1e-6).all()
 
     def test_buy_quantity_is_whole_lots(self):
         bars = make_bars("600519.SH", n=30)
-        result = run_backtest(
-            {"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 0.5}}
-        )
+        result = run_backtest({"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 0.5}})
         filled = result.trades[result.trades["shares"] > 0]
         assert not filled.empty
         assert (filled["shares"] % 100 == 0).all()
@@ -118,8 +114,8 @@ class TestTPlusOne:
         """Sell orders in the same session as a buy must be blocked (T+1)."""
         bars = make_bars("600519.SH", n=10)
         signals = {
-            bars["trade_date"].iloc[0]: {"600519.SH": 1.0},   # buy executes day 1
-            bars["trade_date"].iloc[1]: {"600519.SH": 0.0},   # sell requested day 2
+            bars["trade_date"].iloc[0]: {"600519.SH": 1.0},  # buy executes day 1
+            bars["trade_date"].iloc[1]: {"600519.SH": 0.0},  # sell requested day 2
         }
         result = run_backtest({"600519.SH": bars}, signals)
         filled = result.trades[result.trades["shares"] > 0]
@@ -184,9 +180,7 @@ class TestPriceLimits:
         bars.loc[bars.index[-1], "low"] = 7.0
         # The signal must be placed so it executes ON the limit bar (iloc[-1]).
         exit_date = bars["trade_date"].iloc[-2]
-        result = run_backtest(
-            {"600519.SH": bars}, {entry_date: {"600519.SH": 1.0}, exit_date: {}}
-        )
+        result = run_backtest({"600519.SH": bars}, {entry_date: {"600519.SH": 1.0}, exit_date: {}})
         # The order is recorded with zero shares and an explicit reason.
         blocked = result.trades[result.trades["reason"] == "limit_down"]
         assert not blocked.empty
@@ -209,7 +203,7 @@ class TestPriceLimits:
         """A 10% rise on a ChiNext name is NOT a limit and must be tradeable."""
         bars = make_bars("300750.SZ", n=8, daily_return=0.0)
         bars.loc[bars.index[-1], "preclose"] = 10.0
-        bars.loc[bars.index[-1], "close"] = 11.0   # 10% up, inside the 20% band
+        bars.loc[bars.index[-1], "close"] = 11.0  # 10% up, inside the 20% band
         bars.loc[bars.index[-1], "high"] = 11.2
         bars.loc[bars.index[-1], "low"] = 10.0
         signal_date = bars["trade_date"].iloc[-2]
@@ -223,9 +217,7 @@ class TestSuspension:
         signal_date = bars["trade_date"].iloc[0]
         # Suspend the day the order would execute by removing that row.
         suspended = bars.drop(index=[1]).reset_index(drop=True)
-        result = run_backtest(
-            {"600519.SH": suspended}, {signal_date: {"600519.SH": 1.0}}
-        )
+        result = run_backtest({"600519.SH": suspended}, {signal_date: {"600519.SH": 1.0}})
         # The order must not silently fill on the removed day.
         filled = result.trades[result.trades["shares"] > 0]
         if not filled.empty:
@@ -267,14 +259,19 @@ class TestCosts:
             bars["trade_date"].iloc[10]: {"600519.SH": 0.0},
         }
         free = run_backtest(
-            {"600519.SH": bars}, signals,
+            {"600519.SH": bars},
+            signals,
             config=BacktestConfig(
-                commission_rate=0, min_commission=0, stamp_tax_rate=0,
-                transfer_fee_rate=0, slippage_rate=0,
+                commission_rate=0,
+                min_commission=0,
+                stamp_tax_rate=0,
+                transfer_fee_rate=0,
+                slippage_rate=0,
             ),
         )
         costly = run_backtest(
-            {"600519.SH": bars}, signals,
+            {"600519.SH": bars},
+            signals,
             config=BacktestConfig(commission_rate=0.001, stamp_tax_rate=0.001),
         )
         assert costly.metrics["final_equity"] < free.metrics["final_equity"]
@@ -302,37 +299,35 @@ class TestCosts:
 
     def test_cost_share_is_reported(self):
         bars = make_bars("600519.SH", n=20)
-        result = run_backtest(
-            {"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}}
-        )
+        result = run_backtest({"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}})
         assert result.metrics["cost_share_of_initial"] > 0
 
 
 class TestMetrics:
     def test_metrics_present(self):
         bars = make_bars("600519.SH", n=60)
-        result = run_backtest(
-            {"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}}
-        )
+        result = run_backtest({"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}})
         for key in (
-            "total_return", "annualised_return", "max_drawdown", "sharpe",
-            "trading_days", "n_trades", "total_costs", "turnover",
+            "total_return",
+            "annualised_return",
+            "max_drawdown",
+            "sharpe",
+            "trading_days",
+            "n_trades",
+            "total_costs",
+            "turnover",
         ):
             assert key in result.metrics, f"missing metric {key}"
 
     def test_drawdown_is_never_positive(self):
         bars = make_bars("600519.SH", n=60, daily_return=-0.005)
-        result = run_backtest(
-            {"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}}
-        )
+        result = run_backtest({"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}})
         assert (result.equity["drawdown"] <= 1e-9).all()
         assert result.metrics["max_drawdown"] < 0
 
     def test_no_drawdown_in_monotonic_rise(self):
         bars = make_bars("600519.SH", n=40, daily_return=0.01)
-        result = run_backtest(
-            {"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}}
-        )
+        result = run_backtest({"600519.SH": bars}, {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}})
         # Rising prices with a single entry produce no meaningful drawdown.
         assert result.metrics["max_drawdown"] > -0.2
 
@@ -346,9 +341,7 @@ class TestMetrics:
 
     def test_benchmark_tracked(self):
         bars = make_bars("600519.SH", n=40, daily_return=0.01)
-        result = run_backtest(
-            {"600519.SH": bars}, {}, benchmark="600519.SH"
-        )
+        result = run_backtest({"600519.SH": bars}, {}, benchmark="600519.SH")
         assert result.equity["benchmark"].notna().any()
         assert result.metrics["benchmark_return"] is not None
 
@@ -390,7 +383,5 @@ class TestDeterminism:
         signals = {bars["trade_date"].iloc[0]: {"600519.SH": 1.0}}
         first = run_backtest({"600519.SH": bars}, signals)
         second = run_backtest({"600519.SH": bars}, signals)
-        assert first.metrics["final_equity"] == pytest.approx(
-            second.metrics["final_equity"]
-        )
+        assert first.metrics["final_equity"] == pytest.approx(second.metrics["final_equity"])
         assert len(first.trades) == len(second.trades)

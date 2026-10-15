@@ -25,11 +25,11 @@ import numpy as np
 import pandas as pd
 
 from app.core.logging import get_logger
-from app.core.market import LOT_SIZE, is_limit_down, is_limit_up, price_limit_ratio
+from app.core.market import LOT_SIZE, is_limit_down, is_limit_up
 
 log = get_logger(__name__)
 
-__all__ = ["BacktestConfig", "BacktestResult", "run_backtest", "buy_and_hold_signals"]
+__all__ = ["BacktestConfig", "BacktestResult", "buy_and_hold_signals", "run_backtest"]
 
 
 @dataclass
@@ -150,8 +150,9 @@ def _is_tradeable(
     if side == "sell" and is_limit_down(close, float(preclose), code, is_st=is_st):
         return False, "limit_down"
     # A one-word board is untradeable in both directions.
-    if high == low and (is_limit_up(high, float(preclose), code, is_st=is_st)
-                        or is_limit_down(low, float(preclose), code, is_st=is_st)):
+    if high == low and (
+        is_limit_up(high, float(preclose), code, is_st=is_st) or is_limit_down(low, float(preclose), code, is_st=is_st)
+    ):
         return False, "one_word_limit"
     return True, ""
 
@@ -218,7 +219,6 @@ def run_backtest(
     equity_rows: list[dict] = []
     trade_rows: list[dict] = []
     pending_weights: dict[str, float] | None = None
-    previous_equity = float(config.initial_cash)
     peak = float(config.initial_cash)
 
     benchmark_close: list[float | None] = []
@@ -226,7 +226,7 @@ def run_backtest(
 
     # Signal at t executes at t+1, so walk the calendar carrying the last signal.
     signal_cursor = 0
-    for index, day in enumerate(calendar):
+    for day in calendar:
         # --- collect any signal that becomes effective today ---
         # A signal dated strictly before `day` and not yet applied is effective.
         while signal_cursor < len(signal_dates) and signal_dates[signal_cursor] < day:
@@ -269,9 +269,7 @@ def run_backtest(
                 if shares <= 0:
                     continue
                 bar = _bar(prices, code, day)
-                price = float(bar["close"]) if bar is not None else (
-                    _last_close_before(prices.get(code), day) or 0.0
-                )
+                price = float(bar["close"]) if bar is not None else (_last_close_before(prices.get(code), day) or 0.0)
                 market_value += shares * price
             equity = cash + market_value
 
@@ -284,11 +282,7 @@ def run_backtest(
             if bar is not None:
                 if benchmark_base is None:
                     benchmark_base = float(bar["close"])
-                benchmark_value = (
-                    float(bar["close"]) / benchmark_base * config.initial_cash
-                    if benchmark_base
-                    else None
-                )
+                benchmark_value = float(bar["close"]) / benchmark_base * config.initial_cash if benchmark_base else None
         benchmark_close.append(benchmark_value)
 
         equity_rows.append(
@@ -301,7 +295,6 @@ def run_backtest(
                 "benchmark": benchmark_value,
             }
         )
-        previous_equity = equity
 
     equity_frame = pd.DataFrame(equity_rows)
     trades_frame = pd.DataFrame(trade_rows)
@@ -387,9 +380,7 @@ def _rebalance(
 
         allowed, reason = _is_tradeable(prices, code, day, "sell", config)
         if not allowed:
-            executed.append(
-                _skipped_row(day, code, "sell", positions[code], reason)
-            )
+            executed.append(_skipped_row(day, code, "sell", reason))
             continue
 
         price = float(bar["open"]) * (1.0 - config.slippage_rate)
@@ -411,8 +402,12 @@ def _rebalance(
             cost_basis.pop(code, None)
         executed.append(
             {
-                "code": code, "side": "sell", "trade_date": day,
-                "price": price, "shares": to_sell, "gross": gross,
+                "code": code,
+                "side": "sell",
+                "trade_date": day,
+                "price": price,
+                "shares": to_sell,
+                "gross": gross,
                 "commission": costs["commission"],
                 "stamp_tax": costs["stamp_tax"],
                 "transfer_fee": costs["transfer_fee"],
@@ -426,12 +421,12 @@ def _rebalance(
     for code, weight in clean_targets.items():
         bar = _bar(prices, code, day)
         if bar is None:
-            executed.append(_skipped_row(day, code, "buy", 0, "suspended"))
+            executed.append(_skipped_row(day, code, "buy", "suspended"))
             continue
 
         allowed, reason = _is_tradeable(prices, code, day, "buy", config)
         if not allowed:
-            executed.append(_skipped_row(day, code, "buy", 0, reason))
+            executed.append(_skipped_row(day, code, "buy", reason))
             continue
 
         price = float(bar["open"]) * (1.0 + config.slippage_rate)
@@ -473,8 +468,12 @@ def _rebalance(
         locked[code] = day
         executed.append(
             {
-                "code": code, "side": "buy", "trade_date": day,
-                "price": price, "shares": to_buy, "gross": gross,
+                "code": code,
+                "side": "buy",
+                "trade_date": day,
+                "price": price,
+                "shares": to_buy,
+                "gross": gross,
                 "commission": costs["commission"],
                 "stamp_tax": costs["stamp_tax"],
                 "transfer_fee": costs["transfer_fee"],
@@ -487,19 +486,25 @@ def _rebalance(
     return cash, positions, locked, executed
 
 
-def _skipped_row(day: date, code: str, side: str, shares: int, reason: str) -> dict:
+def _skipped_row(day: date, code: str, side: str, reason: str) -> dict:
     """Record an order that could not be filled."""
     return {
-        "code": code, "side": side, "trade_date": day,
-        "price": 0.0, "shares": 0, "gross": 0.0,
-        "commission": 0.0, "stamp_tax": 0.0, "transfer_fee": 0.0,
-        "slippage": 0.0, "pnl": None, "reason": reason,
+        "code": code,
+        "side": side,
+        "trade_date": day,
+        "price": 0.0,
+        "shares": 0,
+        "gross": 0.0,
+        "commission": 0.0,
+        "stamp_tax": 0.0,
+        "transfer_fee": 0.0,
+        "slippage": 0.0,
+        "pnl": None,
+        "reason": reason,
     }
 
 
-def compute_metrics(
-    equity: pd.DataFrame, trades: pd.DataFrame, config: BacktestConfig
-) -> dict:
+def compute_metrics(equity: pd.DataFrame, trades: pd.DataFrame, config: BacktestConfig) -> dict:
     """Performance metrics from an equity curve and trade ledger."""
     if equity.empty:
         return {"error": "no equity curve"}
@@ -538,13 +543,9 @@ def compute_metrics(
 
     total_costs = 0.0
     if not filled.empty:
-        total_costs = float(
-            (filled["commission"] + filled["stamp_tax"] + filled["transfer_fee"]).sum()
-        )
+        total_costs = float((filled["commission"] + filled["stamp_tax"] + filled["transfer_fee"]).sum())
 
-    turnover = (
-        float(filled["gross"].sum() / initial) if not filled.empty and initial else 0.0
-    )
+    turnover = float(filled["gross"].sum() / initial) if not filled.empty and initial else 0.0
 
     benchmark_return = None
     if "benchmark" in equity and equity["benchmark"].notna().any():
@@ -576,14 +577,12 @@ def compute_metrics(
         "sharpe": sharpe,
         "sortino": sortino,
         "calmar": calmar,
-        "volatility": float(daily_returns.std(ddof=0) * np.sqrt(243))
-        if len(daily_returns) > 1
-        else None,
+        "volatility": float(daily_returns.std(ddof=0) * np.sqrt(243)) if len(daily_returns) > 1 else None,
         "trading_days": days,
-        "n_trades": int(len(filled)),
-        "n_buys": int(len(buys)),
-        "n_sells": int(len(sells)),
-        "n_skipped": int(len(skipped)),
+        "n_trades": len(filled),
+        "n_buys": len(buys),
+        "n_sells": len(sells),
+        "n_skipped": len(skipped),
         "skip_reasons": skip_reasons,
         "win_rate": win_rate,
         "profit_factor": profit_factor,
@@ -591,14 +590,14 @@ def compute_metrics(
         "cost_share_of_initial": total_costs / initial if initial else 0.0,
         "turnover": turnover,
         "benchmark_return": benchmark_return,
-        "excess_return": (
-            total_return - benchmark_return if benchmark_return is not None else None
-        ),
+        "excess_return": (total_return - benchmark_return if benchmark_return is not None else None),
     }
 
 
 def buy_and_hold_signals(
-    bars_by_symbol: dict[str, pd.DataFrame], code: str, start: date | None = None,
+    bars_by_symbol: dict[str, pd.DataFrame],
+    code: str,
+    start: date | None = None,
     weight: float = 1.0,
 ) -> dict[date, dict[str, float]]:
     """A trivial benchmark strategy: hold one name from the first available day."""

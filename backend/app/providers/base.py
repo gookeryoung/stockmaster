@@ -126,5 +126,5 @@ class BaseProvider(ABC):
         """Cheap liveness probe. Conservative default: assume healthy."""
         return True
 
-    def close(self) -> None:
+    def close(self) -> None:  # noqa: B027 - intentional no-op default hook
         """Release resources (sockets, sessions). Must be idempotent."""

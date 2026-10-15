@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 
 from app.db import session_scope
-from app.db.models import DailyBar, DataSyncTask
+from app.db.models import DataSyncTask
 from app.providers.base import ADJUST_QFQ, ADJUST_RAW
 from app.providers.mock_provider import MockProvider, synthetic_bars
 from app.providers.registry import ProviderRegistry
@@ -71,9 +71,7 @@ class TestCalendarSync:
         service.sync_calendar(*WINDOW)
         with session_scope() as session:
             task = session.execute(
-                __import__("sqlalchemy").select(DataSyncTask).where(
-                    DataSyncTask.job == "calendar"
-                )
+                __import__("sqlalchemy").select(DataSyncTask).where(DataSyncTask.job == "calendar")
             ).scalar_one()
             assert task.status == "done"
 
@@ -91,9 +89,11 @@ class TestInstrumentSync:
         with session_scope() as session:
             repo.upsert_instruments(
                 session,
-                [__import__("app.providers.base", fromlist=["InstrumentInfo"]).InstrumentInfo(
-                    code="600519.SH", name="", market="SH"
-                )],
+                [
+                    __import__("app.providers.base", fromlist=["InstrumentInfo"]).InstrumentInfo(
+                        code="600519.SH", name="", market="SH"
+                    )
+                ],
             )
         with session_scope() as session:
             item = repo.get_instrument(session, "600519.SH")
@@ -137,12 +137,8 @@ class TestDailySync:
         assert after == expected
 
     def test_full_flag_refetches_whole_range(self, service):
-        service.sync_symbol_daily(
-            "600519.SH", start=date(2026, 1, 1), end=date(2026, 1, 15)
-        )
-        report = service.sync_symbol_daily(
-            "600519.SH", start=date(2026, 1, 1), end=date(2026, 2, 28), full=True
-        )
+        service.sync_symbol_daily("600519.SH", start=date(2026, 1, 1), end=date(2026, 1, 15))
+        report = service.sync_symbol_daily("600519.SH", start=date(2026, 1, 1), end=date(2026, 2, 28), full=True)
         assert report.bars_written > 0
         with session_scope() as session:
             count = repo.bar_count(session, "600519.SH", ADJUST_RAW)
@@ -150,24 +146,18 @@ class TestDailySync:
 
     def test_window_is_not_extended_past_end(self, service):
         """An explicit ``end`` must bound the fetch, regardless of today's date."""
-        service.sync_symbol_daily(
-            "600519.SH", start=date(2026, 1, 1), end=date(2026, 1, 31)
-        )
+        service.sync_symbol_daily("600519.SH", start=date(2026, 1, 1), end=date(2026, 1, 31))
         with session_scope() as session:
             last = repo.last_bar_date(session, "600519.SH", ADJUST_RAW)
         assert last is not None and last <= date(2026, 1, 31)
 
     def test_incremental_ignores_start_earlier_than_existing(self, service):
         """An earlier ``start`` must not trigger a needless full re-fetch."""
-        service.sync_symbol_daily(
-            "600519.SH", start=date(2026, 2, 1), end=date(2026, 2, 28)
-        )
+        service.sync_symbol_daily("600519.SH", start=date(2026, 2, 1), end=date(2026, 2, 28))
         with session_scope() as session:
             first = repo.bar_count(session, "600519.SH", ADJUST_RAW)
         # Same window again, but with a much earlier start bound.
-        report = service.sync_symbol_daily(
-            "600519.SH", start=date(2020, 1, 1), end=date(2026, 2, 28)
-        )
+        report = service.sync_symbol_daily("600519.SH", start=date(2020, 1, 1), end=date(2026, 2, 28))
         with session_scope() as session:
             after = repo.bar_count(session, "600519.SH", ADJUST_RAW)
         # Count is unchanged because the resolved begin stays at the resume point.
@@ -214,9 +204,7 @@ class TestDailySync:
             with session_scope() as session:
                 from app.db.models import DataSyncError
 
-                errors = session.execute(
-                    __import__("sqlalchemy").select(DataSyncError)
-                ).scalars().all()
+                errors = session.execute(__import__("sqlalchemy").select(DataSyncError)).scalars().all()
                 assert errors
         finally:
             session_mod.reset_engine()
@@ -232,9 +220,7 @@ class TestBulkSync:
 
         with session_scope() as session:
             task = session.execute(
-                __import__("sqlalchemy").select(DataSyncTask).where(
-                    DataSyncTask.job == "backfill"
-                )
+                __import__("sqlalchemy").select(DataSyncTask).where(DataSyncTask.job == "backfill")
             ).scalar_one()
             assert task.status == "done"
             assert set(task.cursor.split(",")) == set(codes)
@@ -326,10 +312,15 @@ class TestAdjustRebuild:
                 scale = 0.9 if bar.trade_date >= step_date else 1.0
                 shifted.append(
                     type(bar)(
-                        code=code, trade_date=bar.trade_date, adjust=ADJUST_QFQ,
-                        open=bar.open * scale, high=bar.high * scale,
-                        low=bar.low * scale, close=bar.close * scale,
-                        volume=bar.volume, amount=bar.amount,
+                        code=code,
+                        trade_date=bar.trade_date,
+                        adjust=ADJUST_QFQ,
+                        open=bar.open * scale,
+                        high=bar.high * scale,
+                        low=bar.low * scale,
+                        close=bar.close * scale,
+                        volume=bar.volume,
+                        amount=bar.amount,
                     )
                 )
             repo.upsert_daily_bars(session, code, shifted, ADJUST_QFQ)
@@ -348,21 +339,15 @@ class TestAdjustRebuild:
 class TestIndexMembers:
     def test_index_members_roundtrip(self, service):
         with session_scope() as session:
-            repo.upsert_index_constituents(
-                session, "000905.SH", ["600519.SH", "000001.SZ"], date(2026, 1, 1)
-            )
+            repo.upsert_index_constituents(session, "000905.SH", ["600519.SH", "000001.SZ"], date(2026, 1, 1))
         with session_scope() as session:
             members = repo.index_members(session, "000905.SH")
         assert set(members) == {"600519.SH", "000001.SZ"}
 
     def test_index_members_uses_latest_snapshot(self, service):
         with session_scope() as session:
-            repo.upsert_index_constituents(
-                session, "000852.SH", ["600519.SH"], date(2026, 1, 1)
-            )
-            repo.upsert_index_constituents(
-                session, "000852.SH", ["000001.SZ"], date(2026, 6, 1)
-            )
+            repo.upsert_index_constituents(session, "000852.SH", ["600519.SH"], date(2026, 1, 1))
+            repo.upsert_index_constituents(session, "000852.SH", ["000001.SZ"], date(2026, 6, 1))
         with session_scope() as session:
             members = repo.index_members(session, "000852.SH")
         assert members == ["000001.SZ"]

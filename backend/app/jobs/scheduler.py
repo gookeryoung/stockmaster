@@ -14,6 +14,7 @@ from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
+
 _scheduler = None
 
 
@@ -31,7 +32,7 @@ def is_trading_day(day: date | None = None) -> bool:
         with session_scope() as session:
             known = repo.is_open_day(session, day)
         return bool(known)
-    except Exception:  # noqa: BLE001 - a missing table must not crash startup
+    except Exception:
         return day.weekday() < 5
 
 
@@ -49,7 +50,7 @@ def _guarded(name: str, func, *, trading_day_only: bool = True):
             result = func()
             log.info("job %s finished: %s", name, str(result)[:400])
             record_task_status(name, "done", str(result)[:2000])
-        except Exception as exc:  # noqa: BLE001 - scheduler must survive job errors
+        except Exception as exc:
             log.exception("job %s failed", name)
             record_task_status(name, "failed", f"{type(exc).__name__}: {exc}")
 
@@ -70,39 +71,46 @@ def build_scheduler():
     scheduler.add_job(
         _guarded("calendar", tasks.job_sync_calendar),
         CronTrigger(hour=15, minute=20, day_of_week="mon-fri"),
-        id="calendar", replace_existing=True,
+        id="calendar",
+        replace_existing=True,
     )
     scheduler.add_job(
         _guarded("daily", tasks.job_sync_daily),
         CronTrigger(hour=15, minute=35, day_of_week="mon-fri"),
-        id="daily", replace_existing=True,
+        id="daily",
+        replace_existing=True,
     )
     scheduler.add_job(
         _guarded("index_daily", tasks.job_sync_index_daily),
         CronTrigger(hour=16, minute=5, day_of_week="mon-fri"),
-        id="index_daily", replace_existing=True,
+        id="index_daily",
+        replace_existing=True,
     )
     scheduler.add_job(
         _guarded("analytics", tasks.job_compute_analytics),
         CronTrigger(hour=16, minute=30, day_of_week="mon-fri"),
-        id="analytics", replace_existing=True,
+        id="analytics",
+        replace_existing=True,
     )
     scheduler.add_job(
         _guarded("predict", tasks.job_predict),
         CronTrigger(hour=16, minute=45, day_of_week="mon-fri"),
-        id="predict", replace_existing=True,
+        id="predict",
+        replace_existing=True,
     )
     scheduler.add_job(
         _guarded("alerts", tasks.job_scan_alerts),
         CronTrigger(hour=17, minute=0, day_of_week="mon-fri"),
-        id="alerts", replace_existing=True,
+        id="alerts",
+        replace_existing=True,
     )
 
     # Intraday snapshot poll for alert freshness (trading days only).
     scheduler.add_job(
         _guarded("snapshot", tasks.job_snapshot_poll),
         IntervalTrigger(seconds=max(60, settings.alert_poll_seconds)),
-        id="snapshot", replace_existing=True,
+        id="snapshot",
+        replace_existing=True,
         max_instances=1,
     )
 
@@ -110,7 +118,8 @@ def build_scheduler():
     scheduler.add_job(
         _guarded("train", tasks.job_train_models, trading_day_only=False),
         CronTrigger(day_of_week="sat", hour=2, minute=0),
-        id="train", replace_existing=True,
+        id="train",
+        replace_existing=True,
     )
 
     return scheduler
@@ -118,7 +127,7 @@ def build_scheduler():
 
 def start_scheduler():
     """Start the background scheduler when enabled."""
-    global _scheduler
+    global _scheduler  # noqa: PLW0603
     if not settings.scheduler_enabled:
         log.info("scheduler disabled by configuration")
         return None
@@ -128,7 +137,7 @@ def start_scheduler():
         _scheduler = build_scheduler()
         _scheduler.start()
         log.info("scheduler started with %d jobs", len(_scheduler.get_jobs()))
-    except Exception as exc:  # noqa: BLE001 - the API must start regardless
+    except Exception as exc:
         log.error("could not start scheduler: %s", exc)
         _scheduler = None
     return _scheduler
@@ -136,11 +145,11 @@ def start_scheduler():
 
 def stop_scheduler() -> None:
     """Shut the scheduler down (called on API shutdown)."""
-    global _scheduler
+    global _scheduler  # noqa: PLW0603
     if _scheduler is not None:
         try:
             _scheduler.shutdown(wait=False)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.debug("scheduler shutdown raised: %s", exc)
         _scheduler = None
 

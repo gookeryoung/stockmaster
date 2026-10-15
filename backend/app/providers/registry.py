@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from app.config import settings
-from app.core.errors import ProviderError, ProviderUnavailable
+from app.core.errors import ProviderUnavailable
 from app.core.logging import get_logger
 from app.providers.base import (
     ADJUST_RAW,
@@ -46,10 +46,8 @@ class ProviderState:
         """True while the breaker is tripped."""
         if self.opened_at is None:
             return False
-        if time.monotonic() - self.opened_at >= settings.provider_circuit_cooldown:
-            # Cooldown elapsed: allow a half-open trial.
-            return False
-        return True
+        # Once the cooldown elapses the breaker is half-open, allowing a trial.
+        return time.monotonic() - self.opened_at < settings.provider_circuit_cooldown
 
     def record_success(self) -> None:
         self.consecutive_failures = 0
@@ -86,14 +84,11 @@ class ProviderState:
 class ProviderRegistry:
     """Ordered, fault-tolerant facade over the configured providers."""
 
-    def __init__(self, providers: list[BaseProvider] | None = None, *,
-                 order: list[str] | None = None) -> None:
+    def __init__(self, providers: list[BaseProvider] | None = None, *, order: list[str] | None = None) -> None:
         self._lock = threading.RLock()
         if providers is None:
             providers = _default_providers()
-        self._states: dict[str, ProviderState] = {
-            p.name: ProviderState(provider=p) for p in providers
-        }
+        self._states: dict[str, ProviderState] = {p.name: ProviderState(provider=p) for p in providers}
         self._order: list[str] = order or settings.provider_priority
         # Any provider not named in the order is appended so nothing is lost.
         for name in self._states:
@@ -145,7 +140,7 @@ class ProviderRegistry:
                 # Not supported by this provider is not a provider failure.
                 errors.append(f"{name}: {exc}")
                 continue
-            except Exception as exc:  # noqa: BLE001 - recorded then failed over
+            except Exception as exc:
                 state.record_failure(f"{type(exc).__name__}: {exc}")
                 errors.append(f"{name}: {type(exc).__name__}: {exc}")
                 log.warning("provider %s failed %s: %s", name, action, exc)
@@ -168,9 +163,7 @@ class ProviderRegistry:
         end: date,
         adjust: str = ADJUST_RAW,
     ) -> list[Bar]:
-        bars, _source = self._dispatch(
-            "fetch_daily", code, start, end, adjust, want=list
-        )
+        bars, _source = self._dispatch("fetch_daily", code, start, end, adjust, want=list)
         return bars
 
     def fetch_daily_with_source(
@@ -181,15 +174,11 @@ class ProviderRegistry:
         adjust: str = ADJUST_RAW,
     ) -> tuple[list[Bar], str]:
         """Like :meth:`fetch_daily` but also reports the serving provider."""
-        bars, source = self._dispatch(
-            "fetch_daily", code, start, end, adjust, want=list
-        )
+        bars, source = self._dispatch("fetch_daily", code, start, end, adjust, want=list)
         return bars, source
 
     def fetch_index_daily(self, code: str, start: date, end: date) -> list[Bar]:
-        bars, _source = self._dispatch(
-            "fetch_index_daily", code, start, end, want=list
-        )
+        bars, _source = self._dispatch("fetch_index_daily", code, start, end, want=list)
         return bars
 
     def fetch_calendar(self, start: date, end: date) -> list[date]:
@@ -212,7 +201,7 @@ class ProviderRegistry:
             provider = self._states[name].provider
             try:
                 ok = bool(provider.health_check())
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.debug("health check raised for %s: %s", name, exc)
                 ok = False
             with self._lock:
@@ -228,7 +217,7 @@ class ProviderRegistry:
         for name in self._order:
             try:
                 self._states[name].provider.close()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.debug("closing provider %s raised: %s", name, exc)
 
 
@@ -236,24 +225,24 @@ def _default_providers() -> list[BaseProvider]:
     """Instantiate the built-in providers, tolerating missing optional deps."""
     providers: list[BaseProvider] = []
     try:
-        from app.providers.baostock_provider import BaostockProvider  # noqa: PLC0415
+        from app.providers.baostock_provider import BaostockProvider
 
         providers.append(BaostockProvider())
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.warning("baostock provider unavailable: %s", exc)
 
     try:
-        from app.providers.tencent_provider import TencentProvider  # noqa: PLC0415
+        from app.providers.tencent_provider import TencentProvider
 
         providers.append(TencentProvider())
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.warning("tencent provider unavailable: %s", exc)
 
     try:
-        from app.providers.sina_provider import SinaProvider  # noqa: PLC0415
+        from app.providers.sina_provider import SinaProvider
 
         providers.append(SinaProvider())
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.warning("sina provider unavailable: %s", exc)
 
     if not providers:
@@ -267,7 +256,7 @@ _registry_lock = threading.Lock()
 
 def get_registry() -> ProviderRegistry:
     """Process-wide registry singleton."""
-    global _registry
+    global _registry  # noqa: PLW0603
     if _registry is None:
         with _registry_lock:
             if _registry is None:
@@ -277,7 +266,7 @@ def get_registry() -> ProviderRegistry:
 
 def reset_registry() -> None:
     """Drop the singleton (used by tests)."""
-    global _registry
+    global _registry  # noqa: PLW0603
     with _registry_lock:
         if _registry is not None:
             _registry.close()

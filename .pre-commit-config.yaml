@@ -1,0 +1,31 @@
+# pre-commit / prek 配置
+# See https://pre-commit.com for more information
+#
+# 安装钩子：
+#   uv run --with prek prek install --force
+# 手动全量运行：
+#   uv run --with prek prek run --all-files
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff 版本必须与 pyproject.toml [project.optional-dependencies].lint 的 ruff== 一致，
+    # 否则同一提交在本地 hook 与 CI 会得到不同的 lint 结果。
+    rev: v0.16.8
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: fix-byte-order-marker
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      # 避免误提交大文件（数据库/模型产物）
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]

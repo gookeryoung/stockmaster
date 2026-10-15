@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import AsyncIterator
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +26,9 @@ FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 
 
 @contextlib.asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(
+    app: FastAPI,  # noqa: ARG001 - required by the FastAPI lifespan protocol
+) -> AsyncIterator[None]:
     """Initialise the database and scheduler on startup; clean up on shutdown."""
     setup_logging(settings.log_level)
     settings.ensure_dirs()
@@ -39,9 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.jobs.scheduler import start_scheduler, stop_scheduler
 
     start_scheduler()
-    log.info(
-        "StockMaster %s ready on http://%s:%d", __version__, settings.host, settings.port
-    )
+    log.info("StockMaster %s ready on http://%s:%d", __version__, settings.host, settings.port)
     try:
         yield
     finally:
@@ -51,7 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             from app.providers.registry import get_registry
 
             get_registry().close()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.debug("provider shutdown raised: %s", exc)
 
 
@@ -120,8 +119,7 @@ def _mount_frontend(app: FastAPI) -> None:
     """Serve the built SPA, with client-side routing fallback."""
     if not FRONTEND_DIST.exists():
         log.info(
-            "frontend build not found at %s; API-only mode "
-            "(run `pnpm build` in frontend/ to enable the UI)",
+            "frontend build not found at %s; API-only mode (run `pnpm build` in frontend/ to enable the UI)",
             FRONTEND_DIST,
         )
 

@@ -28,8 +28,7 @@ log = get_logger(__name__)
 router = APIRouter(tags=["prediction"])
 
 DISCLAIMER = (
-    "预测基于历史数据与统计模型，样本外表现不代表未来收益。"
-    "模型指标（AUC/IC）已包含随机基线对照，请勿据此直接交易。"
+    "预测基于历史数据与统计模型，样本外表现不代表未来收益。模型指标（AUC/IC）已包含随机基线对照，请勿据此直接交易。"
 )
 
 
@@ -151,12 +150,14 @@ def list_predictions(
         stmt = stmt.where(Prediction.prob_up >= min_prob)
 
     rows = list(session.execute(stmt).scalars())
-    names = {
-        i.code: i.name
-        for i in session.execute(
-            select(Instrument).where(Instrument.code.in_([r.code for r in rows]))
-        ).scalars()
-    } if rows else {}
+    names = (
+        {
+            i.code: i.name
+            for i in session.execute(select(Instrument).where(Instrument.code.in_([r.code for r in rows]))).scalars()
+        }
+        if rows
+        else {}
+    )
 
     return PredictionListResponse(
         trade_date=target_date,

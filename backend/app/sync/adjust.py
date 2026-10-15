@@ -30,6 +30,7 @@ Two independent mechanisms are provided:
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from datetime import date
 
@@ -48,9 +49,9 @@ class RatioPoint:
     ratio: float
 
 
-def recover_adjust_ratio(raw_prices: dict[date, float],
-                         qfq_prices: dict[date, float],
-                         *, tolerance: float = 1e-6) -> list[RatioPoint]:
+def recover_adjust_ratio(
+    raw_prices: dict[date, float], qfq_prices: dict[date, float], *, tolerance: float = 1e-6
+) -> list[RatioPoint]:
     """Recover the step-wise qfq/raw ratio implied by a provider's own output.
 
     This exploits a structural property: between two consecutive ex-dividend
@@ -76,9 +77,7 @@ def recover_adjust_ratio(raw_prices: dict[date, float],
     return points
 
 
-def derive_qfq_from_ratio(
-    raw: dict[date, float], points: list[RatioPoint]
-) -> dict[date, float]:
+def derive_qfq_from_ratio(raw: dict[date, float], points: list[RatioPoint]) -> dict[date, float]:
     """Scale raw closes into qfq closes using recovered ratio steps.
 
     ``points`` must be ascending; each point applies from its date onward, with
@@ -142,9 +141,7 @@ def apply_adjustment(
         factor = 1.0
         for ex_date, cash, bonus in ordered:
             step = (1.0 + bonus) + (cash / price if price > 0 else 0.0)
-            if forward and ex_date > day:
-                factor *= step
-            elif not forward and ex_date <= day:
+            if (forward and ex_date > day) or (not forward and ex_date <= day):
                 factor *= step
         if forward:
             out[day] = price / factor if factor else price
@@ -153,9 +150,7 @@ def apply_adjustment(
     return out
 
 
-def find_adjustment_jumps(
-    series: dict[date, float], *, threshold: float = 0.25
-) -> list[tuple[date, float]]:
+def find_adjustment_jumps(series: dict[date, float], *, threshold: float = 0.25) -> list[tuple[date, float]]:
     """Detect suspicious day-over-day jumps, for continuity validation.
 
     A correctly adjusted series should never jump more than the price limit on a
@@ -165,7 +160,7 @@ def find_adjustment_jumps(
     """
     days = sorted(series)
     jumps: list[tuple[date, float]] = []
-    for prev_day, day in zip(days, days[1:], strict=False):
+    for prev_day, day in itertools.pairwise(days):
         prev = series[prev_day]
         if prev <= 0:
             continue
@@ -175,9 +170,7 @@ def find_adjustment_jumps(
     return jumps
 
 
-def is_continuity_broken(
-    series: dict[date, float], *, threshold: float = 0.25
-) -> bool:
+def is_continuity_broken(series: dict[date, float], *, threshold: float = 0.25) -> bool:
     """Whether the series contains an implausible adjustment-boundary jump."""
     return bool(find_adjustment_jumps(series, threshold=threshold))
 

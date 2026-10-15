@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -29,7 +29,7 @@ from app.db.session import session_scope
 
 log = get_logger(__name__)
 
-__all__ = ["TriggerCandidate", "evaluate_rule", "AlertEngine"]
+__all__ = ["AlertEngine", "TriggerCandidate", "evaluate_rule"]
 
 
 @dataclass
@@ -44,7 +44,7 @@ class TriggerCandidate:
     message: str
     snapshot: dict
     dedup_key: str
-    trigger_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    trigger_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
 
 
 def _pct_change(ctx: RuleContext) -> float | None:
@@ -92,15 +92,13 @@ def evaluate_rule(ctx: RuleContext, rule_type: str, params: dict) -> tuple[bool,
         change = (ctx.close / reference - 1.0) * 100.0
         threshold = params["threshold"]
         fired = change >= threshold if params["direction"] == "above" else change <= threshold
-        message = (
-            f"{ctx.name or ctx.code} 相对{params['reference']}变动 {change:+.2f}% "
-            f"触发阈值 {threshold:.2f}%"
-        )
+        message = f"{ctx.name or ctx.code} 相对{params['reference']}变动 {change:+.2f}% 触发阈值 {threshold:.2f}%"
         return fired, message if fired else "", {"change_pct": change, "threshold": threshold}
 
     if rule_type == "volume_ratio":
         ratio = ctx.indicators.get("vol_ratio")
-        if ratio is None or ratio != ratio:
+        # NaN != NaN: a NaN indicator means "no value", not a trigger.
+        if ratio is None or ratio != ratio:  # noqa: PLR0124 - NaN guard
             return False, "", {}
         threshold = params["threshold"]
         fired = ratio >= threshold if params["direction"] == "above" else ratio <= threshold
@@ -156,7 +154,7 @@ def evaluate_rule(ctx: RuleContext, rule_type: str, params: dict) -> tuple[bool,
     if rule_type == "rsi_extreme":
         key = f"rsi{params['period']}"
         value = ctx.indicators.get(key)
-        if value is None or value != value:
+        if value is None or value != value:  # noqa: PLR0124 - NaN guard
             return False, "", {}
         threshold = params["threshold"]
         if params["direction"] == "oversold":
@@ -205,12 +203,12 @@ def evaluate_rule(ctx: RuleContext, rule_type: str, params: dict) -> tuple[bool,
         if len(highs) < window + 1 or len(lows) < window + 1:
             return False, "", {}
         if params["direction"] == "high":
-            prior = max(highs[-(window + 1):-1])
+            prior = max(highs[-(window + 1) : -1])
             fired = highs[-1] > prior
             message = f"{ctx.name or ctx.code} 创 {window} 日新高 {highs[-1]:.2f}（前高 {prior:.2f}）" if fired else ""
             snapshot = {"high": highs[-1], "prior_high": prior}
         else:
-            prior = min(lows[-(window + 1):-1])
+            prior = min(lows[-(window + 1) : -1])
             fired = lows[-1] < prior
             message = f"{ctx.name or ctx.code} 创 {window} 日新低 {lows[-1]:.2f}（前低 {prior:.2f}）" if fired else ""
             snapshot = {"low": lows[-1], "prior_low": prior}
@@ -255,9 +253,7 @@ def evaluate_rule(ctx: RuleContext, rule_type: str, params: dict) -> tuple[bool,
     raise DataError(f"rule_type {rule_type!r} has no evaluator")
 
 
-def _dedup_key(
-    rule: AlertRule, ctx: RuleContext, trigger_at: datetime
-) -> str:
+def _dedup_key(rule: AlertRule, ctx: RuleContext, trigger_at: datetime) -> str:
     """Stable identity for a triggering event.
 
     ``once_per_day`` collapses the whole session to a single alert per symbol,
@@ -296,20 +292,18 @@ class AlertEngine:
             return repo.index_members(session, rule.scope_value or "000300.SH")
         if scope == "watchlist":
             name = rule.scope_value or "default"
-            rows = session.execute(
-                select(WatchlistItem.code).where(WatchlistItem.list_name == name)
-            ).scalars().all()
+            rows = session.execute(select(WatchlistItem.code).where(WatchlistItem.list_name == name)).scalars().all()
             if rows:
                 return list(rows)
             # Fall back to all active instruments when the watchlist is empty, so
             # a fresh install still produces something useful.
             scope = "all"
         if scope == "all":
-            rows = session.execute(
-                select(Instrument.code).where(
-                    Instrument.status == 1, Instrument.is_index.is_(False)
-                )
-            ).scalars().all()
+            rows = (
+                session.execute(select(Instrument.code).where(Instrument.status == 1, Instrument.is_index.is_(False)))
+                .scalars()
+                .all()
+            )
             return list(rows)
         return []
 
@@ -317,8 +311,8 @@ class AlertEngine:
     @staticmethod
     def _build_context(session, code: str, lookback: int = 260) -> RuleContext | None:
         """Assemble a point-in-time context for one symbol."""
-        from app.factors.compute import compute_factors
         from app.factors.compute import composite_score as factor_score
+        from app.factors.compute import compute_factors
         from app.indicators.compute import compute_indicators
         from app.sync import repository as repo
 
@@ -366,15 +360,10 @@ class AlertEngine:
         from app.db.models import Prediction
 
         prediction_row = session.execute(
-            select(Prediction)
-            .where(Prediction.code == code)
-            .order_by(Prediction.trade_date.desc())
-            .limit(1)
+            select(Prediction).where(Prediction.code == code).order_by(Prediction.trade_date.desc()).limit(1)
         ).scalar_one_or_none()
         prediction = (
-            {"prob_up": prediction_row.prob_up, "horizon": prediction_row.horizon}
-            if prediction_row is not None
-            else {}
+            {"prob_up": prediction_row.prob_up, "horizon": prediction_row.horizon} if prediction_row is not None else {}
         )
 
         history = [
@@ -419,12 +408,12 @@ class AlertEngine:
         now: datetime | None = None,
     ) -> list[TriggerCandidate]:
         """Evaluate every enabled rule and persist new, de-duplicated triggers."""
-        now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+        now = now or datetime.now(UTC).replace(tzinfo=None)
 
         if self.respect_market_hours:
             from app.config import settings
 
-            local = (now.replace(tzinfo=timezone.utc)).astimezone(settings.tz)
+            local = (now.replace(tzinfo=UTC)).astimezone(settings.tz)
             if not is_trading_time(local) or is_call_auction(local):
                 return []
 
@@ -460,10 +449,8 @@ class AlertEngine:
                         continue
 
                     try:
-                        fired, message, snapshot = evaluate_rule(
-                            ctx, rule.rule_type, params
-                        )
-                    except Exception as exc:  # noqa: BLE001 - one rule must not stop the scan
+                        fired, message, snapshot = evaluate_rule(ctx, rule.rule_type, params)
+                    except Exception as exc:
                         log.warning("rule %s failed on %s: %s", rule.id, code, exc)
                         continue
                     if not fired:
@@ -487,13 +474,8 @@ class AlertEngine:
                 inserted = self._persist(session, candidates)
                 # Only report what was actually new, so callers can notify on the
                 # delta rather than re-notifying already-known triggers.
-                inserted_keys = {
-                    (row.rule_id, row.dedup_key) for row in inserted
-                }
-                candidates = [
-                    c for c in candidates
-                    if (c.rule_id, c.dedup_key) in inserted_keys
-                ]
+                inserted_keys = {(row.rule_id, row.dedup_key) for row in inserted}
+                candidates = [c for c in candidates if (c.rule_id, c.dedup_key) in inserted_keys]
 
         return candidates
 
@@ -544,10 +526,7 @@ class AlertEngine:
     ) -> int:
         """Validate and store a rule; returns its id."""
         if rule_type not in RULE_TYPES:
-            raise DataError(
-                f"unknown rule_type {rule_type!r}; expected one of "
-                f"{', '.join(sorted(RULE_TYPES))}"
-            )
+            raise DataError(f"unknown rule_type {rule_type!r}; expected one of {', '.join(sorted(RULE_TYPES))}")
         normalized = normalize_params(rule_type, params)
         with session_scope() as session:
             rule = AlertRule(
@@ -570,9 +549,7 @@ class AlertEngine:
         """Delete triggers older than ``days`` (housekeeping)."""
         from sqlalchemy import delete
 
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
         with session_scope() as session:
-            result = session.execute(
-                delete(AlertTrigger).where(AlertTrigger.trigger_at < cutoff)
-            )
+            result = session.execute(delete(AlertTrigger).where(AlertTrigger.trigger_at < cutoff))
             return int(result.rowcount or 0)

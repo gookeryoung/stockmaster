@@ -15,7 +15,6 @@ the factor definitions.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from app.core.logging import get_logger
@@ -94,7 +93,7 @@ def top_n_per_date(score_history: pd.DataFrame, top_n: int) -> dict:
         if not codes:
             continue
         weight = 1.0 / len(codes)
-        signals[day] = {code: weight for code in codes}
+        signals[day] = dict.fromkeys(codes, weight)
     return signals
 
 
@@ -103,9 +102,9 @@ def summarize_scores(score_history: pd.DataFrame) -> dict:
     if score_history.empty:
         return {"dates": 0, "symbols": 0, "rows": 0}
     return {
-        "dates": int(score_history["trade_date"].nunique()),
-        "symbols": int(score_history["code"].nunique()),
-        "rows": int(len(score_history)),
+        "dates": score_history["trade_date"].nunique(),
+        "symbols": score_history["code"].nunique(),
+        "rows": len(score_history),
         "first_date": str(score_history["trade_date"].min()),
         "last_date": str(score_history["trade_date"].max()),
     }

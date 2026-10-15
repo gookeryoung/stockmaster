@@ -28,7 +28,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, utcnow
 
@@ -44,8 +44,8 @@ class Instrument(Base):
 
     code: Mapped[str] = mapped_column(String(16), primary_key=True)  # 600519.SH
     name: Mapped[str] = mapped_column(String(64), default="")
-    market: Mapped[str] = mapped_column(String(8), default="")   # SH/SZ/BJ
-    board: Mapped[str] = mapped_column(String(16), default="")   # main/star/chinext/bse/index
+    market: Mapped[str] = mapped_column(String(8), default="")  # SH/SZ/BJ
+    board: Mapped[str] = mapped_column(String(16), default="")  # main/star/chinext/bse/index
     industry: Mapped[str] = mapped_column(String(64), default="")
     is_index: Mapped[bool] = mapped_column(Boolean, default=False)
     is_st: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -83,9 +83,7 @@ class IndexConstituent(Base):
     as_of: Mapped[date] = mapped_column(Date, index=True)
     source: Mapped[str] = mapped_column(String(16), default="")
 
-    __table_args__ = (
-        UniqueConstraint("index_code", "code", "as_of", name="uq_index_cons"),
-    )
+    __table_args__ = (UniqueConstraint("index_code", "code", "as_of", name="uq_index_cons"),)
 
 
 # --------------------------------------------------------------------------- #

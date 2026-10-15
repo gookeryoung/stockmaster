@@ -24,7 +24,7 @@ from app.core.market import default_history_start
 from app.core.symbols import normalize
 from app.db.models import AdjustFactor, DailyBar, DataSyncError, DataSyncTask
 from app.db.session import session_scope
-from app.providers.base import ADJUST_QFQ, ADJUST_RAW, Bar
+from app.providers.base import ADJUST_QFQ, ADJUST_RAW
 from app.providers.registry import ProviderRegistry, get_registry
 from app.sync import repository as repo
 from app.sync.adjust import ex_date_set, recover_adjust_ratio
@@ -73,9 +73,7 @@ class SyncService:
     @staticmethod
     def _task(session, job: str, target: str) -> DataSyncTask:
         task = session.execute(
-            select(DataSyncTask).where(
-                DataSyncTask.job == job, DataSyncTask.target == target
-            )
+            select(DataSyncTask).where(DataSyncTask.job == job, DataSyncTask.target == target)
         ).scalar_one_or_none()
         if task is None:
             task = DataSyncTask(job=job, target=target, status="pending")
@@ -85,9 +83,7 @@ class SyncService:
 
     @staticmethod
     def _record_error(session, job: str, code: str, provider: str, error: str) -> None:
-        session.add(
-            DataSyncError(job=job, code=code, provider=provider, error=error[:2000])
-        )
+        session.add(DataSyncError(job=job, code=code, provider=provider, error=error[:2000]))
 
     # ------------------------------------------------------------- calendar
     def sync_calendar(self, start: date | None = None, end: date | None = None) -> SyncReport:
@@ -145,10 +141,10 @@ class SyncService:
         canon = normalize(index_code)
         digits = canon.split(".")[0]
         try:
-            import akshare as ak  # noqa: PLC0415
+            import akshare as ak
 
             df = ak.index_stock_cons_csindex(symbol=digits)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             report.errors.append(f"{type(exc).__name__}: {exc}")
             report.failed = 1
             log.warning("index member fetch failed for %s: %s", canon, exc)
@@ -168,9 +164,7 @@ class SyncService:
             return report
 
         with session_scope() as session:
-            written = repo.upsert_index_constituents(
-                session, canon, codes, as_of or date.today(), source="csindex"
-            )
+            written = repo.upsert_index_constituents(session, canon, codes, as_of or date.today(), source="csindex")
         report.total = len(codes)
         report.processed = written
         log.info("index %s members synced: %d", canon, written)
@@ -214,9 +208,7 @@ class SyncService:
                     report.skipped += 1
                     continue
                 try:
-                    bars, source = self._registry.fetch_daily_with_source(
-                        canon, begin, end, adjust
-                    )
+                    bars, _source = self._registry.fetch_daily_with_source(canon, begin, end, adjust)
                 except ProviderError as exc:
                     report.failed += 1
                     err = f"{canon}/{adjust}: {exc}"
@@ -264,13 +256,13 @@ class SyncService:
         todo = [c for c in canon_codes if c not in processed_set]
         log.info(
             "backfill starting: %d symbols (%d already done), workers=%d",
-            len(todo), len(processed_set), workers,
+            len(todo),
+            len(processed_set),
+            workers,
         )
 
         for index, code in enumerate(todo, start=1):
-            sub = self.sync_symbol_daily(
-                code, start=start, end=end, adjusts=adjusts, full=True
-            )
+            sub = self.sync_symbol_daily(code, start=start, end=end, adjusts=adjusts, full=True)
             report.bars_written += sub.bars_written
             report.errors.extend(sub.errors)
             if sub.failed:
@@ -288,8 +280,7 @@ class SyncService:
                 task.message = f"last={code}"
 
             if index % 50 == 0:
-                log.info("backfill progress: %d/%d (failed=%d)", index, len(todo),
-                         report.failed)
+                log.info("backfill progress: %d/%d (failed=%d)", index, len(todo), report.failed)
 
         with session_scope() as session:
             task = self._task(session, "backfill", "daily")
@@ -297,7 +288,9 @@ class SyncService:
             task.finished_at = func.now()
         log.info(
             "backfill finished: processed=%d bars=%d failed=%d",
-            report.processed, report.bars_written, report.failed,
+            report.processed,
+            report.bars_written,
+            report.failed,
         )
         return report
 
@@ -327,13 +320,12 @@ class SyncService:
 
             log.info(
                 "adjustment changed for %s (%d new ex-dates): rebuilding qfq",
-                canon, len(new_ex_dates - known),
+                canon,
+                len(new_ex_dates - known),
             )
             for ex_date in sorted(new_ex_dates):
                 ratio = next((p.ratio for p in points if p.ex_date == ex_date), 1.0)
-                prev = next(
-                    (p.ratio for p in points if p.ex_date < ex_date), 1.0
-                )
+                prev = next((p.ratio for p in points if p.ex_date < ex_date), 1.0)
                 step = ratio / prev if prev else 1.0
                 repo.upsert_adjust_factors(
                     session,

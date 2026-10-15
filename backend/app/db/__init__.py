@@ -9,10 +9,9 @@ partial schema (only whatever happened to be imported by the caller) and fail
 later with ``no such table`` errors.
 """
 
-from app.db.base import Base, utcnow
-
 # Registration of all mapped classes — do not remove. See module docstring.
-from app.db import models as models  # noqa: E402,F401
+from app.db import models as models
+from app.db.base import Base, utcnow
 from app.db.session import (
     get_db,
     get_engine,
@@ -24,12 +23,12 @@ from app.db.session import (
 
 __all__ = [
     "Base",
-    "utcnow",
-    "models",
     "get_db",
     "get_engine",
     "get_session_factory",
     "init_db",
+    "models",
     "reset_engine",
     "session_scope",
+    "utcnow",
 ]

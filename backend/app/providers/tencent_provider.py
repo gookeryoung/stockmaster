@@ -15,7 +15,7 @@ from datetime import date, datetime
 
 from app.core.errors import DataError, ProviderError
 from app.core.logging import get_logger
-from app.core.symbols import infer_exchange, normalize, to_tencent
+from app.core.symbols import normalize, to_tencent
 from app.providers.base import (
     ADJUST_HFQ,
     ADJUST_QFQ,
@@ -43,7 +43,7 @@ class TencentProvider(BaseProvider):
 
     @staticmethod
     def _ak():
-        import akshare as ak  # noqa: PLC0415
+        import akshare as ak
 
         return ak
 
@@ -64,7 +64,7 @@ class TencentProvider(BaseProvider):
         except (TypeError, ValueError):
             return None
         # pandas may hand back NaN.
-        return None if out != out else out  # noqa: PLR0124
+        return None if out != out else out  # noqa: PLR0124 - NaN check
 
     def fetch_daily(
         self,
@@ -85,7 +85,7 @@ class TencentProvider(BaseProvider):
                 end_date=end.strftime("%Y%m%d"),
                 adjust=_ADJUST_ARG[adjust],
             )
-        except Exception as exc:  # noqa: BLE001 - normalised for the registry
+        except Exception as exc:
             raise ProviderError(f"tencent daily {symbol} failed: {exc}") from exc
 
         if df is None or len(df) == 0:
@@ -99,7 +99,7 @@ class TencentProvider(BaseProvider):
                 h = self._f(row.get("high"))
                 lo = self._f(row.get("low"))
                 c = self._f(row.get("close"))
-            except Exception:  # noqa: BLE001 - skip malformed rows
+            except Exception:
                 continue
             if None in (o, h, lo, c):
                 continue
@@ -107,7 +107,10 @@ class TencentProvider(BaseProvider):
                 Bar(
                     code=canon,
                     trade_date=day,
-                    open=o, high=h, low=lo, close=c,
+                    open=o,
+                    high=h,
+                    low=lo,
+                    close=c,
                     volume=self._f(row.get("volume")) or 0.0,
                     amount=self._f(row.get("amount")) or 0.0,
                     turn=self._f(row.get("turnover")),
@@ -125,7 +128,7 @@ class TencentProvider(BaseProvider):
         ak = self._ak()
         try:
             df = ak.stock_zh_index_daily_tx(symbol=symbol)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ProviderError(f"tencent index {symbol} failed: {exc}") from exc
         if df is None or len(df) == 0:
             return []
@@ -159,7 +162,7 @@ class TencentProvider(BaseProvider):
         ak = self._ak()
         try:
             df = ak.tool_trade_date_hist_sina()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ProviderError(f"calendar fetch failed: {exc}") from exc
         if df is None or len(df) == 0:
             return []
@@ -175,7 +178,7 @@ class TencentProvider(BaseProvider):
         ak = self._ak()
         try:
             df = ak.stock_info_a_code_name()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ProviderError(f"instrument list failed: {exc}") from exc
         if df is None or len(df) == 0:
             return []
@@ -188,7 +191,7 @@ class TencentProvider(BaseProvider):
                 canon = normalize(raw_code)
             except DataError:
                 continue
-            digits, exchange = canon.split(".")
+            _digits, exchange = canon.split(".")
             out.append(
                 InstrumentInfo(
                     code=canon,
@@ -206,6 +209,6 @@ class TencentProvider(BaseProvider):
             end = date.today()
             bars = self.fetch_daily("600519.SH", end, end, ADJUST_QFQ)
             return isinstance(bars, list)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.debug("tencent health check failed: %s", exc)
             return False

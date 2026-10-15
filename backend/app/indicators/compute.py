@@ -28,28 +28,45 @@ import numpy as np
 import pandas as pd
 
 __all__ = [
-    "ma",
-    "ema",
-    "wilder",
-    "macd",
-    "rsi",
-    "kdj",
-    "boll",
-    "atr",
-    "obv",
-    "volume_ratio",
-    "compute_indicators",
     "INDICATOR_COLUMNS",
+    "atr",
+    "boll",
+    "compute_indicators",
+    "ema",
+    "kdj",
+    "ma",
+    "macd",
+    "obv",
+    "rsi",
+    "volume_ratio",
+    "wilder",
 ]
 
 #: Columns produced by :func:`compute_indicators`, in storage order.
 INDICATOR_COLUMNS = (
-    "ma5", "ma10", "ma20", "ma60", "ma120", "ema12", "ema26",
-    "macd_dif", "macd_dea", "macd_hist",
-    "rsi6", "rsi12", "rsi24",
-    "kdj_k", "kdj_d", "kdj_j",
-    "boll_up", "boll_mid", "boll_low",
-    "atr14", "atr_pct", "obv", "vol_ratio",
+    "ma5",
+    "ma10",
+    "ma20",
+    "ma60",
+    "ma120",
+    "ema12",
+    "ema26",
+    "macd_dif",
+    "macd_dea",
+    "macd_hist",
+    "rsi6",
+    "rsi12",
+    "rsi24",
+    "kdj_k",
+    "kdj_d",
+    "kdj_j",
+    "boll_up",
+    "boll_mid",
+    "boll_low",
+    "atr14",
+    "atr_pct",
+    "obv",
+    "vol_ratio",
 )
 
 
@@ -76,9 +93,7 @@ def wilder(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
 
 
-def macd(
-    close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
-) -> pd.DataFrame:
+def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
     """MACD as ``dif`` / ``dea`` / ``hist``.
 
     ``hist`` is ``2 * (dif - dea)``, the Chinese-platform convention.
@@ -141,23 +156,17 @@ def boll(close: pd.Series, window: int = 20, num_std: float = 2.0) -> pd.DataFra
     """
     mid = close.rolling(window=window, min_periods=window).mean()
     std = close.rolling(window=window, min_periods=window).std(ddof=0)
-    return pd.DataFrame(
-        {"up": mid + num_std * std, "mid": mid, "low": mid - num_std * std}
-    )
+    return pd.DataFrame({"up": mid + num_std * std, "mid": mid, "low": mid - num_std * std})
 
 
 def true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
     """True range, including the gap from the previous close."""
     prev_close = close.shift(1)
-    ranges = pd.concat(
-        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
-    )
+    ranges = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1)
     return ranges.max(axis=1)
 
 
-def atr(
-    high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
-) -> pd.Series:
+def atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     """Average True Range with Wilder smoothing."""
     return wilder(true_range(high, low, close), period)
 

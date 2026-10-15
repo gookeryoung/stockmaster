@@ -79,17 +79,15 @@ class TestFactorFrameForHistory:
         partial_last = partial[partial["trade_date"] == cutoff]
 
         for column in ("mom_20", "mom_60", "vol_20", "rsi_14"):
-            a = (
-                full_early[full_early["trade_date"] == cutoff]
-                .sort_values("code")[column]
-                .reset_index(drop=True)
-            )
+            a = full_early[full_early["trade_date"] == cutoff].sort_values("code")[column].reset_index(drop=True)
             b = partial_last.sort_values("code")[column].reset_index(drop=True)
             mask = a.notna() & b.notna()
             if mask.sum() == 0:
                 continue
             np.testing.assert_allclose(
-                a[mask].to_numpy(), b[mask].to_numpy(), rtol=1e-9,
+                a[mask].to_numpy(),
+                b[mask].to_numpy(),
+                rtol=1e-9,
                 err_msg=f"{column} leaks future information",
             )
 
@@ -123,7 +121,7 @@ class TestBuildScoreHistory:
 
     def test_sorted_by_date_then_code(self):
         history = build_score_history(universe(4))
-        keys = list(zip(history["trade_date"], history["code"]))
+        keys = list(zip(history["trade_date"], history["code"], strict=False))
         assert keys == sorted(keys)
 
 

@@ -23,22 +23,32 @@ import numpy as np
 import pandas as pd
 
 __all__ = [
+    "DEFAULT_SCORE_WEIGHTS",
+    "PCT_COLUMNS",
     "RAW_FACTOR_COLUMNS",
     "ZSCORE_COLUMNS",
-    "PCT_COLUMNS",
-    "DEFAULT_SCORE_WEIGHTS",
-    "compute_factors",
-    "standardize_cross_section",
     "composite_score",
+    "compute_factors",
     "screen_frame",
+    "standardize_cross_section",
 ]
 
 #: Factor columns computed per symbol from its own history.
 RAW_FACTOR_COLUMNS = (
-    "mom_5", "mom_20", "mom_60", "mom_120", "dist_high_252",
-    "vol_20", "vol_60", "atr_pct",
-    "turnover_20", "amount_log_20", "amihud_20",
-    "ma_bull", "breakout_20", "rsi_14",
+    "mom_5",
+    "mom_20",
+    "mom_60",
+    "mom_120",
+    "dist_high_252",
+    "vol_20",
+    "vol_60",
+    "atr_pct",
+    "turnover_20",
+    "amount_log_20",
+    "amihud_20",
+    "ma_bull",
+    "breakout_20",
+    "rsi_14",
 )
 
 #: Cross-sectional z-scores written by :func:`standardize_cross_section`.
@@ -88,11 +98,6 @@ def compute_factors(df: pd.DataFrame) -> pd.DataFrame:
     close = df["close"].astype(float)
     high = df["high"].astype(float) if "high" in df else close
     low = df["low"].astype(float) if "low" in df else close
-    volume = (
-        df["volume"].astype(float)
-        if "volume" in df
-        else pd.Series(np.nan, index=df.index)
-    )
     amount = df["amount"].astype(float) if "amount" in df else pd.Series(np.nan, index=df.index)
     turn = df["turn"].astype(float) if "turn" in df else pd.Series(np.nan, index=df.index)
 
@@ -114,17 +119,13 @@ def compute_factors(df: pd.DataFrame) -> pd.DataFrame:
     out["vol_60"] = returns.rolling(window=60, min_periods=60).std(ddof=0) * np.sqrt(252)
 
     prev_close = close.shift(1)
-    true_range = pd.concat(
-        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
-    ).max(axis=1)
+    true_range = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
     atr14 = true_range.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
     out["atr_pct"] = _safe_div(atr14, close) * 100.0
 
     # --- liquidity ---
     out["turnover_20"] = turn.rolling(window=20, min_periods=20).mean()
-    out["amount_log_20"] = np.log1p(
-        amount.rolling(window=20, min_periods=20).mean().clip(lower=0.0)
-    )
+    out["amount_log_20"] = np.log1p(amount.rolling(window=20, min_periods=20).mean().clip(lower=0.0))
     # Amihud illiquidity: |return| per unit of traded value, scaled for readability.
     abs_return = returns.abs()
     daily_amihud = _safe_div(abs_return, amount)
@@ -135,9 +136,7 @@ def compute_factors(df: pd.DataFrame) -> pd.DataFrame:
     ma20 = close.rolling(window=20, min_periods=20).mean()
     ma60 = close.rolling(window=60, min_periods=60).mean()
     # Bullish stack: short above medium above long.
-    out["ma_bull"] = (
-        (ma5 > ma20).astype(float) + (ma20 > ma60).astype(float)
-    ) / 2.0
+    out["ma_bull"] = ((ma5 > ma20).astype(float) + (ma20 > ma60).astype(float)) / 2.0
     out.loc[ma60.isna(), "ma_bull"] = np.nan
 
     # Breakout: close above the trailing 20-day high *excluding today*.
@@ -209,9 +208,7 @@ def standardize_cross_section(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def composite_score(
-    frame: pd.DataFrame, weights: dict[str, float] | None = None
-) -> pd.Series:
+def composite_score(frame: pd.DataFrame, weights: dict[str, float] | None = None) -> pd.Series:
     """Weighted blend of standardised factors, renormalised per row.
 
     Rows missing some factors still receive a score from the factors they do

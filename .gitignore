@@ -1,33 +1,59 @@
-# --- Python ---
+# --- Python-generated ---
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
+wheels/
+
+# --- Virtual environments ---
 .venv/
 venv/
-*.egg-info/
+
+# --- 测试与覆盖率 ---
 .pytest_cache/
+.coverage
+.coverage.*
+coverage.json
+coverage.xml
+htmlcov/
+
+# --- 工具缓存 ---
 .ruff_cache/
 .mypy_cache/
+.pyreflex_cache/
+.uv-cache/
+.pytmp/
 
 # --- Node / frontend ---
 node_modules/
+frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/coverage/
+frontend/.eslintcache
 *.tsbuildinfo
+# 已使用 pnpm，不再使用 npm 的冗余 lock 文件
+frontend/package-lock.json
+package-lock.json
 
-# --- Data & artifacts (never commit) ---
+# --- Data & artifacts（绝不提交）---
+# 数据库为本地研究数据，体积可达数百 MB
 data/
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
 *.parquet
 *.joblib
 *.pkl
 *.log
 logs/
 
-# --- Local env ---
+# --- 本地环境与凭证 ---
 .env
 .env.local
+.env.*
 
 # --- OS / editor ---
 Thumbs.db
@@ -35,3 +61,5 @@ desktop.ini
 .DS_Store
 .idea/
 .vscode/
+*.bak
+*backup-*.tar.gz

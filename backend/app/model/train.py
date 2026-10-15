@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
-import numpy as np
 
 from app.config import settings
 from app.core.errors import InsufficientData, ModelNotTrained
@@ -17,7 +15,6 @@ from app.core.logging import get_logger
 from app.db.models import ModelRegistry, Prediction
 from app.db.session import session_scope
 from app.model.dataset import (
-    FEATURE_COLUMNS,
     Dataset,
     Split,
     build_dataset,
@@ -37,11 +34,11 @@ from app.model.models import (
 
 log = get_logger(__name__)
 
-__all__ = ["train_model", "train_all_horizons", "load_active_model", "score_symbols"]
+__all__ = ["load_active_model", "score_symbols", "train_all_horizons", "train_model"]
 
 
 def _model_id(algo: str, horizon: int) -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     return f"{algo}-h{horizon}-{stamp}-{uuid.uuid4().hex[:6]}"
 
 
@@ -66,9 +63,7 @@ def train_model(
         raise InsufficientData("dataset is empty; sync history before training")
 
     test_fraction = settings.test_fraction if test_fraction is None else test_fraction
-    split: Split = chronological_split(
-        dataset, test_fraction=test_fraction, validation_fraction=validation_fraction
-    )
+    split: Split = chronological_split(dataset, test_fraction=test_fraction, validation_fraction=validation_fraction)
 
     if split.train.empty or split.test.empty:
         raise InsufficientData(
@@ -76,9 +71,7 @@ def train_model(
             f"({len(split.train)} train rows, {len(split.test)} test rows)"
         )
 
-    estimator = fit_model(
-        algo, split.train, dataset.feature_columns, label_column=dataset.label_column
-    )
+    estimator = fit_model(algo, split.train, dataset.feature_columns, label_column=dataset.label_column)
     probabilities = predict_proba(estimator, split.test, dataset.feature_columns)
     metrics = evaluate_predictions(
         split.test,
@@ -93,9 +86,7 @@ def train_model(
     # Validation slice, when configured, is reported separately so a user can see
     # overfitting between partitions rather than only a single test number.
     if not split.validation.empty:
-        validation_probabilities = predict_proba(
-            estimator, split.validation, dataset.feature_columns
-        )
+        validation_probabilities = predict_proba(estimator, split.validation, dataset.feature_columns)
         validation_metrics = evaluate_predictions(
             split.validation,
             validation_probabilities,
@@ -130,8 +121,12 @@ def train_model(
 
     log.info(
         "trained %s horizon=%d train=%d test=%d AUC=%s IC=%s",
-        algo, dataset.horizon, len(split.train), len(split.test),
-        _fmt(metrics.get("auc")), _fmt(metrics.get("ic_spearman")),
+        algo,
+        dataset.horizon,
+        len(split.train),
+        len(split.test),
+        _fmt(metrics.get("auc")),
+        _fmt(metrics.get("ic_spearman")),
     )
 
     if persist:
@@ -151,15 +146,11 @@ def _fmt(value) -> str:
 
 def _walk_forward_report(dataset: Dataset, algo: str) -> list[dict]:
     """Walk-forward stability report across expanding windows."""
-    folds = time_series_folds(
-        dataset.frame, n_splits=5, horizon=dataset.horizon
-    )
+    folds = time_series_folds(dataset.frame, n_splits=5, horizon=dataset.horizon)
     report: list[dict] = []
     for index, (train, test) in enumerate(folds):
         try:
-            estimator = fit_model(
-                algo, train, dataset.feature_columns, label_column=dataset.label_column
-            )
+            estimator = fit_model(algo, train, dataset.feature_columns, label_column=dataset.label_column)
             probabilities = predict_proba(estimator, test, dataset.feature_columns)
             metrics = evaluate_predictions(
                 test,
@@ -167,7 +158,7 @@ def _walk_forward_report(dataset: Dataset, algo: str) -> list[dict]:
                 return_column=dataset.forward_return_column,
                 label_column=dataset.label_column,
             )
-        except Exception as exc:  # noqa: BLE001 - a fold may be too small
+        except Exception as exc:
             report.append({"fold": index, "error": str(exc)[:200]})
             continue
         report.append(
@@ -201,9 +192,7 @@ def _persist(model: TrainedModel) -> Path:
 
     with session_scope() as session:
         # Only one active model per horizon, so scoring is deterministic.
-        for row in session.query(ModelRegistry).filter_by(
-            horizon=model.horizon, is_active=True
-        ):
+        for row in session.query(ModelRegistry).filter_by(horizon=model.horizon, is_active=True):
             row.is_active = False
         session.merge(
             ModelRegistry(
@@ -222,7 +211,7 @@ def _persist(model: TrainedModel) -> Path:
                 n_test=model.n_test,
                 artifact_path=str(artifact),
                 is_active=True,
-                trained_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                trained_at=datetime.now(UTC).replace(tzinfo=None),
             )
         )
     return artifact
@@ -246,9 +235,7 @@ def load_active_model(horizon: int = 1) -> TrainedModel:
             .first()
         )
         if row is None:
-            raise ModelNotTrained(
-                f"no active model for horizon={horizon}; train one first"
-            )
+            raise ModelNotTrained(f"no active model for horizon={horizon}; train one first")
         payload = {
             "model_id": row.model_id,
             "algo": row.algo,
@@ -279,14 +266,8 @@ def load_active_model(horizon: int = 1) -> TrainedModel:
         importance=json.loads(payload["importance_json"] or "{}"),
         n_train=payload["n_train"],
         n_test=payload["n_test"],
-        train_span=(
-            (str(payload["train_start"]), str(payload["train_end"]))
-            if payload["train_start"] else None
-        ),
-        test_span=(
-            (str(payload["test_start"]), str(payload["test_end"]))
-            if payload["test_start"] else None
-        ),
+        train_span=((str(payload["train_start"]), str(payload["train_end"])) if payload["train_start"] else None),
+        test_span=((str(payload["test_start"]), str(payload["test_end"])) if payload["test_start"] else None),
     )
 
 
@@ -305,9 +286,7 @@ def train_all_horizons(
         if dataset.frame.empty:
             log.warning("skipping horizon=%d: empty dataset", horizon)
             continue
-        models[horizon] = train_model(
-            dataset, algo=algo, persist=persist
-        )
+        models[horizon] = train_model(dataset, algo=algo, persist=persist)
     if not models:
         raise InsufficientData("no horizon produced a trainable dataset")
     return models
@@ -337,10 +316,8 @@ def score_symbols(
         if present < max(1, len(model.feature_columns) // 3):
             continue
         try:
-            probability = float(
-                model.predict_proba(last)[0]
-            )
-        except Exception as exc:  # noqa: BLE001 - one bad symbol must not stop the run
+            probability = float(model.predict_proba(last)[0])
+        except Exception as exc:
             log.debug("scoring failed for %s: %s", code, exc)
             continue
 
@@ -356,10 +333,7 @@ def score_symbols(
                 "interval_lo": None,
                 "interval_hi": None,
                 "features_json": json.dumps(
-                    {
-                        c: (None if last[c].isna().iloc[0] else float(last[c].iloc[0]))
-                        for c in model.feature_columns
-                    }
+                    {c: (None if last[c].isna().iloc[0] else float(last[c].iloc[0])) for c in model.feature_columns}
                 ),
             }
         )
@@ -377,8 +351,10 @@ def _persist_predictions(records: list[dict]) -> None:
         stmt = sqlite_insert(Prediction).values(records)
         stmt = stmt.on_conflict_do_update(
             index_elements=[
-                Prediction.model_id, Prediction.code,
-                Prediction.trade_date, Prediction.horizon,
+                Prediction.model_id,
+                Prediction.code,
+                Prediction.trade_date,
+                Prediction.horizon,
             ],
             set_={
                 "prob_up": stmt.excluded.prob_up,

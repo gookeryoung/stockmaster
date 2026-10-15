@@ -102,8 +102,7 @@ class MockProvider(BaseProvider):
     def fetch_snapshot(self, codes=None):
         wanted = [normalize(c) for c in codes] if codes else ["600519.SH", "000001.SZ"]
         return [
-            Snapshot(code=c, name=f"Mock {c}", price=100.0, preclose=99.0,
-                     pct_chg=1.01, source=self.name)
+            Snapshot(code=c, name=f"Mock {c}", price=100.0, preclose=99.0, pct_chg=1.01, source=self.name)
             for c in wanted
         ]
 

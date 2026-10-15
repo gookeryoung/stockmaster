@@ -17,8 +17,8 @@ BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from app.providers.base import Bar  # noqa: E402
-from app.providers.mock_provider import MockProvider, synthetic_bars  # noqa: E402
+from app.providers.base import Bar
+from app.providers.mock_provider import MockProvider, synthetic_bars
 
 
 def pytest_collection_modifyitems(config, items):
@@ -30,9 +30,7 @@ def pytest_collection_modifyitems(config, items):
     marker_expr = config.getoption("-m") or ""
     if "network" in marker_expr:
         return
-    skip_network = pytest.mark.skip(
-        reason="network test; run with `-m network` to enable"
-    )
+    skip_network = pytest.mark.skip(reason="network test; run with `-m network` to enable")
     for item in items:
         if "network" in item.keywords:
             item.add_marker(skip_network)

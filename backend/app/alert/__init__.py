@@ -13,17 +13,17 @@ from app.alert.engine import AlertEngine, TriggerCandidate
 from app.alert.rules import RULE_TYPES, RuleContext, describe_rule, normalize_params
 
 __all__ = [
-    "AlertEngine",
-    "TriggerCandidate",
     "RULE_TYPES",
-    "RuleContext",
-    "describe_rule",
-    "normalize_params",
-    "Notification",
+    "AlertEngine",
+    "BarkChannel",
     "Channel",
     "DatabaseChannel",
+    "Notification",
+    "RuleContext",
+    "TriggerCandidate",
     "WebhookChannel",
-    "BarkChannel",
+    "describe_rule",
     "get_channels",
+    "normalize_params",
     "notify",
 ]

@@ -18,8 +18,8 @@ from app.core.market import (
     limit_prices,
     lot_floor,
     next_trade_day_after,
-    price_limit_ratio,
     prev_trade_day,
+    price_limit_ratio,
 )
 from app.core.symbols import (
     from_baostock,

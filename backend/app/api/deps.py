@@ -51,14 +51,14 @@ def resolve_universe(limit: int = Query(default=300, ge=1, le=5000)) -> int:
 
 
 __all__ = [
-    "db_session",
+    "Depends",
+    "HTTPException",
+    "Query",
+    "Session",
+    "SymbolNotFound",
     "canonical_code",
+    "db_session",
     "require_instrument",
     "resolve_universe",
-    "Session",
-    "Depends",
-    "Query",
-    "HTTPException",
     "status",
-    "SymbolNotFound",
 ]

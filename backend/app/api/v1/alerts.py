@@ -85,9 +85,7 @@ def create_rule(payload: AlertRuleIn, session: Session = Depends(db_session)):
     try:
         normalized = normalize_params(payload.rule_type, payload.params)
     except DataError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
     rule = AlertRule(
         name=payload.name,
@@ -112,15 +110,11 @@ def update_rule(rule_id: int, payload: AlertRuleIn, session: Session = Depends(d
     """Replace a rule's definition."""
     rule = session.get(AlertRule, rule_id)
     if rule is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"rule {rule_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"rule {rule_id} not found")
     try:
         normalized = normalize_params(payload.rule_type, payload.params)
     except DataError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
     rule.name = payload.name
     rule.rule_type = payload.rule_type
@@ -142,12 +136,9 @@ def delete_rule(rule_id: int, session: Session = Depends(db_session)):
     """Delete a rule and its triggers."""
     rule = session.get(AlertRule, rule_id)
     if rule is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"rule {rule_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"rule {rule_id} not found")
     session.delete(rule)
     session.commit()
-    return None
 
 
 @router.get("/alerts/triggers", response_model=list[AlertTriggerOut])
@@ -170,9 +161,7 @@ def list_triggers(
 
 
 @router.patch("/alerts/triggers/{trigger_id}", response_model=AlertTriggerOut)
-def update_trigger(
-    trigger_id: int, payload: TriggerStatusUpdate, session: Session = Depends(db_session)
-):
+def update_trigger(trigger_id: int, payload: TriggerStatusUpdate, session: Session = Depends(db_session)):
     """Mark a trigger read or muted."""
     row = session.get(AlertTrigger, trigger_id)
     if row is None:
@@ -217,9 +206,7 @@ def preview_rule(payload: AlertRuleIn, session: Session = Depends(db_session)):
     try:
         normalized = normalize_params(payload.rule_type, payload.params)
     except DataError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
     engine = AlertEngine()
     probe = AlertRule(
@@ -250,9 +237,7 @@ def preview_rule(payload: AlertRuleIn, session: Session = Depends(db_session)):
             continue
         fired, message, snapshot = evaluate_rule(ctx, payload.rule_type, normalized)
         if fired:
-            matches.append(
-                {"code": code, "name": ctx.name, "message": message, "snapshot": snapshot}
-            )
+            matches.append({"code": code, "name": ctx.name, "message": message, "snapshot": snapshot})
         if len(matches) >= 50:
             break
 

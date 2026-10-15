@@ -47,9 +47,7 @@ def list_stocks(
     session: Session = Depends(db_session),
 ):
     """Search the security master."""
-    items = repo.list_instruments(
-        session, include_indices=include_indices, query=q
-    )
+    items = repo.list_instruments(session, include_indices=include_indices, query=q)
     if board:
         items = [i for i in items if i.board == board]
     total = len(items)
@@ -135,11 +133,7 @@ def market_overview(session: Session = Depends(db_session)):
         latest = bars[-1]
         previous = bars[-2] if len(bars) > 1 else None
         preclose = latest.preclose or (previous.close if previous else None)
-        pct_chg = (
-            (latest.close / preclose - 1.0) * 100.0
-            if preclose and preclose > 0
-            else latest.pct_chg
-        )
+        pct_chg = (latest.close / preclose - 1.0) * 100.0 if preclose and preclose > 0 else latest.pct_chg
         indices.append(
             IndexQuote(
                 code=index_code,
@@ -154,17 +148,15 @@ def market_overview(session: Session = Depends(db_session)):
     # Breadth from the most recent stored bar date across all symbols.
     from sqlalchemy import func, select
 
-    latest_date = session.execute(
-        select(func.max(DailyBar.trade_date)).where(DailyBar.adjust == "qfq")
-    ).scalar()
+    latest_date = session.execute(select(func.max(DailyBar.trade_date)).where(DailyBar.adjust == "qfq")).scalar()
 
     advancing = declining = unchanged = limit_up = limit_down = total = 0
     if latest_date is not None:
-        rows = session.execute(
-            select(DailyBar).where(
-                DailyBar.adjust == "qfq", DailyBar.trade_date == latest_date
-            )
-        ).scalars().all()
+        rows = (
+            session.execute(select(DailyBar).where(DailyBar.adjust == "qfq", DailyBar.trade_date == latest_date))
+            .scalars()
+            .all()
+        )
         total = len(rows)
         for row in rows:
             change = row.pct_chg
@@ -188,9 +180,7 @@ def market_overview(session: Session = Depends(db_session)):
     freshness = {
         "latest_bar_date": str(latest_date) if latest_date else None,
         "bar_count": repo.bar_count(session),
-        "instrument_count": session.execute(
-            select(func.count()).select_from(Instrument)
-        ).scalar(),
+        "instrument_count": session.execute(select(func.count()).select_from(Instrument)).scalar(),
     }
 
     return MarketOverview(
@@ -243,13 +233,8 @@ def get_indicators(
     )
     indicators = compute_indicators(frame)
     last = indicators.iloc[-1]
-    values = {
-        column: (None if pd.isna(last[column]) else float(last[column]))
-        for column in indicators.columns
-    }
-    return IndicatorSnapshot(
-        code=canon, trade_date=bars[-1].trade_date, values=values
-    )
+    values = {column: (None if pd.isna(last[column]) else float(last[column])) for column in indicators.columns}
+    return IndicatorSnapshot(code=canon, trade_date=bars[-1].trade_date, values=values)
 
 
 @router.get("/stocks/{code}/snapshot")
@@ -261,15 +246,13 @@ def get_snapshot(code: str, session: Session = Depends(db_session)):
 
     try:
         snapshots = get_registry().fetch_snapshot([canon])
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"snapshot unavailable: {exc}",
         ) from exc
     if not snapshots:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="no snapshot returned"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no snapshot returned")
     snap = snapshots[0]
     return {
         "code": snap.code,

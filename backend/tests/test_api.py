@@ -169,9 +169,7 @@ class TestBars:
 
     def test_hfq_is_explicitly_not_supported(self, client):
         """hfq is derived, not stored; the API must say so rather than 500."""
-        response = client.get(
-            "/api/v1/stocks/600519.SH/bars", params={"adjust": "hfq"}
-        )
+        response = client.get("/api/v1/stocks/600519.SH/bars", params={"adjust": "hfq"})
         assert response.status_code == 501
         assert "hfq" in response.json()["detail"]
 
@@ -184,9 +182,7 @@ class TestBars:
             assert "2025-02-01" <= bar["trade_date"] <= "2025-03-01"
 
     def test_calendar(self, client):
-        body = client.get(
-            "/api/v1/calendar", params={"start": "2025-01-01", "end": "2025-01-31"}
-        ).json()
+        body = client.get("/api/v1/calendar", params={"start": "2025-01-01", "end": "2025-01-31"}).json()
         assert body["days"]
         assert all(date.fromisoformat(d).weekday() < 5 for d in body["days"])
 
@@ -239,9 +235,7 @@ class TestAnalysis:
 
     def test_screen_min_score_filter(self, client):
         client.post("/api/v1/system/jobs/analytics")
-        rows = client.post(
-            "/api/v1/analysis/screen", json={"limit": 50, "min_score": 100.0}
-        ).json()
+        rows = client.post("/api/v1/analysis/screen", json={"limit": 50, "min_score": 100.0}).json()
         assert rows == []
 
     def test_correlation(self, client):
@@ -255,9 +249,7 @@ class TestAnalysis:
         assert body["matrix"][0][0] == pytest.approx(1.0)
 
     def test_correlation_requires_two_codes(self, client):
-        response = client.get(
-            "/api/v1/analysis/correlation", params={"codes": "600519.SH"}
-        )
+        response = client.get("/api/v1/analysis/correlation", params={"codes": "600519.SH"})
         assert response.status_code == 422
 
 
@@ -461,9 +453,7 @@ class TestAlerts:
         client.post("/api/v1/alerts/scan")
         trigger_id = client.get("/api/v1/alerts/triggers").json()[0]["id"]
 
-        updated = client.patch(
-            f"/api/v1/alerts/triggers/{trigger_id}", json={"status": "read"}
-        )
+        updated = client.patch(f"/api/v1/alerts/triggers/{trigger_id}", json={"status": "read"})
         assert updated.status_code == 200
         assert updated.json()["status"] == "read"
 
@@ -527,9 +517,7 @@ class TestAlerts:
 
 class TestWatchlist:
     def test_add_list_remove(self, client):
-        created = client.post(
-            "/api/v1/watchlist", json={"code": "600519.SH", "list_name": "default"}
-        )
+        created = client.post("/api/v1/watchlist", json={"code": "600519.SH", "list_name": "default"})
         assert created.status_code == 201, created.text
         item = created.json()
         assert item["code"] == "600519.SH"
@@ -543,9 +531,7 @@ class TestWatchlist:
 
     def test_add_is_idempotent(self, client):
         first = client.post("/api/v1/watchlist", json={"code": "600519.SH"}).json()
-        second = client.post(
-            "/api/v1/watchlist", json={"code": "600519.SH", "note": "更新备注"}
-        ).json()
+        second = client.post("/api/v1/watchlist", json={"code": "600519.SH", "note": "更新备注"}).json()
         assert first["id"] == second["id"]
         assert second["note"] == "更新备注"
         assert len(client.get("/api/v1/watchlist").json()) == 1

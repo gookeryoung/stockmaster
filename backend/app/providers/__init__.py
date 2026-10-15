@@ -25,9 +25,9 @@ __all__ = [
     "Bar",
     "BaseProvider",
     "InstrumentInfo",
-    "Snapshot",
     "ProviderRegistry",
     "ProviderState",
+    "Snapshot",
     "get_registry",
     "reset_registry",
 ]

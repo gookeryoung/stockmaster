@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from functools import partial
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import __version__
-from app.api.deps import canonical_code, db_session
+from app.api.deps import db_session
 from app.config import settings
 from app.core.logging import get_logger
 from app.core.symbols import normalize
@@ -50,21 +50,26 @@ def list_watchlist(
     session: Session = Depends(db_session),
 ):
     """Watchlist entries with current names resolved."""
-    rows = session.execute(
-        select(WatchlistItem)
-        .where(WatchlistItem.list_name == list_name)
-        .order_by(WatchlistItem.code)
-    ).scalars().all()
-    names = {
-        i.code: i.name
-        for i in session.execute(
-            select(Instrument).where(Instrument.code.in_([r.code for r in rows]))
-        ).scalars()
-    } if rows else {}
+    rows = (
+        session.execute(select(WatchlistItem).where(WatchlistItem.list_name == list_name).order_by(WatchlistItem.code))
+        .scalars()
+        .all()
+    )
+    names = (
+        {
+            i.code: i.name
+            for i in session.execute(select(Instrument).where(Instrument.code.in_([r.code for r in rows]))).scalars()
+        }
+        if rows
+        else {}
+    )
     return [
         WatchlistItemOut(
-            id=r.id, list_name=r.list_name, code=r.code,
-            name=names.get(r.code, ""), note=r.note,
+            id=r.id,
+            list_name=r.list_name,
+            code=r.code,
+            name=names.get(r.code, ""),
+            note=r.note,
         )
         for r in rows
     ]
@@ -75,16 +80,14 @@ def add_watchlist_item(payload: WatchlistItemIn, session: Session = Depends(db_s
     """Add a symbol to a watchlist (idempotent on list+code)."""
     try:
         canon = normalize(payload.code)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"invalid code: {exc}",
         ) from exc
 
     existing = session.execute(
-        select(WatchlistItem).where(
-            WatchlistItem.list_name == payload.list_name, WatchlistItem.code == canon
-        )
+        select(WatchlistItem).where(WatchlistItem.list_name == payload.list_name, WatchlistItem.code == canon)
     ).scalar_one_or_none()
     if existing is not None:
         existing.note = payload.note
@@ -92,17 +95,18 @@ def add_watchlist_item(payload: WatchlistItemIn, session: Session = Depends(db_s
         session.refresh(existing)
         item = existing
     else:
-        item = WatchlistItem(
-            list_name=payload.list_name, code=canon, note=payload.note
-        )
+        item = WatchlistItem(list_name=payload.list_name, code=canon, note=payload.note)
         session.add(item)
         session.commit()
         session.refresh(item)
 
     instrument = repo.get_instrument(session, canon)
     return WatchlistItemOut(
-        id=item.id, list_name=item.list_name, code=item.code,
-        name=instrument.name if instrument else "", note=item.note,
+        id=item.id,
+        list_name=item.list_name,
+        code=item.code,
+        name=instrument.name if instrument else "",
+        note=item.note,
     )
 
 
@@ -111,12 +115,9 @@ def remove_watchlist_item(item_id: int, session: Session = Depends(db_session)):
     """Remove a watchlist entry."""
     item = session.get(WatchlistItem, item_id)
     if item is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"item {item_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"item {item_id} not found")
     session.delete(item)
     session.commit()
-    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -132,30 +133,24 @@ def system_status(session: Session = Depends(db_session)):
     otherwise invisible, and a user needs to know when results are being served by
     a backup source.
     """
-    from app.db.session import get_engine
     from app.jobs.scheduler import scheduler_status
-    from app.providers.registry import reset_registry, get_registry
+    from app.providers.registry import get_registry
 
     try:
         provider_states = [ProviderStatus(**s) for s in get_registry().states()]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.warning("provider registry unavailable: %s", exc)
         provider_states = []
 
     bar_count = session.execute(select(func.count()).select_from(DailyBar)).scalar() or 0
-    instrument_count = (
-        session.execute(select(func.count()).select_from(Instrument)).scalar() or 0
-    )
+    instrument_count = session.execute(select(func.count()).select_from(Instrument)).scalar() or 0
     latest_bar = session.execute(select(func.max(DailyBar.trade_date))).scalar()
-    calendar_days = session.execute(
-        select(func.count())
-        .select_from(TradeCalendar)
-        .where(TradeCalendar.is_open.is_(True))
-    ).scalar() or 0
+    calendar_days = (
+        session.execute(select(func.count()).select_from(TradeCalendar).where(TradeCalendar.is_open.is_(True))).scalar()
+        or 0
+    )
 
-    tasks = session.execute(
-        select(DataSyncTask).order_by(DataSyncTask.updated_at.desc()).limit(20)
-    ).scalars().all()
+    tasks = session.execute(select(DataSyncTask).order_by(DataSyncTask.updated_at.desc()).limit(20)).scalars().all()
 
     return SystemStatus(
         version=__version__,
@@ -163,9 +158,7 @@ def system_status(session: Session = Depends(db_session)):
         database={
             "path": str(settings.db_path),
             "exists": settings.db_path.exists(),
-            "size_mb": round(settings.db_path.stat().st_size / 1e6, 2)
-            if settings.db_path.exists()
-            else 0.0,
+            "size_mb": round(settings.db_path.stat().st_size / 1e6, 2) if settings.db_path.exists() else 0.0,
         },
         providers=provider_states,
         scheduler=scheduler_status(),
@@ -174,9 +167,7 @@ def system_status(session: Session = Depends(db_session)):
             "instrument_count": instrument_count,
             "calendar_days": calendar_days,
             "latest_bar_date": str(latest_bar) if latest_bar else None,
-            "watchlist_size": session.execute(
-                select(func.count()).select_from(WatchlistItem)
-            ).scalar() or 0,
+            "watchlist_size": session.execute(select(func.count()).select_from(WatchlistItem)).scalar() or 0,
             "sync_tasks": [
                 {
                     "job": t.job,
@@ -207,17 +198,19 @@ def run_job(
     """
     from app.jobs import tasks
 
+    # partial (rather than lambda) keeps each entry a direct reference to the
+    # job function, so the mapping is data instead of deferred code.
     mapping = {
-        "calendar": lambda: tasks.job_sync_calendar(),
-        "instruments": lambda: tasks.job_sync_instruments(),
-        "index_daily": lambda: tasks.job_sync_index_daily(),
-        "daily": lambda: tasks.job_sync_daily(full=full),
-        "analytics": lambda: tasks.job_compute_analytics(),
-        "train": lambda: tasks.job_train_models(horizon=horizon),
-        "predict": lambda: tasks.job_predict(horizon=horizon),
-        "alerts": lambda: tasks.job_scan_alerts(),
-        "snapshot": lambda: tasks.job_snapshot_poll(),
-        "pipeline": lambda: tasks.run_pipeline(),
+        "calendar": tasks.job_sync_calendar,
+        "instruments": tasks.job_sync_instruments,
+        "index_daily": tasks.job_sync_index_daily,
+        "daily": partial(tasks.job_sync_daily, full=full),
+        "analytics": tasks.job_compute_analytics,
+        "train": partial(tasks.job_train_models, horizon=horizon),
+        "predict": partial(tasks.job_predict, horizon=horizon),
+        "alerts": tasks.job_scan_alerts,
+        "snapshot": tasks.job_snapshot_poll,
+        "pipeline": tasks.run_pipeline,
     }
 
     if job_name not in mapping:
@@ -228,7 +221,7 @@ def run_job(
 
     try:
         detail = mapping[job_name]()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.exception("job %s failed", job_name)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

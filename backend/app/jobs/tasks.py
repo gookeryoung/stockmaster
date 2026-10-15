@@ -13,32 +13,26 @@ from time import monotonic
 
 from app.alert.channels import Notification, notify
 from app.alert.engine import AlertEngine
-from app.config import settings
 from app.core.logging import get_logger
 from app.db.models import DataSyncTask, Prediction
 from app.db.session import session_scope
 from app.model.train import load_active_model, score_symbols
 from app.sync import repository as repo
-from app.sync.sync_service import SyncService, get_sync_service
+from app.sync.sync_service import get_sync_service
 
 log = get_logger(__name__)
 
 __all__ = [
-    "job_sync_calendar",
-    "job_sync_instruments",
-    "job_sync_daily",
     "job_compute_analytics",
     "job_predict",
     "job_scan_alerts",
-    "job_train_models",
     "job_snapshot_poll",
+    "job_sync_calendar",
+    "job_sync_daily",
+    "job_sync_instruments",
+    "job_train_models",
     "run_pipeline",
 ]
-
-
-def _job_record(job: str, target: str = "global"):
-    """Context-manage a DataSyncTask row for observability."""
-    return session_scope()
 
 
 # --------------------------------------------------------------------------- #
@@ -76,9 +70,7 @@ def job_sync_daily(full: bool = False, codes: list[str] | None = None) -> dict:
         return {"job": "daily", "processed": 0, "message": "no universe available"}
 
     started = monotonic()
-    report = service.sync_universe_daily(
-        codes, end=date.today(), resume=not full
-    )
+    report = service.sync_universe_daily(codes, end=date.today(), resume=not full)
     payload = report.as_dict()
     payload["elapsed_seconds"] = round(monotonic() - started, 2)
     return payload
@@ -95,20 +87,16 @@ def _default_universe() -> list[str]:
 
         from app.db.models import Instrument, WatchlistItem
 
-        watched = list(
-            session.execute(select(WatchlistItem.code)).scalars().all()
-        )
+        watched = list(session.execute(select(WatchlistItem.code)).scalars().all())
         if watched:
             return watched
         members = repo.index_members(session, "000300.SH")
         if members:
             return members
         return list(
-            session.execute(
-                select(Instrument.code).where(
-                    Instrument.status == 1, Instrument.is_index.is_(False)
-                )
-            ).scalars().all()
+            session.execute(select(Instrument.code).where(Instrument.status == 1, Instrument.is_index.is_(False)))
+            .scalars()
+            .all()
         )
 
 
@@ -123,7 +111,7 @@ def job_sync_index_daily(index_codes: tuple[str, ...] = ("000300.SH", "000905.SH
         start = (last - timedelta(days=1)) if last else date.today() - timedelta(days=365 * 5)
         try:
             bars = service._registry.fetch_index_daily(code, start, date.today())
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(f"{code}: {exc}")
             continue
         with session_scope() as session:
@@ -143,11 +131,11 @@ def job_compute_analytics(codes: list[str] | None = None) -> dict:
     cross-sectional standardisation is applied per trade_date across whatever
     universe is present, so it should be re-run after a universe change.
     """
-    from app.factors.compute import compute_factors, standardize_cross_section
-    from app.factors.compute import composite_score as factor_score
-    from app.indicators.compute import compute_indicators
-
     import pandas as pd
+
+    from app.factors.compute import composite_score as factor_score
+    from app.factors.compute import compute_factors, standardize_cross_section
+    from app.indicators.compute import compute_indicators
 
     codes = codes or _default_universe()
     started = monotonic()
@@ -181,26 +169,21 @@ def job_compute_analytics(codes: list[str] | None = None) -> dict:
                 {
                     "code": code,
                     "trade_date": last_date,
-                    **{
-                        column: _clean(indicators[column].iloc[-1])
-                        for column in indicators.columns
-                    },
+                    **{column: _clean(indicators[column].iloc[-1]) for column in indicators.columns},
                 }
             )
             factor_rows.append(
                 {
                     "code": code,
                     "trade_date": last_date,
-                    **{
-                        column: _clean(factors[column].iloc[-1])
-                        for column in factors.columns
-                    },
+                    **{column: _clean(factors[column].iloc[-1]) for column in factors.columns},
                 }
             )
 
     if not factor_rows:
         return {
-            "job": "analytics", "symbols": 0,
+            "job": "analytics",
+            "symbols": 0,
             "message": "no symbols had sufficient history",
         }
 
@@ -241,16 +224,31 @@ def _upsert_indicators(session, rows: list[dict]) -> None:
     from app.db.models import Indicator
 
     keys = [
-        "ma5", "ma10", "ma20", "ma60", "ma120", "ema12", "ema26",
-        "macd_dif", "macd_dea", "macd_hist", "rsi6", "rsi12", "rsi24",
-        "kdj_k", "kdj_d", "kdj_j", "boll_up", "boll_mid", "boll_low",
-        "atr14", "atr_pct", "obv", "vol_ratio",
+        "ma5",
+        "ma10",
+        "ma20",
+        "ma60",
+        "ma120",
+        "ema12",
+        "ema26",
+        "macd_dif",
+        "macd_dea",
+        "macd_hist",
+        "rsi6",
+        "rsi12",
+        "rsi24",
+        "kdj_k",
+        "kdj_d",
+        "kdj_j",
+        "boll_up",
+        "boll_mid",
+        "boll_low",
+        "atr14",
+        "atr_pct",
+        "obv",
+        "vol_ratio",
     ]
-    payload = [
-        {"code": r["code"], "trade_date": r["trade_date"],
-         **{k: r.get(k) for k in keys}}
-        for r in rows
-    ]
+    payload = [{"code": r["code"], "trade_date": r["trade_date"], **{k: r.get(k) for k in keys}} for r in rows]
     stmt = sqlite_insert(Indicator).values(payload)
     stmt = stmt.on_conflict_do_update(
         index_elements=[Indicator.code, Indicator.trade_date],
@@ -265,17 +263,30 @@ def _upsert_factors(session, rows: list[dict]) -> None:
     from app.db.models import Factor
 
     keys = [
-        "mom_5", "mom_20", "mom_60", "mom_120", "dist_high_252",
-        "vol_20", "vol_60", "atr_pct", "turnover_20", "amount_log_20",
-        "amihud_20", "ma_bull", "breakout_20", "rsi_14",
-        "z_mom_20", "z_mom_60", "z_vol_20", "z_turnover_20", "z_rsi_14",
-        "pct_mom_20", "pct_mom_60", "score",
+        "mom_5",
+        "mom_20",
+        "mom_60",
+        "mom_120",
+        "dist_high_252",
+        "vol_20",
+        "vol_60",
+        "atr_pct",
+        "turnover_20",
+        "amount_log_20",
+        "amihud_20",
+        "ma_bull",
+        "breakout_20",
+        "rsi_14",
+        "z_mom_20",
+        "z_mom_60",
+        "z_vol_20",
+        "z_turnover_20",
+        "z_rsi_14",
+        "pct_mom_20",
+        "pct_mom_60",
+        "score",
     ]
-    payload = [
-        {"code": r["code"], "trade_date": r["trade_date"],
-         **{k: _clean(r.get(k)) for k in keys}}
-        for r in rows
-    ]
+    payload = [{"code": r["code"], "trade_date": r["trade_date"], **{k: _clean(r.get(k)) for k in keys}} for r in rows]
     if not payload:
         return
     stmt = sqlite_insert(Factor).values(payload)
@@ -318,8 +329,7 @@ def job_train_models(algo: str = "hist_gbdt", horizon: int | None = None) -> dic
     return {
         "job": "train",
         "models": {
-            str(h): {"model_id": m.model_id, "auc": m.metrics.get("auc"),
-                     "ic": m.metrics.get("ic_spearman")}
+            str(h): {"model_id": m.model_id, "auc": m.metrics.get("auc"), "ic": m.metrics.get("ic_spearman")}
             for h, m in models.items()
         },
     }
@@ -331,7 +341,7 @@ def job_predict(horizon: int = 1) -> dict:
 
     try:
         model = load_active_model(horizon=horizon)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"job": "predict", "message": f"no active model: {exc}"}
 
     codes = _default_universe()
@@ -389,7 +399,7 @@ def job_snapshot_poll() -> dict:
         return {"job": "snapshot", "updated": 0}
     try:
         snapshots = get_registry().fetch_snapshot(codes[:200])
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"job": "snapshot", "error": str(exc)[:200]}
     return {"job": "snapshot", "updated": len(snapshots)}
 
@@ -423,7 +433,7 @@ def run_pipeline(*, train: bool = False, predict: bool = True) -> dict:
     for name, func in steps:
         try:
             results[name] = func()
-        except Exception as exc:  # noqa: BLE001 - one stage must not stop the chain
+        except Exception as exc:
             log.exception("pipeline stage %s failed", name)
             results[name] = {"error": f"{type(exc).__name__}: {exc}"}
 
@@ -436,9 +446,7 @@ def record_task_status(job: str, status: str, message: str = "") -> None:
     with session_scope() as session:
         from sqlalchemy import select
 
-        task = session.execute(
-            select(DataSyncTask).where(DataSyncTask.job == job)
-        ).scalar_one_or_none()
+        task = session.execute(select(DataSyncTask).where(DataSyncTask.job == job)).scalar_one_or_none()
         if task is None:
             task = DataSyncTask(job=job, target="job")
             session.add(task)
@@ -450,11 +458,16 @@ def record_task_status(job: str, status: str, message: str = "") -> None:
 def recent_predictions(limit: int = 50) -> list[dict]:
     """Latest stored predictions, for the dashboard."""
     with session_scope() as session:
-        rows = session.execute(
-            __import__("sqlalchemy").select(Prediction)
-            .order_by(Prediction.trade_date.desc(), Prediction.prob_up.desc())
-            .limit(limit)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                __import__("sqlalchemy")
+                .select(Prediction)
+                .order_by(Prediction.trade_date.desc(), Prediction.prob_up.desc())
+                .limit(limit)
+            )
+            .scalars()
+            .all()
+        )
     return [
         {
             "code": r.code,

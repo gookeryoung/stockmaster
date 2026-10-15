@@ -8,6 +8,7 @@ this path supports checkpointed resume.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from datetime import date
 
@@ -15,6 +16,20 @@ from app import __version__
 from app.core.logging import get_logger, setup_logging
 
 log = get_logger(__name__)
+
+
+def _force_utf8_stdout() -> None:
+    """Make CLI output UTF-8 regardless of the console code page.
+
+    When stdout is a pipe (e.g. `make stats`), Python picks the locale encoding —
+    on a Chinese Windows console that is GBK, which mangles the Chinese labels.
+    Reconfiguring to UTF-8 keeps output identical whether run directly or piped.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(encoding="utf-8", errors="replace")
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -74,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_stdout()
     args = build_parser().parse_args(argv)
     setup_logging(getattr(args, "log_level", "INFO"))
 
@@ -148,21 +164,15 @@ def _stats() -> int:
 
     with session_scope() as session:
         bars = session.execute(select(func.count()).select_from(DailyBar)).scalar() or 0
-        instruments = (
-            session.execute(select(func.count()).select_from(Instrument)).scalar() or 0
-        )
+        instruments = session.execute(select(func.count()).select_from(Instrument)).scalar() or 0
         latest = session.execute(select(func.max(DailyBar.trade_date))).scalar()
         models = (
             session.execute(
-                select(func.count()).select_from(ModelRegistry).where(
-                    ModelRegistry.is_active.is_(True)
-                )
+                select(func.count()).select_from(ModelRegistry).where(ModelRegistry.is_active.is_(True))
             ).scalar()
             or 0
         )
-        predictions = (
-            session.execute(select(func.count()).select_from(Prediction)).scalar() or 0
-        )
+        predictions = session.execute(select(func.count()).select_from(Prediction)).scalar() or 0
 
     print(f"数据库           : {settings.db_path}")
     print(f"证券数量         : {instruments}")
@@ -186,7 +196,6 @@ def _sync_daily(args) -> int:
     """
     from sqlalchemy import select
 
-    from app.config import settings
     from app.db.models import Instrument
     from app.db.session import session_scope
     from app.providers.registry import get_registry
@@ -198,9 +207,7 @@ def _sync_daily(args) -> int:
         if not codes and args.full:
             codes = list(
                 session.execute(
-                    select(Instrument.code).where(
-                        Instrument.status == 1, Instrument.is_index.is_(False)
-                    )
+                    select(Instrument.code).where(Instrument.status == 1, Instrument.is_index.is_(False))
                 ).scalars()
             )
         targets = codes or SyncService(get_registry()).core_universe()

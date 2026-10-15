@@ -27,7 +27,7 @@ from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["TrainedModel", "build_estimator", "AVAILABLE_ALGOS", "fit_model", "predict_proba"]
+__all__ = ["AVAILABLE_ALGOS", "TrainedModel", "build_estimator", "fit_model", "predict_proba"]
 
 AVAILABLE_ALGOS = ("hist_gbdt", "random_forest", "logistic")
 
@@ -58,9 +58,7 @@ class TrainedModel:
         """Positive-class probability for each row."""
         missing = [c for c in self.feature_columns if c not in feature_frame.columns]
         if missing:
-            raise ModelNotTrained(
-                f"feature frame missing columns required by {self.model_id}: {missing}"
-            )
+            raise ModelNotTrained(f"feature frame missing columns required by {self.model_id}: {missing}")
         matrix = feature_frame[self.feature_columns].astype(float).to_numpy()
         probabilities = self.estimator.predict_proba(matrix)
         # predict_proba returns columns ordered by classes_; find the 1 column.
@@ -81,30 +79,30 @@ def build_estimator(algo: str, *, seed: int | None = None, **overrides) -> Estim
     if algo == "hist_gbdt":
         from sklearn.ensemble import HistGradientBoostingClassifier
 
-        params = dict(
-            max_iter=300,
-            learning_rate=0.05,
-            max_depth=4,
-            min_samples_leaf=50,
-            l2_regularization=1.0,
-            early_stopping=False,
-            random_state=seed,
-        )
+        params = {
+            "max_iter": 300,
+            "learning_rate": 0.05,
+            "max_depth": 4,
+            "min_samples_leaf": 50,
+            "l2_regularization": 1.0,
+            "early_stopping": False,
+            "random_state": seed,
+        }
         params.update(overrides)
         return HistGradientBoostingClassifier(**params)
 
     if algo == "random_forest":
         from sklearn.ensemble import RandomForestClassifier
 
-        params = dict(
-            n_estimators=300,
-            max_depth=8,
-            min_samples_leaf=50,
-            max_features="sqrt",
-            class_weight="balanced_subsample",
-            n_jobs=-1,
-            random_state=seed,
-        )
+        params = {
+            "n_estimators": 300,
+            "max_depth": 8,
+            "min_samples_leaf": 50,
+            "max_features": "sqrt",
+            "class_weight": "balanced_subsample",
+            "n_jobs": -1,
+            "random_state": seed,
+        }
         params.update(overrides)
         return RandomForestClassifier(**params)
 
@@ -114,12 +112,12 @@ def build_estimator(algo: str, *, seed: int | None = None, **overrides) -> Estim
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import StandardScaler
 
-        params = dict(
-            C=0.5,
-            max_iter=2000,
-            class_weight="balanced",
-            random_state=seed,
-        )
+        params = {
+            "C": 0.5,
+            "max_iter": 2000,
+            "class_weight": "balanced",
+            "random_state": seed,
+        }
         params.update(overrides)
         return Pipeline(
             [
@@ -129,9 +127,7 @@ def build_estimator(algo: str, *, seed: int | None = None, **overrides) -> Estim
             ]
         )
 
-    raise ValueError(
-        f"unknown algo {algo!r}; expected one of {', '.join(AVAILABLE_ALGOS)}"
-    )
+    raise ValueError(f"unknown algo {algo!r}; expected one of {', '.join(AVAILABLE_ALGOS)}")
 
 
 def fit_model(
@@ -172,9 +168,7 @@ def fit_model(
         from sklearn.pipeline import Pipeline
 
         if isinstance(estimator, (HistGradientBoostingClassifier, RandomForestClassifier)):
-            pipeline = Pipeline(
-                [("impute", SimpleImputer(strategy="median")), ("model", estimator)]
-            )
+            pipeline = Pipeline([("impute", SimpleImputer(strategy="median")), ("model", estimator)])
             pipeline.fit(X, y)
             return pipeline
         raise
@@ -225,8 +219,5 @@ def extract_importance(estimator, feature_columns: list[str]) -> dict[str, float
     if total > 0:
         values = values / total
     return {
-        name: float(value)
-        for name, value in sorted(
-            zip(feature_columns, values, strict=False), key=lambda kv: -kv[1]
-        )
+        name: float(value) for name, value in sorted(zip(feature_columns, values, strict=False), key=lambda kv: -kv[1])
     }

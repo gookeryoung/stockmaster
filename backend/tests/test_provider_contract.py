@@ -12,7 +12,7 @@ upstream is one of the highest-impact failure modes for this app.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 
@@ -48,9 +48,7 @@ class TestBaostockContract:
         assert date(2026, 10, 15) in days
 
     def test_daily_fields_are_complete(self, baostock):
-        bars = baostock.fetch_daily(
-            "600519.SH", date(2026, 10, 8), date(2026, 10, 15), "raw"
-        )
+        bars = baostock.fetch_daily("600519.SH", date(2026, 10, 8), date(2026, 10, 15), "raw")
         assert bars
         last = bars[-1]
         # These five fields cannot be derived elsewhere and gate limit/ST logic.
@@ -92,7 +90,7 @@ class TestBaostockContract:
         baostock creates its socket without a timeout; the provider must set one
         so a stalled server raises instead of hanging the sync forever.
         """
-        import baostock.common.context as context
+        from baostock.common import context
 
         sock = getattr(context, "default_socket", None)
         assert sock is not None, "expected an active baostock socket"
@@ -166,7 +164,6 @@ class TestCrossSourceConsistency:
         assert len(common) >= 5, f"too few overlapping dates: {sorted(common)}"
         for day in sorted(common):
             values = [closes[src][day] for src in closes]
-            assert max(values) - min(values) < 0.02, (
-                f"qfd close disagreement on {day}: "
-                + ", ".join(f"{k}={v}" for k, v in closes.items())
+            assert max(values) - min(values) < 0.02, f"qfd close disagreement on {day}: " + ", ".join(
+                f"{k}={v}" for k, v in closes.items()
             )

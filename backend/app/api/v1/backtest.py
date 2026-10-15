@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date, timedelta
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import db_session
 from app.backtest.engine import BacktestConfig, run_backtest
 from app.core.logging import get_logger
-from app.db.models import BacktestEquity, BacktestRun, BacktestTrade, Instrument
+from app.db.models import BacktestEquity, BacktestRun, BacktestTrade
 from app.db.session import session_scope
 from app.schemas import (
     BacktestRequest,
@@ -56,16 +56,17 @@ def _load_bars(session: Session, codes: list[str], adjust: str = "qfq") -> dict:
     return out
 
 
-def _default_codes(session: Session, limit: int = 50) -> list[str]:
+def _default_codes(
+    session: Session,  # noqa: ARG001 - kept for call-site symmetry
+    limit: int = 50,
+) -> list[str]:
     from app.jobs.tasks import _default_universe
 
     codes = _default_universe()
     return codes[:limit]
 
 
-def _build_signals(
-    payload: BacktestRequest, session: Session, bars: dict
-) -> dict[date, dict[str, float]]:
+def _build_signals(payload: BacktestRequest, session: Session, bars: dict) -> dict[date, dict[str, float]]:
     """Translate a strategy choice into a date -> weights mapping.
 
     Every strategy reads point-in-time data only: the score/prediction stored for
@@ -81,8 +82,6 @@ def _build_signals(
         return buy_and_hold_signals(bars, codes[0], start=payload.start, weight=1.0)
 
     if payload.strategy == "ma_cross":
-        from app.core.market import next_trade_day_after
-
         signals: dict[date, dict[str, float]] = {}
         for code, frame in bars.items():
             frame = frame.sort_values("trade_date").reset_index(drop=True)
@@ -110,16 +109,12 @@ def _build_signals(
         history = build_score_history(bars)
         if history.empty:
             return {}
-        return _thin_by_cadence(
-            top_n_per_date(history, payload.top_n), payload.rebalance_days
-        )
+        return _thin_by_cadence(top_n_per_date(history, payload.top_n), payload.rebalance_days)
 
     if payload.strategy == "prediction_top_n":
         from app.db.models import Prediction
 
-        rows = session.execute(
-            select(Prediction).order_by(Prediction.trade_date.asc())
-        ).scalars().all()
+        rows = session.execute(select(Prediction).order_by(Prediction.trade_date.asc())).scalars().all()
         by_date: dict[date, list[tuple[float, str]]] = {}
         for row in rows:
             if row.prob_up is None or row.code not in bars:
@@ -141,9 +136,7 @@ def _build_signals(
     )
 
 
-def _thin_by_cadence(
-    signals: dict[date, dict[str, float]], rebalance_days: int
-) -> dict[date, dict[str, float]]:
+def _thin_by_cadence(signals: dict[date, dict[str, float]], rebalance_days: int) -> dict[date, dict[str, float]]:
     """Keep only the first signal in each ``rebalance_days`` window.
 
     Without this, a daily score would trade every day — inflating turnover and
@@ -237,11 +230,18 @@ def run(payload: BacktestRequest, session: Session = Depends(db_session)):
         ],
         trades=[
             TradeOut(
-                code=row.code, side=row.side, trade_date=row.trade_date,
-                price=row.price, shares=row.shares, gross=row.gross,
-                commission=row.commission, stamp_tax=row.stamp_tax,
-                transfer_fee=row.transfer_fee, slippage=row.slippage,
-                pnl=row.pnl, reason=row.reason,
+                code=row.code,
+                side=row.side,
+                trade_date=row.trade_date,
+                price=row.price,
+                shares=row.shares,
+                gross=row.gross,
+                commission=row.commission,
+                stamp_tax=row.stamp_tax,
+                transfer_fee=row.transfer_fee,
+                slippage=row.slippage,
+                pnl=row.pnl,
+                reason=row.reason,
             )
             for row in result.trades.itertuples()
         ],
@@ -249,7 +249,13 @@ def run(payload: BacktestRequest, session: Session = Depends(db_session)):
     )
 
 
-def _persist_run(run_id: str, payload: BacktestRequest, result, config, signals) -> None:
+def _persist_run(
+    run_id: str,
+    payload: BacktestRequest,
+    result,
+    config,  # noqa: ARG001 - costs already reflected in result.metrics
+    signals,  # noqa: ARG001 - persisted via payload for reproducibility
+) -> None:
     """Store the run summary, equity curve and trades.
 
     The parent ``backtest_runs`` row is flushed before the children are inserted:
@@ -319,9 +325,7 @@ def list_runs(
     session: Session = Depends(db_session),
 ):
     """Recent backtest runs."""
-    rows = session.execute(
-        select(BacktestRun).order_by(BacktestRun.created_at.desc()).limit(limit)
-    ).scalars()
+    rows = session.execute(select(BacktestRun).order_by(BacktestRun.created_at.desc()).limit(limit)).scalars()
     return [
         BacktestSummary(
             run_id=row.id,
@@ -339,18 +343,12 @@ def get_run(run_id: str, session: Session = Depends(db_session)):
     """Full stored result for a run."""
     row = session.get(BacktestRun, run_id)
     if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"run {run_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"run {run_id} not found")
     equity = session.execute(
-        select(BacktestEquity)
-        .where(BacktestEquity.run_id == run_id)
-        .order_by(BacktestEquity.trade_date)
+        select(BacktestEquity).where(BacktestEquity.run_id == run_id).order_by(BacktestEquity.trade_date)
     ).scalars()
     trades = session.execute(
-        select(BacktestTrade)
-        .where(BacktestTrade.run_id == run_id)
-        .order_by(BacktestTrade.trade_date)
+        select(BacktestTrade).where(BacktestTrade.run_id == run_id).order_by(BacktestTrade.trade_date)
     ).scalars()
 
     return {
@@ -373,11 +371,18 @@ def get_run(run_id: str, session: Session = Depends(db_session)):
         ],
         "trades": [
             {
-                "code": t.code, "side": t.side, "trade_date": t.trade_date,
-                "price": t.price, "shares": t.shares, "gross": t.gross,
-                "commission": t.commission, "stamp_tax": t.stamp_tax,
-                "transfer_fee": t.transfer_fee, "slippage": t.slippage,
-                "pnl": t.pnl, "reason": t.reason,
+                "code": t.code,
+                "side": t.side,
+                "trade_date": t.trade_date,
+                "price": t.price,
+                "shares": t.shares,
+                "gross": t.gross,
+                "commission": t.commission,
+                "stamp_tax": t.stamp_tax,
+                "transfer_fee": t.transfer_fee,
+                "slippage": t.slippage,
+                "pnl": t.pnl,
+                "reason": t.reason,
             }
             for t in trades
         ],

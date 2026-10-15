@@ -17,7 +17,7 @@ from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["Notification", "Channel", "DatabaseChannel", "WebhookChannel", "get_channels"]
+__all__ = ["Channel", "DatabaseChannel", "Notification", "WebhookChannel", "get_channels"]
 
 
 @dataclass
@@ -50,7 +50,7 @@ class DatabaseChannel:
 
     name = "database"
 
-    def send(self, notification: Notification) -> bool:  # noqa: ARG002
+    def send(self, notification: Notification) -> bool:
         return True
 
 
@@ -83,11 +83,9 @@ class WebhookChannel:
             response = httpx.post(self.url, json=payload, timeout=self.timeout)
             ok = 200 <= response.status_code < 300
             if not ok:
-                log.warning(
-                    "webhook returned %s for %s", response.status_code, notification.code
-                )
+                log.warning("webhook returned %s for %s", response.status_code, notification.code)
             return ok
-        except Exception as exc:  # noqa: BLE001 - delivery must never break a scan
+        except Exception as exc:
             log.warning("webhook delivery failed: %s", exc)
             return False
 
@@ -106,16 +104,13 @@ class BarkChannel:
             return False
         from urllib.parse import quote
 
-        url = (
-            f"{self.base_url}/{quote(notification.title)}/"
-            f"{quote(notification.body)}"
-        )
+        url = f"{self.base_url}/{quote(notification.title)}/{quote(notification.body)}"
         try:
             import httpx
 
             response = httpx.get(url, timeout=self.timeout)
             return 200 <= response.status_code < 300
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.warning("bark delivery failed: %s", exc)
             return False
 
@@ -145,7 +140,7 @@ def notify(notifications: list[Notification]) -> dict[str, int]:
             try:
                 if channel.send(notification):
                     delivered += 1
-            except Exception as exc:  # noqa: BLE001 - a channel must not break others
+            except Exception as exc:
                 log.warning("channel %s raised: %s", channel.name, exc)
         results[channel.name] = delivered
     return results

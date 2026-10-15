@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date
-
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -24,11 +22,25 @@ router = APIRouter(tags=["analysis"])
 
 #: Factor columns exposed to clients.
 FACTOR_FIELDS = (
-    "mom_5", "mom_20", "mom_60", "mom_120", "dist_high_252",
-    "vol_20", "vol_60", "atr_pct",
-    "turnover_20", "amount_log_20", "amihud_20",
-    "ma_bull", "breakout_20", "rsi_14",
-    "z_mom_20", "z_mom_60", "z_vol_20", "z_turnover_20", "z_rsi_14",
+    "mom_5",
+    "mom_20",
+    "mom_60",
+    "mom_120",
+    "dist_high_252",
+    "vol_20",
+    "vol_60",
+    "atr_pct",
+    "turnover_20",
+    "amount_log_20",
+    "amihud_20",
+    "ma_bull",
+    "breakout_20",
+    "rsi_14",
+    "z_mom_20",
+    "z_mom_60",
+    "z_vol_20",
+    "z_turnover_20",
+    "z_rsi_14",
 )
 PERCENTILE_FIELDS = ("pct_mom_20", "pct_mom_60")
 
@@ -45,19 +57,13 @@ def get_factors(code: str, session: Session = Depends(db_session)):
     instrument = require_instrument(session, canon)
 
     row = session.execute(
-        select(Factor)
-        .where(Factor.code == canon)
-        .order_by(Factor.trade_date.desc())
-        .limit(1)
+        select(Factor).where(Factor.code == canon).order_by(Factor.trade_date.desc()).limit(1)
     ).scalar_one_or_none()
 
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=(
-                f"no factors stored for {canon}; run the analytics job "
-                "(POST /system/jobs/analytics) first"
-            ),
+            detail=(f"no factors stored for {canon}; run the analytics job (POST /system/jobs/analytics) first"),
         )
 
     return FactorSnapshot(
@@ -79,14 +85,10 @@ def screen(payload: ScreenRequest, session: Session = Depends(db_session)):
 
     if payload.trade_date is None:
         # Default to the most recent date that actually has factors.
-        latest = session.execute(
-            select(Factor.trade_date).order_by(Factor.trade_date.desc()).limit(1)
-        ).scalar()
+        latest = session.execute(select(Factor.trade_date).order_by(Factor.trade_date.desc()).limit(1)).scalar()
         if latest is None:
             return []
-        stmt = select(Factor).where(Factor.trade_date == latest).order_by(
-            Factor.score.desc().nullslast()
-        )
+        stmt = select(Factor).where(Factor.trade_date == latest).order_by(Factor.score.desc().nullslast())
 
     rows = list(session.execute(stmt).scalars())
 
@@ -95,9 +97,7 @@ def screen(payload: ScreenRequest, session: Session = Depends(db_session)):
 
     instruments = {
         i.code: i
-        for i in session.execute(
-            select(Instrument).where(Instrument.code.in_([r.code for r in rows]))
-        ).scalars()
+        for i in session.execute(select(Instrument).where(Instrument.code.in_([r.code for r in rows]))).scalars()
     }
 
     out: list[ScreenRow] = []

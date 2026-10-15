@@ -162,8 +162,10 @@ class TestComputeFactors:
             mask = a.notna() & b.notna()
             assert mask.sum() > 0, f"{column} had no overlapping non-null values"
             np.testing.assert_allclose(
-                a[mask].to_numpy(), b[mask].to_numpy(),
-                rtol=1e-9, atol=1e-9,
+                a[mask].to_numpy(),
+                b[mask].to_numpy(),
+                rtol=1e-9,
+                atol=1e-9,
                 err_msg=f"{column} leaks future information",
             )
 
@@ -250,10 +252,9 @@ class TestCompositeScore:
     def test_score_uses_declared_weights(self):
         result = standardize_cross_section(cross_section())
         result["score"] = composite_score(result)
-        manual = sum(
-            result[column].fillna(0.0) * weight
-            for column, weight in DEFAULT_SCORE_WEIGHTS.items()
-        ) / sum(abs(w) for w in DEFAULT_SCORE_WEIGHTS.values())
+        manual = sum(result[column].fillna(0.0) * weight for column, weight in DEFAULT_SCORE_WEIGHTS.items()) / sum(
+            abs(w) for w in DEFAULT_SCORE_WEIGHTS.values()
+        )
         assert list(result["score"]) == pytest.approx(list(manual))
 
     def test_high_momentum_beats_low_momentum(self):

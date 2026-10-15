@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, MetaData
 from sqlalchemy.orm import DeclarativeBase
@@ -25,7 +25,7 @@ class Base(DeclarativeBase):
 
 def utcnow() -> datetime:
     """Timezone-aware UTC now (SQLite stores naive; we keep UTC semantics)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 TZDateTime = DateTime(timezone=True)

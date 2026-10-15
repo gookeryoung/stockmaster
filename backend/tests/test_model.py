@@ -35,9 +35,11 @@ from app.model.models import (
     build_estimator,
     extract_importance,
     fit_model,
+)
+from app.model.models import (
     predict_proba as model_predict_proba,
 )
-from app.model.train import train_model, score_symbols
+from app.model.train import score_symbols, train_model
 
 
 def bars(n: int = 400, seed: int = 1, start: date = date(2024, 1, 1), code: str = "600519.SH"):
@@ -110,8 +112,10 @@ class TestSymbolFeatures:
             mask = a.notna() & b.notna()
             assert mask.sum() > 0, f"{column} had no overlapping values"
             np.testing.assert_allclose(
-                a[mask].to_numpy(), b[mask].to_numpy(),
-                rtol=1e-9, atol=1e-9,
+                a[mask].to_numpy(),
+                b[mask].to_numpy(),
+                rtol=1e-9,
+                atol=1e-9,
                 err_msg=f"{column} leaks future information",
             )
 
@@ -122,9 +126,7 @@ class TestLabels:
         labelled = add_labels(build_symbol_features(df), horizon=5)
         # Recompute independently on the feature frame.
         close = labelled["close"].to_numpy()
-        assert labelled["forward_return"].iloc[10] == pytest.approx(
-            close[15] / close[10] - 1.0
-        )
+        assert labelled["forward_return"].iloc[10] == pytest.approx(close[15] / close[10] - 1.0)
 
     def test_label_matches_sign_of_forward_return(self):
         labelled = add_labels(build_symbol_features(bars(200)), horizon=1)
@@ -153,15 +155,11 @@ class TestBuildDataset:
         dataset = build_dataset(data, horizon=1)
         assert dataset.frame["code"].nunique() == 2
         assert len(dataset) > 0
-        assert list(dataset.frame.columns[:5]) == [
-            "trade_date", "code", "close", "forward_return", "label"
-        ]
+        assert list(dataset.frame.columns[:5]) == ["trade_date", "code", "close", "forward_return", "label"]
 
     def test_rows_sorted_by_date_then_code(self):
-        dataset = build_dataset(
-            {"600519.SH": bars(200, seed=1), "000001.SZ": bars(200, seed=2)}, horizon=1
-        )
-        keys = list(zip(dataset.frame["trade_date"], dataset.frame["code"]))
+        dataset = build_dataset({"600519.SH": bars(200, seed=1), "000001.SZ": bars(200, seed=2)}, horizon=1)
+        keys = list(zip(dataset.frame["trade_date"], dataset.frame["code"], strict=False))
         assert keys == sorted(keys)
 
     def test_empty_input_gives_empty_dataset(self):
@@ -236,9 +234,7 @@ class TestChronologicalSplit:
     def test_validation_slice_precedes_test_and_is_purged(self):
         horizon = 5
         dataset = self.make(horizon=horizon)
-        split = chronological_split(
-            dataset, test_fraction=0.2, validation_fraction=0.2
-        )
+        split = chronological_split(dataset, test_fraction=0.2, validation_fraction=0.2)
         assert not split.validation.empty
         assert split.validation["trade_date"].max() < split.test["trade_date"].min()
 
@@ -284,9 +280,7 @@ class TestChronologicalSplit:
 
     def test_validation_larger_than_timeline_also_guards(self):
         dataset = build_dataset({"600519.SH": bars(120)}, horizon=1)
-        split = chronological_split(
-            dataset, test_fraction=0.6, validation_fraction=0.6
-        )
+        split = chronological_split(dataset, test_fraction=0.6, validation_fraction=0.6)
         assert split.test.empty
 
     def test_empty_dataset(self):
@@ -334,9 +328,7 @@ class TestEstimators:
             pytest.skip("no dataset")
         split = chronological_split(dataset, test_fraction=0.2)
         estimator = fit_model(algo, split.train, dataset.feature_columns)
-        probabilities = model_predict_proba(
-            estimator, split.test, dataset.feature_columns
-        )
+        probabilities = model_predict_proba(estimator, split.test, dataset.feature_columns)
         assert probabilities.shape[0] == len(split.test)
         assert ((probabilities >= 0) & (probabilities <= 1)).all()
 
@@ -346,9 +338,7 @@ class TestEstimators:
         split = chronological_split(dataset, test_fraction=0.2)
         estimator = fit_model("hist_gbdt", split.train, dataset.feature_columns)
         helper = model_predict_proba(estimator, split.test, dataset.feature_columns)
-        raw = estimator.predict_proba(
-            split.test[dataset.feature_columns].astype(float).to_numpy()
-        )
+        raw = estimator.predict_proba(split.test[dataset.feature_columns].astype(float).to_numpy())
         classes = list(estimator.classes_)
         assert list(helper) == pytest.approx(list(raw[:, classes.index(1)]))
 
@@ -512,9 +502,7 @@ class TestTrainModel:
             assert reloaded.feature_columns == model.feature_columns
             # Reloaded model must give identical predictions.
             split = chronological_split(dataset, test_fraction=0.2)
-            assert np.allclose(
-                model.predict_proba(split.test), reloaded.predict_proba(split.test)
-            )
+            assert np.allclose(model.predict_proba(split.test), reloaded.predict_proba(split.test))
         finally:
             session_mod.reset_engine()
             get_settings.cache_clear()

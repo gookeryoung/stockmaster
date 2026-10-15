@@ -24,16 +24,13 @@ from __future__ import annotations
 
 import contextlib
 import io
-import socket
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
-from time import monotonic
 
 from app.config import settings
 from app.core.errors import DataError, ProviderError, ProviderTimeout
 from app.core.logging import get_logger
-from app.core.symbols import from_baostock, infer_exchange, normalize, to_baostock
+from app.core.symbols import from_baostock, normalize, to_baostock
 from app.providers.base import (
     ADJUST_HFQ,
     ADJUST_QFQ,
@@ -48,9 +45,7 @@ log = get_logger(__name__)
 # baostock adjustflag: 1=后复权, 2=前复权, 3=不复权
 _ADJUST_TO_FLAG = {ADJUST_RAW: "3", ADJUST_QFQ: "2", ADJUST_HFQ: "1"}
 
-_DAILY_FIELDS = (
-    "date,code,open,high,low,close,preclose,volume,amount,turn,pctChg,peTTM,pbMRQ,isST"
-)
+_DAILY_FIELDS = "date,code,open,high,low,close,preclose,volume,amount,turn,pctChg,peTTM,pbMRQ,isST"
 
 # Board classification by code prefix (SH/SZ/BJ).
 _BOARD_RULES = (
@@ -78,7 +73,7 @@ class BaostockProvider(BaseProvider):
     @staticmethod
     def _bs():
         """Import baostock lazily so module import stays cheap and testable."""
-        import baostock as bs  # noqa: PLC0415
+        import baostock as bs
 
         return bs
 
@@ -92,7 +87,7 @@ class BaostockProvider(BaseProvider):
     def _apply_socket_timeout(self) -> None:
         """Set a timeout on baostock's global socket — the root-cause fix."""
         try:
-            import baostock.common.context as context  # noqa: PLC0415
+            from baostock.common import context
 
             sock = getattr(context, "default_socket", None)
             if sock is not None:
@@ -110,8 +105,7 @@ class BaostockProvider(BaseProvider):
                 res = bs.login()
             if getattr(res, "error_code", "1") != "0":
                 raise ProviderError(
-                    f"baostock login failed: {getattr(res, 'error_code', '?')} "
-                    f"{getattr(res, 'error_msg', '')}"
+                    f"baostock login failed: {getattr(res, 'error_code', '?')} {getattr(res, 'error_msg', '')}"
                 )
             self._logged_in = True
             self._closed = False
@@ -142,7 +136,7 @@ class BaostockProvider(BaseProvider):
         server is not reading.
         """
         try:
-            import baostock.common.context as context  # noqa: PLC0415
+            from baostock.common import context
 
             sock = getattr(context, "default_socket", None)
             if sock is not None:
@@ -162,7 +156,7 @@ class BaostockProvider(BaseProvider):
             self.login()
             try:
                 yield self._session
-            except (TimeoutError, socket.timeout) as exc:
+            except TimeoutError as exc:
                 self.force_close()
                 raise ProviderTimeout(f"baostock socket timeout: {exc}") from exc
             except OSError as exc:
@@ -184,18 +178,15 @@ class BaostockProvider(BaseProvider):
         def run() -> None:
             try:
                 result.append(fn())
-            except BaseException as exc:  # noqa: BLE001 - surfaced below
+            except BaseException as exc:
                 error.append(exc)
 
         thread = threading.Thread(target=run, name=f"baostock-{what}", daemon=True)
-        start = monotonic()
         thread.start()
         thread.join(deadline)
         if thread.is_alive():
             self.force_close()
-            raise ProviderTimeout(
-                f"baostock {what} exceeded {deadline:.0f}s deadline; socket reset"
-            )
+            raise ProviderTimeout(f"baostock {what} exceeded {deadline:.0f}s deadline; socket reset")
         if error:
             self.force_close()
             raise ProviderError(f"baostock {what} failed: {error[0]}") from error[0]
@@ -223,7 +214,7 @@ class BaostockProvider(BaseProvider):
 
     @staticmethod
     def _board_for(code: str) -> str:
-        digits = code.split(".")[0]
+        digits = code.split(".", maxsplit=1)[0]
         for prefixes, board in _BOARD_RULES:
             if digits.startswith(prefixes):
                 return board
@@ -236,10 +227,7 @@ class BaostockProvider(BaseProvider):
         rows: list[list[str]] = []
         while True:
             if getattr(rs, "error_code", "0") != "0":
-                raise ProviderError(
-                    f"baostock {what} error {rs.error_code}: "
-                    f"{getattr(rs, 'error_msg', '')}"
-                )
+                raise ProviderError(f"baostock {what} error {rs.error_code}: {getattr(rs, 'error_msg', '')}")
             if not rs.next():
                 break
             rows.append(rs.get_row_data())
@@ -277,20 +265,41 @@ class BaostockProvider(BaseProvider):
         for row in rows:
             if len(row) < 14:
                 continue
-            (d, _code, raw_open, raw_high, raw_low, raw_close, preclose,
-             volume, amount, turn, pct_chg, pe_ttm, pb_mrq, is_st) = row[:14]
+            (
+                d,
+                _code,
+                raw_open,
+                raw_high,
+                raw_low,
+                raw_close,
+                preclose,
+                volume,
+                amount,
+                turn,
+                pct_chg,
+                pe_ttm,
+                pb_mrq,
+                is_st,
+            ) = row[:14]
             # A suspended day has empty prices; skip rather than store zeros.
             if not str(raw_open).strip() or not str(raw_close).strip():
                 continue
-            o, h, lo, c = (self._to_float(raw_open), self._to_float(raw_high),
-                           self._to_float(raw_low), self._to_float(raw_close))
+            o, h, lo, c = (
+                self._to_float(raw_open),
+                self._to_float(raw_high),
+                self._to_float(raw_low),
+                self._to_float(raw_close),
+            )
             if None in (o, h, lo, c):
                 continue
             bars.append(
                 Bar(
                     code=canon,
                     trade_date=self._to_date(d),
-                    open=o, high=h, low=lo, close=c,
+                    open=o,
+                    high=h,
+                    low=lo,
+                    close=c,
                     volume=self._to_float(volume) or 0.0,
                     amount=self._to_float(amount) or 0.0,
                     preclose=self._to_float(preclose),
@@ -397,7 +406,7 @@ class BaostockProvider(BaseProvider):
         out = row[3] if len(row) > 3 else ""
         type_ = row[4] if len(row) > 4 else "1"
         status = row[5] if len(row) > 5 else "1"
-        digits, exchange = canon.split(".")
+        _digits, exchange = canon.split(".")
         list_date = self._to_date(ipo) if str(ipo).strip() else None
         delist_date = self._to_date(out) if str(out).strip() else None
         return InstrumentInfo(
@@ -418,7 +427,7 @@ class BaostockProvider(BaseProvider):
             end = date.today()
             days = self.fetch_calendar(end - timedelta(days=10), end)
             return isinstance(days, list)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.debug("baostock health check failed: %s", exc)
             return False
 
@@ -441,7 +450,7 @@ class BaostockProvider(BaseProvider):
         from concurrent.futures import ThreadPoolExecutor as _TPE
 
         results: dict[str, list[Bar]] = {}
-        import baostock.common.context as context  # noqa: PLC0415
+        from baostock.common import context
 
         swap_lock = threading.Lock()
 
@@ -457,7 +466,7 @@ class BaostockProvider(BaseProvider):
                         sock.settimeout(self._timeout)
                 bars = self.fetch_daily(symbol, start, end, adjust)
                 return symbol, bars, ""
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 return symbol, None, f"{type(exc).__name__}: {exc}"
             finally:
                 with swap_lock:

@@ -30,10 +30,20 @@
 
 ### 2.2 安装
 
+**方式一：Make（推荐，等价于下方手动步骤）**
+
+```bash
+make sync            # 后端依赖（uv sync --extra dev）
+make frontend-sync   # 前端依赖（pnpm install）
+make frontend-build  # 构建前端
+make init            # 初始化数据库
+```
+
+**方式二：手动**
+
 ```powershell
 # 1) 后端
-uv venv .venv --python 3.13
-uv pip install --python .venv\Scripts\python.exe -e ".[dev]"
+uv sync --extra dev
 
 # 2) 前端
 cd frontend
@@ -122,6 +132,11 @@ cd frontend; pnpm dev     # http://127.0.0.1:5173
 
 ```
 stockmaster/
+├─ Makefile            # 快捷命令（make help 查看全部）
+├─ pyproject.toml      # 依赖、pytest/coverage/bumpversion 配置
+├─ ruff.toml           # lint 规则（与 cndb 口径一致）
+├─ .pre-commit-config.yaml
+├─ .gitattributes      # 行尾规范化
 ├─ backend/app/
 │  ├─ providers/    # 数据源抽象 + baostock/腾讯/新浪 + 熔断注册表
 │  ├─ sync/         # 仓储、增量同步、断点续传、复权重建
@@ -134,7 +149,7 @@ stockmaster/
 │  ├─ api/v1/       # FastAPI 路由
 │  └─ cli.py        # 命令行（全市场回补等）
 ├─ frontend/src/    # React + ECharts 工作台
-├─ backend/tests/   # 386 项测试
+├─ backend/tests/   # 374 项离线测试 + 12 项网络契约测试
 └─ scripts/         # 启动、验收脚本
 ```
 
@@ -157,21 +172,52 @@ stockmaster/
 
 ## 6. 测试与验收
 
+```bash
+make test            # 离线测试（并行；网络测试自动跳过）
+make cov             # 测试 + 覆盖率报告（当前 76%，门槛 75%）
+make test-network    # 网络契约测试（验证真实数据源与跨源一致性）
+make acceptance      # 端到端实盘验收（真实数据走完整链路）
+make lint            # ruff check + format 校验
+make check-fast      # 轻量静态门禁（lint + 前端类型检查，不含测试）
+make check           # 全套门禁（lint + 前端类型检查 + 测试 + 覆盖率）
+```
+
+等价的手动命令：
+
 ```powershell
-# 离线测试（默认，网络测试自动跳过）
-.venv\Scripts\python.exe -m pytest backend/tests -q
-
-# 网络契约测试（验证真实数据源与跨源一致性）
+.venv\Scripts\python.exe -m pytest backend/tests -q        # 离线
 .venv\Scripts\python.exe -m pytest backend/tests -q -m network
-
-# 端到端实盘验收（真实数据走完整链路）
 .venv\Scripts\python.exe -u scripts\acceptance_live.py
-
-# 前端类型检查与构建
 cd frontend; pnpm exec tsc --noEmit; pnpm build
 ```
 
-当前状态：**386 项离线测试全绿**，12 项网络契约测试需显式开启，实盘验收全部通过。
+当前状态：**374 项离线测试通过（12 项网络测试默认跳过）**，12 项网络契约测试实盘通过，
+覆盖率 **76.25%**，实盘端到端验收全部通过。
+
+### 6.1 全部 Make 命令
+
+运行 `make help` 可随时查看。常用命令：
+
+| 命令 | 说明 |
+|---|---|
+| `make sync` / `make init` | 安装后端依赖 / 初始化数据库 |
+| `make frontend-sync` / `make frontend-build` | 安装前端依赖 / 构建前端 |
+| `make serve` | 启动服务（默认 `127.0.0.1:8770`，可用 `DEV_PORT=` 覆盖） |
+| `make dev` | 显示开发模式两终端启动方式 |
+| `make stats` | 数据库概况（证券数、日线行数、最新行情日、模型数） |
+| `make acceptance` | 端到端实盘验收 |
+| `make clean` | 清理构建产物与缓存 |
+| `make bump` | 版本号 bump（`bump-my-version`，同步 pyproject 与 `__init__`） |
+
+### 6.2 Git 钩子（可选）
+
+```bash
+uv run --with prek prek install --force   # 安装钩子
+uv run --with prek prek run --all-files   # 手动全量运行
+```
+
+钩子使用 ruff **0.16.8**，与 `pyproject.toml` 的 `ruff==` 及 `.pre-commit-config.yaml` 的 `rev` 三处保持一致，
+避免同一提交在本地与 CI 得到不同结果。
 
 ---
 

@@ -14,10 +14,10 @@ import pandas as pd
 
 __all__ = [
     "classification_metrics",
-    "information_coefficient",
-    "quantile_returns",
     "decile_spread",
     "evaluate_predictions",
+    "information_coefficient",
+    "quantile_returns",
 ]
 
 
@@ -30,9 +30,7 @@ def _safe_auc(y_true: np.ndarray, scores: np.ndarray) -> float | None:
     return float(roc_auc_score(y_true, scores))
 
 
-def classification_metrics(
-    y_true: np.ndarray, probabilities: np.ndarray, *, threshold: float = 0.5
-) -> dict:
+def classification_metrics(y_true: np.ndarray, probabilities: np.ndarray, *, threshold: float = 0.5) -> dict:
     """Accuracy/precision/recall/AUC plus explicit random baselines.
 
     ``accuracy_baseline`` is the majority-class rate and ``auc_baseline`` is 0.5;
@@ -58,7 +56,7 @@ def classification_metrics(
     base_rate = positives / len(y_true)
 
     return {
-        "n": int(len(y_true)),
+        "n": len(y_true),
         "n_positive": int(positives),
         "n_negative": int(negatives),
         "base_rate": float(base_rate),
@@ -73,9 +71,7 @@ def classification_metrics(
     }
 
 
-def information_coefficient(
-    scores: pd.Series, returns: pd.Series, *, method: str = "spearman"
-) -> float | None:
+def information_coefficient(scores: pd.Series, returns: pd.Series, *, method: str = "spearman") -> float | None:
     """Rank correlation between a predicted score and the realised return.
 
     Spearman is the default because the relationship is rarely linear; a Pearson
@@ -95,9 +91,7 @@ def information_coefficient(
     return None if value is None or np.isnan(value) else float(value)
 
 
-def quantile_returns(
-    scores: pd.Series, returns: pd.Series, *, quantiles: int = 5
-) -> pd.DataFrame:
+def quantile_returns(scores: pd.Series, returns: pd.Series, *, quantiles: int = 5) -> pd.DataFrame:
     """Mean forward return per score quantile.
 
     A genuine signal should produce a roughly monotonic progression across
@@ -153,31 +147,25 @@ def evaluate_predictions(
     frame = test_frame.copy()
     frame["_prob"] = np.asarray(probabilities, dtype=float)
 
-    metrics = classification_metrics(
-        frame[label_column].to_numpy(), frame["_prob"].to_numpy(), threshold=threshold
-    )
+    metrics = classification_metrics(frame[label_column].to_numpy(), frame["_prob"].to_numpy(), threshold=threshold)
     metrics["ic_spearman"] = information_coefficient(frame["_prob"], frame[return_column])
-    metrics["ic_pearson"] = information_coefficient(
-        frame["_prob"], frame[return_column], method="pearson"
-    )
+    metrics["ic_pearson"] = information_coefficient(frame["_prob"], frame[return_column], method="pearson")
 
     table = quantile_returns(frame["_prob"], frame[return_column], quantiles=quantiles)
     metrics["quantile_table"] = table.to_dict("records") if not table.empty else []
-    metrics["decile_spread"] = decile_spread(
-        frame["_prob"], frame[return_column], quantiles=quantiles
-    )
+    metrics["decile_spread"] = decile_spread(frame["_prob"], frame[return_column], quantiles=quantiles)
 
     # High-confidence slice: does the model actually separate outcomes where it
     # claims to be confident? This is a far stricter test than overall accuracy.
     high = frame[frame["_prob"] >= 0.6]
     low = frame[frame["_prob"] <= 0.4]
     metrics["high_confidence"] = {
-        "n": int(len(high)),
+        "n": len(high),
         "mean_return": float(high[return_column].mean()) if len(high) else None,
         "hit_rate": float(high[label_column].mean()) if len(high) else None,
     }
     metrics["low_confidence"] = {
-        "n": int(len(low)),
+        "n": len(low),
         "mean_return": float(low[return_column].mean()) if len(low) else None,
         "hit_rate": float(low[label_column].mean()) if len(low) else None,
     }

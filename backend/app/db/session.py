@@ -14,6 +14,7 @@ from app.db.base import Base
 
 log = get_logger(__name__)
 
+
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
 
@@ -41,7 +42,7 @@ def _configure_sqlite(dbapi_conn, _record) -> None:
 
 def get_engine() -> Engine:
     """Return the process-wide engine, creating it on first use."""
-    global _engine
+    global _engine  # noqa: PLW0603
     if _engine is None:
         settings.ensure_dirs()
         _engine = create_engine(
@@ -57,7 +58,7 @@ def get_engine() -> Engine:
 
 
 def get_session_factory() -> sessionmaker[Session]:
-    global _SessionLocal
+    global _SessionLocal  # noqa: PLW0603
     if _SessionLocal is None:
         _SessionLocal = sessionmaker(bind=get_engine(), expire_on_commit=False, future=True)
     return _SessionLocal
@@ -94,20 +95,18 @@ def init_db() -> None:
     Without that, ``create_all`` would silently build a partial schema.
     """
     settings.ensure_dirs()
-    import app.db.models  # noqa: F401,PLC0415 - registers mappers as a side effect
+    import app.db.models  # noqa: F401 - registers ORM mappers
 
     engine = get_engine()
     Base.metadata.create_all(engine)
 
     # Verify the schema is complete rather than trusting create_all.
-    from sqlalchemy import inspect  # noqa: PLC0415
+    from sqlalchemy import inspect
 
     present = set(inspect(engine).get_table_names())
     missing = set(Base.metadata.tables) - present
     if missing:
-        raise RuntimeError(
-            f"database schema incomplete; missing tables: {sorted(missing)}"
-        )
+        raise RuntimeError(f"database schema incomplete; missing tables: {sorted(missing)}")
     log.info("database ready at %s (%d tables)", settings.db_path, len(present))
 
 
@@ -120,7 +119,7 @@ def vacuum() -> None:
 
 def reset_engine() -> None:
     """Drop cached engine/session factory (used by tests)."""
-    global _engine, _SessionLocal
+    global _engine, _SessionLocal  # noqa: PLW0603
     if _engine is not None:
         _engine.dispose()
     _engine = None

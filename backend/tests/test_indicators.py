@@ -39,9 +39,7 @@ def frame(n: int = 200, seed: int = 7) -> pd.DataFrame:
     low = close * (1 - np.abs(rng.normal(0, 0.01, n)))
     open_ = np.concatenate([[close[0]], close[:-1]])
     volume = np.abs(rng.normal(1e6, 2e5, n))
-    return pd.DataFrame(
-        {"open": open_, "high": high, "low": low, "close": close, "volume": volume}
-    )
+    return pd.DataFrame({"open": open_, "high": high, "low": low, "close": close, "volume": volume})
 
 
 class TestMovingAverages:
@@ -132,9 +130,7 @@ class TestRsi:
 class TestMacd:
     def test_histogram_is_twice_the_dif_dea_gap(self):
         result = macd(frame(200)["close"])
-        assert list(result["hist"]) == pytest.approx(
-            list(2.0 * (result["dif"] - result["dea"]))
-        )
+        assert list(result["hist"]) == pytest.approx(list(2.0 * (result["dif"] - result["dea"])))
 
     def test_dif_equals_ema_difference(self):
         close = frame(150)["close"]
@@ -171,9 +167,7 @@ class TestKdj:
     def test_j_is_3k_minus_2d(self):
         df = frame(80)
         result = kdj(df["high"], df["low"], df["close"])
-        assert list(result["j"]) == pytest.approx(
-            list(3.0 * result["k"] - 2.0 * result["d"])
-        )
+        assert list(result["j"]) == pytest.approx(list(3.0 * result["k"] - 2.0 * result["d"]))
 
     def test_flat_window_is_neutral(self):
         high = low = close = pd.Series([10.0] * 30)
@@ -200,9 +194,7 @@ class TestBoll:
 
     def test_bands_are_symmetric_around_mid(self):
         result = boll(frame(80)["close"]).dropna()
-        assert list(result["up"] - result["mid"]) == pytest.approx(
-            list(result["mid"] - result["low"])
-        )
+        assert list(result["up"] - result["mid"]) == pytest.approx(list(result["mid"] - result["low"]))
 
     def test_warmup_is_nan(self):
         result = boll(frame(30)["close"], 20).dropna()

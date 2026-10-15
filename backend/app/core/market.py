@@ -25,7 +25,11 @@ LIMIT_STAR_CHINEXT = 0.20  # 科创板 / 创业板
 LIMIT_BJ = 0.30
 
 
-def price_limit_ratio(code: str, name: str = "", is_st: bool = False) -> float:
+def price_limit_ratio(
+    code: str,
+    name: str = "",  # noqa: ARG001 - kept for call-site symmetry
+    is_st: bool = False,
+) -> float:
     """Daily price-limit ratio for an instrument.
 
     ST names on the main board are capped at 5%; STAR/ChiNext at 20%; BSE at 30%.
@@ -71,8 +75,15 @@ def is_limit_down(close: float, preclose: float, code: str, name: str = "", is_s
     return down > 0 and close <= down + 1e-6
 
 
-def is_one_word_limit(open_: float, high: float, low: float, preclose: float,
-                      code: str, name: str = "", is_st: bool = False) -> bool:
+def is_one_word_limit(
+    open_: float,  # noqa: ARG001 - kept for OHLC call-site symmetry
+    high: float,
+    low: float,
+    preclose: float,
+    code: str,
+    name: str = "",
+    is_st: bool = False,
+) -> bool:
     """True for a 一字板: the whole session pinned at one limit price."""
     _, up = limit_prices(preclose, price_limit_ratio(code, name, is_st))
     down, _ = limit_prices(preclose, price_limit_ratio(code, name, is_st))
