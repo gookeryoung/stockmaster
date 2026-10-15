@@ -81,7 +81,9 @@ exclude = [
 [tool.bumpversion]
 current_version = "0.1.0"
 commit = true
-message = "chore: 更新版本 {current_version} → {new_version}"
+# ASCII-only message: bump-my-version mangles non-ASCII templates under a GBK
+# locale (observed as mojibake in the generated commit message).
+message = "chore(release): bump version {current_version} -> {new_version}"
 tag = true
 tag_name = "v{new_version}"
 
