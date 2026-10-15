@@ -234,6 +234,17 @@ class BaostockProvider(BaseProvider):
         return rows
 
     # -------------------------------------------------------------- interface
+    def supports(self, code: str) -> bool:
+        """baostock covers 上交所/深交所 only.
+
+        Its API accepts just ``sh.``/``sz.`` prefixes and returns error 10004011
+        ("股票代码未标识sh或sz") for 北交所 codes.
+        """
+        try:
+            return not normalize(code).endswith(".BJ")
+        except DataError:
+            return False
+
     def fetch_daily(
         self,
         code: str,

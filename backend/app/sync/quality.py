@@ -274,6 +274,41 @@ def _pick_targets(session: Session, adjust: str, codes: list[str] | None, max_sy
     return list(rows)
 
 
+def _index_codes(session: Session, codes: list[str]) -> set[str]:
+    """Of ``codes``, those that are indices rather than stocks.
+
+    Detection notes (each of these was a wrong turn worth recording):
+
+    - ``Instrument.is_index`` is unusable: the master contains only stocks, so the
+      flag is never set and the check would silently never fire.
+    - ``is_index_digits()`` is too broad: it matches any ``000xxx``, so it would
+      misclassify real stocks such as ``000001.SZ`` (平安银行).
+
+    So a code counts as an index when it has stored bars but no instrument-master
+    row (every stock is in the master) — that is precisely how index series enter
+    the database, via ``job_sync_index_daily`` — or when it is in the unambiguous
+    ``39xxxx`` index range.
+    """
+    if not codes:
+        return set()
+
+    in_master = set(session.execute(select(Instrument.code).where(Instrument.code.in_(codes))).scalars())
+    found: set[str] = set()
+    for code in codes:
+        if code in in_master:
+            continue  # a stock: present in the master
+        digits = code.split(".")[0]
+        if digits.startswith("399"):
+            # 399xxx is the Shenzhen index range; no A-share stock uses it.
+            found.add(code)
+        elif digits.startswith("000"):
+            # 000xxx CSI/SSE indices are Shanghai by construction. The master has
+            # no row for them, so they cannot be confused with 000xxx SZ stocks
+            # (those *do* have master rows, handled by the `continue` above).
+            found.add(code)
+    return found
+
+
 def check_data_quality(
     session: Session,
     *,
@@ -360,6 +395,7 @@ def check_data_quality(
         )
 
     names = dict(session.execute(select(Instrument.code, Instrument.name).where(Instrument.code.in_(targets))).all())
+    indices = _index_codes(session, targets)
 
     for code in targets:
         report.symbols.append(
@@ -368,6 +404,7 @@ def check_data_quality(
                 code=code,
                 name=names.get(code, ""),
                 adjust=adjust,
+                is_index=code in indices,
                 latest_market_date=latest_market_date,
                 open_days=open_days,
                 stale_days=stale_days,
@@ -375,7 +412,8 @@ def check_data_quality(
             )
         )
 
-    report.global_findings.extend(_check_series_pairing(session, targets, adjust))
+    # Indices are excluded: they have no adjustment series by design.
+    report.global_findings.extend(_check_series_pairing(session, [c for c in targets if c not in indices], adjust))
     return report
 
 
@@ -385,6 +423,7 @@ def _check_symbol(
     code: str,
     name: str,
     adjust: str,
+    is_index: bool = False,
     latest_market_date: date,
     open_days: set[date],
     stale_days: int,
@@ -405,7 +444,8 @@ def _check_symbol(
     quality.first_date = first_date
     quality.last_date = last_date
 
-    if quality.bars == 0:
+    has_series = quality.bars > 0
+    if not has_series:
         # Distinguish "nothing at all" from "only this series is missing": the
         # remedies differ (full sync vs. re-sync of one adjust mode).
         other = "raw" if adjust == "qfq" else "qfq"
@@ -415,7 +455,18 @@ def _check_symbol(
             ).scalar()
             or 0
         )
-        if counterpart:
+        if counterpart and is_index:
+            # Indices carry only a raw series; there is nothing to adjust for.
+            quality.findings.append(
+                Finding(
+                    kind="index_series",
+                    severity="info",
+                    code=code,
+                    message=(f"{code} 为指数，仅有 {other} 序列（指数无复权概念），已有 {counterpart} 根。"),
+                    detail={"bars": counterpart, "series": other},
+                )
+            )
+        elif counterpart:
             quality.findings.append(
                 Finding(
                     kind=f"missing_{adjust}",
@@ -434,7 +485,9 @@ def _check_symbol(
                     message=f"{code} 没有任何行情数据。",
                 )
             )
-        return quality
+        # Fall through: an index whose raw series is itself too short must still
+        # be reported, so do not return early here.
+        quality.bars = counterpart
 
     if quality.bars < MIN_BARS_FOR_ANALYSIS:
         quality.findings.append(
@@ -448,6 +501,9 @@ def _check_symbol(
         )
 
     # --- staleness ----------------------------------------------------------
+    if not has_series:
+        return quality
+
     lag = (latest_market_date - last_date).days
     if lag > stale_days:
         quality.findings.append(
@@ -531,8 +587,8 @@ def _check_symbol(
             )
         )
 
-    # --- adjustment continuity (qfq only) ----------------------------------
-    if adjust == "qfq":
+    # --- adjustment continuity (qfq stocks only; indices are not adjusted) ---
+    if adjust == "qfq" and not is_index:
         jumps = _find_qfq_discontinuities(session, code, limit)
         if jumps:
             quality.findings.append(

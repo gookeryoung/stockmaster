@@ -113,6 +113,20 @@ class BaseProvider(ABC):
     def list_instruments(self) -> list[InstrumentInfo]:
         """Full security master."""
 
+    # -------------------------------------------------------------- capability
+    def supports(self, code: str) -> bool:  # noqa: ARG002 - part of the contract
+        """Whether this provider can serve the given symbol.
+
+        A ``False`` here means a *structural* gap (the source does not cover that
+        exchange or instrument class), which is different from a failure. The
+        registry skips unsupported symbols without counting them against the
+        provider's health, so a source is never circuit-broken for symbols it
+        never claimed to support.
+
+        Defaults to True; override where a source has a known coverage boundary.
+        """
+        return True
+
     # ---------------------------------------------------------------- optional
     def fetch_snapshot(self, codes: list[str] | None = None) -> list[Snapshot]:
         """Intraday snapshots. Providers without support raise."""

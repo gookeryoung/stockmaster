@@ -57,6 +57,23 @@ class SinaProvider(BaseProvider):
 
     name = "sina"
 
+    def supports(self, code: str) -> bool:
+        """Sina serves only the newer 920xxx 北交所 range.
+
+        Verified directly: ``bj920000`` / ``bj920001`` / ``bj920002`` return bars,
+        while ``bj430047`` / ``bj830799`` / ``bj871981`` / ``bj889999`` fail inside
+        the backend ("No value to decode"). Older BJ prefixes are therefore not
+        reachable from any configured source yet — better to fail fast and clearly
+        than to exhaust the circuit breaker.
+        """
+        try:
+            canon = normalize(code)
+        except DataError:
+            return False
+        if not canon.endswith(".BJ"):
+            return True
+        return canon.split(".")[0].startswith("920")
+
     def __init__(self, timeout: float = 30.0) -> None:
         self._timeout = timeout
 

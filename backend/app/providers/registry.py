@@ -134,6 +134,11 @@ class ProviderRegistry:
             if method is None:
                 errors.append(f"{name}: unsupported {action}")
                 continue
+            # Capability gap, not a failure: skip without touching provider health.
+            supported = getattr(provider, "supports", None)
+            if supported is not None and args and not supported(args[0]):
+                errors.append(f"{name}: does not support {args[0]}")
+                continue
             try:
                 result = method(*args, **kwargs)
             except NotImplementedError as exc:
@@ -177,8 +182,19 @@ class ProviderRegistry:
         bars, source = self._dispatch("fetch_daily", code, start, end, adjust, want=list)
         return bars, source
 
+    def fetch_index_daily_with_source(self, code: str, start: date, end: date) -> tuple[list[Bar], str]:
+        """Index bars, reporting which provider served them.
+
+        Indices must go through ``fetch_index_daily`` rather than ``fetch_daily``:
+        the backup providers resolve a *stock* symbol on the equity endpoint, so
+        index codes fail there even though the same providers serve indices
+        correctly through their index endpoint.
+        """
+        bars, source = self._dispatch("fetch_index_daily", code, start, end, want=list)
+        return bars, source
+
     def fetch_index_daily(self, code: str, start: date, end: date) -> list[Bar]:
-        bars, _source = self._dispatch("fetch_index_daily", code, start, end, want=list)
+        bars, _source = self.fetch_index_daily_with_source(code, start, end)
         return bars
 
     def fetch_calendar(self, start: date, end: date) -> list[date]:

@@ -38,6 +38,18 @@ class TencentProvider(BaseProvider):
 
     name = "tencent"
 
+    def supports(self, code: str) -> bool:
+        """Tencent's equity endpoint does not serve 北交所 codes.
+
+        Verified directly: every ``bj`` symbol (43x/83x/87x/920xxx) fails inside
+        the backend with ``KeyError: 'day'`` or ``IndexError`` — no payload at all.
+        Declaring the boundary keeps those symbols from counting as failures.
+        """
+        try:
+            return not normalize(code).endswith(".BJ")
+        except DataError:
+            return False
+
     def __init__(self, timeout: float = 30.0) -> None:
         self._timeout = timeout
 
