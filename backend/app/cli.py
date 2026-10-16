@@ -183,7 +183,7 @@ def _doctor() -> int:
     import platform
 
     from app.config import REPO_ROOT, settings
-    from app.core.console import detect_console_encoding, locale_encoding
+    from app.core.console import detect_console_encoding, explain_console_encoding, locale_encoding
 
     print("StockMaster 环境自检")
     print(f"  Python       : {platform.python_version()} ({platform.system()} {platform.release()})")
@@ -193,6 +193,19 @@ def _doctor() -> int:
     print(f"  控制台编码   : {detect_console_encoding()}  (进程 locale: {locale_encoding()})")
     if settings.console_encoding_override:
         print(f"  编码覆盖     : SM_CONSOLE_ENCODING={settings.console_encoding_override}")
+
+    # These signals conflict on real machines (chcp=936 while GetConsoleOutputCP=65001
+    # on this host), so print them all — otherwise diagnosing mojibake means guessing
+    # which layer is lying.
+    info = explain_console_encoding()
+    print(
+        "  编码诊断     : "
+        f"chcp/console={info.get('get_console_output_cp')} "
+        f"stdout={info.get('stdout_encoding')} "
+        f"stderr={info.get('stderr_encoding')} "
+        f"isatty={info.get('stdout_isatty')}"
+    )
+    print(f"                 (输出固定为 {info.get('selected')}；如需覆盖请设置 SM_CONSOLE_ENCODING)")
     print(f"  调度器       : {'启用' if settings.scheduler_enabled else '禁用'}")
     print(f"  数据源优先级 : {', '.join(settings.provider_priority)}")
     print(f"  超时/重试    : {settings.provider_timeout}s / {settings.provider_max_retries} 次")

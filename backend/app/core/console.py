@@ -1,24 +1,26 @@
 """Console output encoding handling.
 
-Why this is not simply "force UTF-8"
-------------------------------------
-On a Chinese Windows install the console code page is typically **936 (GBK)**.
+Why this is not auto-detected
+-----------------------------
+The obvious approach — ask Windows what code page the console uses — is unreliable.
+Measured on this machine, three signals disagree:
 
-* With stdout attached to that console, Python encodes as GBK and it renders
-  correctly.
-* Under `make`, stdout is a **pipe**. Python then uses the locale encoding while
-  the *terminal* remains the thing that decodes — so emitting UTF-8 into a GBK
-  console shows mojibake, and emitting GBK into a UTF-8 terminal does the same.
+    chcp                        -> 936      (the console's real code page)
+    GetConsoleOutputCP()        -> 65001    (wrong)
+    sys.stdout.encoding         -> gbk      (Python's negotiation)
 
-Blindly forcing UTF-8 therefore does not fix anything; it moves the breakage.
-The rule used here:
+An earlier version trusted ``GetConsoleOutputCP()``; another trusted the stream
+encoding. Each was right on one machine and wrong on another, so Chinese output
+flip-flopped between correct and mojibake. The resolution is to stop guessing:
 
-1. **Explicit override** — honour ``SM_CONSOLE_ENCODING`` (lets a caller or CI
-   force a choice, e.g. ``utf-8`` in a UTF-8 CI log).
-2. **Interactive** — when a console is attached, use *its* code page, which is
-   exactly what that console will decode correctly.
-3. **Piped** — no way to interrogate the far end reliably, so use UTF-8, the
-   cross-platform default that modern terminals and log viewers assume.
+1. **Explicit override** — honour ``SM_CONSOLE_ENCODING`` for genuine exceptions
+   (a legacy GBK-only console, or a CI log with a known encoding).
+2. **Otherwise UTF-8, always** — it renders correctly in the terminal actually in
+   use, and it is what modern terminals, editors and log viewers expect. Having one
+   predictable answer also removes the class of bug this area kept producing.
+
+Use :func:`explain_console_encoding` (via `stockmaster doctor`) to see every signal
+when something does look wrong.
 """
 
 from __future__ import annotations
@@ -29,7 +31,11 @@ import locale
 import os
 import sys
 
-__all__ = ["detect_console_encoding", "prefer_console_encoding"]
+__all__ = [
+    "detect_console_encoding",
+    "explain_console_encoding",
+    "prefer_console_encoding",
+]
 
 _UTF8_CP = 65001
 _UTF8 = "utf-8"
@@ -51,20 +57,64 @@ def _console_output_cp() -> int | None:
         return None
 
 
+#: Our own output is always UTF-8. This is a deliberate, fixed choice rather than a
+#: runtime guess: every available signal disagrees on some machine, so detection
+#: produced flip-flopping behaviour. Measured on this host:
+#:
+#:     chcp                        -> 936
+#:     GetConsoleOutputCP()        -> 65001
+#:     sys.stdout.encoding         -> gbk
+#:
+#: UTF-8 renders correctly in the terminal actually in use, and it is also what
+#: modern terminals, editors and CI logs assume. Set ``SM_CONSOLE_ENCODING`` to
+#: override for a genuinely GBK-only console.
+_DEFAULT_ENCODING = _UTF8
+
+
+def _console_input_cp() -> int | None:
+    """Console *input* code page, for diagnostics.
+
+    Differs from the output code page on this host (936 vs 65001), which is a useful
+    clue when diagnosing encoding confusion.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        codepage = int(ctypes.windll.kernel32.GetConsoleCP())  # type: ignore[attr-defined]
+        return codepage or None
+    except Exception:
+        return None
+
+
 def detect_console_encoding() -> str:
-    """Encoding that the current output target can render."""
+    """Encoding used for our own console output.
+
+    Fixed to UTF-8 unless ``SM_CONSOLE_ENCODING`` overrides it. See
+    :data:`_DEFAULT_ENCODING` for why this is not auto-detected.
+    """
     override = os.environ.get("SM_CONSOLE_ENCODING", "").strip()
-    if override:
-        return override
+    return override or _DEFAULT_ENCODING
 
-    codepage = _console_output_cp()
-    if codepage:
-        # A UTF-8 console must keep the -8 suffix: the bare "cp65001" alias is
-        # accepted by Python but "utf-8" is clearer and avoids edge cases.
-        return _UTF8 if codepage == _UTF8_CP else f"cp{codepage}"
 
-    # Piped or redirected: prefer UTF-8 for portability.
-    return _UTF8
+def explain_console_encoding() -> dict:
+    """Diagnostics for `doctor`.
+
+    Reports every signal alongside the chosen encoding, because they conflict on
+    real machines and that is confusing to debug: the obvious API call
+    (``GetConsoleOutputCP``) disagreed with both `chcp` and Python's own stream
+    encoding on this host.
+    """
+    return {
+        "sm_console_encoding_override": os.environ.get("SM_CONSOLE_ENCODING", "") or None,
+        "selected": detect_console_encoding(),
+        "get_console_output_cp": _console_output_cp(),
+        "console_input_cp": _console_input_cp(),
+        "stdout_encoding": getattr(sys.stdout, "encoding", None),
+        "stderr_encoding": getattr(sys.stderr, "encoding", None),
+        "locale_encoding": locale_encoding(),
+        "stdout_isatty": bool(getattr(sys.stdout, "isatty", lambda: False)()),
+        "note": "signals may disagree; output is fixed to UTF-8 for consistency",
+    }
 
 
 def prefer_console_encoding() -> str:

@@ -1,15 +1,19 @@
 """Console encoding tests.
 
 These guard a Windows-specific failure that is easy to reintroduce and awkward to
-notice in CI: emitting the wrong code page turns every Chinese label into
-mojibake. The rule under test is "match the terminal, do not impose a favourite".
+notice in CI: emitting the wrong code page turns every Chinese label into mojibake.
+
+The resolved design is deliberately *not* auto-detected. Three signals disagree on
+this host (``chcp`` says 936, ``GetConsoleOutputCP()`` says 65001, Python's stream
+says gbk), and the two detection strategies tried during development each broke a
+different machine. Output is therefore fixed to UTF-8, with
+``SM_CONSOLE_ENCODING`` as the escape hatch — one predictable answer instead of a
+per-machine guess.
 """
 
 from __future__ import annotations
 
 import sys
-
-import pytest
 
 from app.core.console import (
     detect_console_encoding,
@@ -46,24 +50,41 @@ class TestDetectConsoleEncoding:
 
         assert codecs.lookup(name)
 
-    @pytest.mark.skipif(sys.platform != "win32", reason="Windows console API only")
-    def test_utf8_console_reports_utf8(self, monkeypatch):
-        monkeypatch.delenv("SM_CONSOLE_ENCODING", raising=False)
-        monkeypatch.setattr("app.core.console._console_output_cp", lambda: 65001)
-        assert detect_console_encoding() == "utf-8"
+    def test_default_is_utf8_regardless_of_console_codepage(self, monkeypatch):
+        """The core decision: do not vary with the reported console code page.
 
-    @pytest.mark.skipif(sys.platform != "win32", reason="Windows console API only")
-    def test_gbk_console_reports_cp936(self, monkeypatch):
-        """A 936 console must get cp936, not UTF-8 — this is the regression guard."""
+        A 936 answer must NOT switch us to cp936 — that was the regression which
+        produced mojibake, because the terminal in use decodes UTF-8 even though the
+        console reports 936.
+        """
         monkeypatch.delenv("SM_CONSOLE_ENCODING", raising=False)
-        monkeypatch.setattr("app.core.console._console_output_cp", lambda: 936)
+        for codepage in (936, 65001, 1252, None):
+            monkeypatch.setattr("app.core.console._console_output_cp", lambda cp=codepage: cp)
+            assert detect_console_encoding() == "utf-8", f"codepage={codepage}"
+
+    def test_override_beats_the_default(self, monkeypatch):
+        monkeypatch.setenv("SM_CONSOLE_ENCODING", "cp936")
         assert detect_console_encoding() == "cp936"
 
-    def test_no_console_falls_back_to_utf8(self, monkeypatch):
-        """Piped output (no attached console) should default to portable UTF-8."""
+
+class TestExplainConsoleEncoding:
+    def test_reports_every_signal(self, monkeypatch):
+        """`doctor` needs the raw signals, because they genuinely disagree."""
         monkeypatch.delenv("SM_CONSOLE_ENCODING", raising=False)
-        monkeypatch.setattr("app.core.console._console_output_cp", lambda: None)
-        assert detect_console_encoding() == "utf-8"
+        from app.core.console import explain_console_encoding
+
+        info = explain_console_encoding()
+        for key in (
+            "selected",
+            "get_console_output_cp",
+            "console_input_cp",
+            "stdout_encoding",
+            "stderr_encoding",
+            "locale_encoding",
+            "stdout_isatty",
+        ):
+            assert key in info, key
+        assert info["selected"] == "utf-8"
 
 
 class TestPreferConsoleEncoding:
