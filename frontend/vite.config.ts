@@ -33,9 +33,17 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // ECharts is large; splitting it keeps the app shell fast to load.
-        manualChunks: {
-          echarts: ["echarts"],
-          vendor: ["react", "react-dom", "react-router-dom"],
+        // Vite 8 换成了 rolldown，只接受**函数**形式的 manualChunks：
+        // 原来的对象形式 {"echarts": ["echarts"]} 会以
+        // "manualChunks is not a function" 直接构建失败。
+        manualChunks(id: string) {
+          if (!id.includes("/node_modules/")) return undefined;
+          // echarts 的渲染层 zrender 要跟它同块，否则拆不干净
+          if (id.includes("/echarts/") || id.includes("/zrender/")) return "echarts";
+          if (/\/node_modules\/(react|react-dom|react-router|react-router-dom|scheduler)\//.test(id)) {
+            return "vendor";
+          }
+          return undefined;
         },
       },
     },
