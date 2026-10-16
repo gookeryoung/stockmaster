@@ -1,6 +1,17 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4：三个 @tailwind 指令换成单条 @import；
+   自定义主题也从 tailwind.config.js 搬到 CSS 的 @theme 里（v4 不再自动读 JS 配置）。 */
+@import "tailwindcss";
+
+/* 显式声明扫描范围：v4 的自动探测从项目根开始，这里写死避免 CI/容器里根目录不同而漏扫 */
+@source "../index.html";
+@source "./**/*.{ts,tsx}";
+
+/* up/down/flat 沿用中文市场口径：红涨绿跌 */
+@theme {
+  --color-up: #ef4444;
+  --color-down: #22c55e;
+  --color-flat: #94a3b8;
+}
 
 :root {
   color-scheme: dark;
