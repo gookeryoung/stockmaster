@@ -106,8 +106,28 @@ def upsert_calendar(session: Session, days: Iterable[date], source: str = "") ->
 def upsert_index_constituents(
     session: Session, index_code: str, codes: Sequence[str], as_of: date, source: str = ""
 ) -> int:
+    """Store an index's membership snapshot for ``as_of``.
+
+    The supplied set is treated as **authoritative** for that date: existing rows are
+    removed first, then the new set is inserted. A pure upsert (the previous
+    behaviour) never deletes, so a constituent that left the index — or a code that
+    was once mis-parsed — stayed in the table forever and silently inflated the
+    universe.
+
+    Empty ``codes`` is a no-op so that a failed upstream fetch cannot destroy a good
+    snapshot; callers are expected to validate before calling.
+    """
     if not codes:
         return 0
+
+    # Replace the snapshot for this date so removals are reflected.
+    session.execute(
+        delete(IndexConstituent).where(
+            IndexConstituent.index_code == index_code,
+            IndexConstituent.as_of == as_of,
+        )
+    )
+
     rows = [{"index_code": index_code, "code": c, "as_of": as_of, "source": source} for c in codes]
     written = 0
     for chunk in _chunks(rows, 500):
@@ -292,6 +312,16 @@ def get_bars(
 def last_bar_date(session: Session, code: str, adjust: str = "raw") -> date | None:
     stmt = select(func.max(DailyBar.trade_date)).where(DailyBar.code == code, DailyBar.adjust == adjust)
     return session.execute(stmt).scalar()
+
+
+def available_adjusts(session: Session, code: str) -> list[str]:
+    """Which adjust series exist for ``code`` (e.g. ``["raw", "qfq"]``).
+
+    Used to make a "no bars" response actionable: a symbol with only a raw series
+    needs a different recovery step from one that was never synced at all.
+    """
+    rows = session.execute(select(DailyBar.adjust).where(DailyBar.code == code).group_by(DailyBar.adjust)).scalars()
+    return sorted(rows)
 
 
 def bar_count(session: Session, code: str | None = None, adjust: str | None = None) -> int:

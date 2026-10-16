@@ -93,9 +93,27 @@ def get_bars(
 
     bars = repo.get_bars(session, canon, adjust, start=start, end=end, limit=limit)
     if not bars:
+        # Tell the caller exactly what is missing and what to run. `have` lets the UI
+        # (and a human) tell "never synced" apart from "only the other series exists",
+        # which need different recovery commands.
+        have = repo.available_adjusts(session, canon)
+        sync_cmd = f"uv run stockmaster sync-daily --codes {canon}"
+        if have:
+            detail = f"{canon} 缺少 {adjust} 序列（现有：{', '.join(have)}）。请执行：{sync_cmd} 以补齐复权序列。"
+        else:
+            detail = (
+                f"{canon} 尚未同步任何日线数据。请执行：{sync_cmd}，"
+                f"或运行 `uv run stockmaster sync-daily --full` 回补全市场。"
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"no {adjust} bars stored for {canon}; run a data sync first",
+            detail=detail,
+            headers={
+                # Lets a client distinguish "resource absent" from "wrong URL", so a
+                # missing symbol does not read as a routing bug.
+                "X-StockMaster-Reason": "data-not-synced",
+                "X-StockMaster-Available-Adjusts": ",".join(have) if have else "",
+            },
         )
     return BarsResponse(
         code=canon,
