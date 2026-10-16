@@ -283,13 +283,27 @@ uv run stockmaster data-quality --min-usable-share 0.5       # 作为门禁（�
 ### 6.3 中文乱码说明（Windows）
 
 中文 Windows 控制台默认代码页为 **936(GBK)**，而现代终端（Windows Terminal / VS Code）
-多为 **65001(UTF-8)**。同一段字节在其中一边必然乱码，因此本项目：
+多为 **65001(UTF-8)**。同一段字节在其中一边必然乱码。
 
-- 统一在输出前探测当前控制台代码页并按其编码输出
-  （见 `backend/app/core/console.py`；`make doctor` 会显示实际取值）；
+**本项目的做法：输出统一为 UTF-8，不做运行时探测。**
+
+原因是一次实测发现"按控制台代码页输出"并不可靠 —— 本机三个信号互相矛盾：
+
+| 信号 | 取值 |
+|---|---|
+| `chcp` | 936 |
+| `GetConsoleOutputCP()` | 65001 ← 与实际不符 |
+| `sys.stdout.encoding` | gbk |
+
+两种探测策略各在一台机器上正确、在另一台上错误，导致中文时好时坏。因此改为固定
+UTF-8（这也是现代终端/编辑器/CI 日志的通行假设），行为在任何机器上都一致：
+
+- 需要例外时用 `SM_CONSOLE_ENCODING` 覆盖（例如仅支持 GBK 的旧控制台）；
+- `make doctor` 会打印全部信号（`编码诊断` 一行），便于排查；
 - `Makefile` **不使用内联 Python** 输出中文（内联 `python -c` 是新进程，编码不可控），
   改为调用 `stockmaster` CLI 与 `scripts/*.py`；
-- 可用 `SM_CONSOLE_ENCODING` 强制指定（例如 CI 里设为 `utf-8`）。
+- 回归保护见 `backend/tests/test_console_bytes.py`：直接断言 CLI 子进程的
+  **原始字节是合法 UTF-8**（仅断言编码名无法发现问题）。
 
 ### 6.4 CI / CD
 
