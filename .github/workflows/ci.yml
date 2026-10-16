@@ -71,7 +71,7 @@ jobs:
           # Lockfile is v9.0; pnpm 10 handles that format.
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
