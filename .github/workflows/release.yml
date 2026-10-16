@@ -1,0 +1,52 @@
+name: Release (PyPI)
+
+# 为什么不是 tag 触发：
+# - tag 触发的发布链已由 ci.yml 的 release job 承担（构建 wheel/sdist + 前端产物、
+#   生成 SHA256SUMS、创建 GitHub Release）。
+# - 本仓库尚未配置 PyPI 信任发布者（见 Makefile `pub` 目标的注释），
+#   若改回 tag 触发，则每次 `make bump` 都会自动跑一次注定失败的发布。
+# 因此这里只保留「手动、显式」的 PyPI 通道，作为 `make pub` 的 CI 等价物。
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "只构建并校验分发包，不上传"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-pypi
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: 构建并发布到 PyPI
+    runs-on: ubuntu-latest
+    # OIDC 信任发布需要该环境；未配置 PyPI Trusted Publisher 时这里会失败而不是静默跳过
+    environment: pypi
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: 安装 Python
+        run: uv python install 3.13
+
+      - name: 构建 wheel 与 sdist
+        run: uv build
+
+      - name: 校验分发包元数据
+        run: uvx twine check dist/*
+
+      - name: 发布到 PyPI（OIDC 信任发布）
+        if: ${{ !inputs.dry_run }}
+        run: uv publish --trusted-publishing always

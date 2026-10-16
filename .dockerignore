@@ -1,0 +1,72 @@
+# 版本控制
+.git
+.gitignore
+.github
+
+# Python 缓存与构建产物
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+*.egg
+dist
+build
+.eggs
+
+# 测试与覆盖率
+.pytest_cache
+.coverage
+.coverage.*
+htmlcov
+.tox
+coverage.xml
+
+# 前端依赖与构建产物（Dockerfile 只复制 backend/，无需送入构建上下文）
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/coverage
+frontend/.eslintcache
+*.tsbuildinfo
+
+# 本地研究数据与模型产物（体积可达数百 MB，绝不进入镜像）
+data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.parquet
+*.joblib
+*.pkl
+logs
+*.log
+
+# 工作区元数据
+.workbuddy
+.trae
+.claude
+
+# 虚拟环境
+.venv
+venv
+env
+
+# 工具缓存
+.uv-cache
+.ruff_cache
+.pyrefly_cache
+.mypy_cache
+
+# IDE 与编辑器
+.idea
+.vscode
+*.swp
+*.swo
+
+# 文档（按需保留）
+docs
+
+# 系统文件
+.DS_Store
+Thumbs.db

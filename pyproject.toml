@@ -41,6 +41,13 @@ Issues = "https://github.com/gookeryoung/stockmaster/issues"
 
 [project.optional-dependencies]
 dev = ["stockmaster[lint,test]"]
+# Sphinx 文档站依赖：仅 ReadTheDocs 与 `uv sync --extra docs` 使用，
+# 刻意不并入 dev，避免日常开发环境被文档工具链拖慢。
+docs = [
+    "sphinx>=8.1",
+    "sphinx-rtd-theme>=3.0",
+    "myst-parser>=4.0",
+]
 # ruff 固定精确版本：本地 `uv run ruff` 必须与 .pre-commit-config.yaml 的 rev 一致，
 # 否则同一提交在本地 hook 与 CI 会得到不同的 lint 结果。
 lint = ["ruff==0.16.8"]
