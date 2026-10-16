@@ -131,7 +131,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: 创建 Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # Tag name is taken from the ref, e.g. v0.1.0.
           name: StockMaster ${{ github.ref_name }}
