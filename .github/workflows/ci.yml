@@ -26,7 +26,7 @@ jobs:
     name: 后端 · lint + 测试
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装 uv
         uses: astral-sh/setup-uv@v7
@@ -64,7 +64,7 @@ jobs:
     name: 前端 · 类型检查 + 构建
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
@@ -106,7 +106,7 @@ jobs:
       # Required to create the release; scoped to this job only.
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 下载已构建的分发包
         uses: actions/download-artifact@v4
