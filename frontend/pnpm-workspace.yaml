@@ -1,2 +1,5 @@
+# 允许执行安装脚本的依赖白名单（pnpm 10+ 默认拦截依赖的 postinstall）。
+# esbuild 的安装脚本负责落位平台二进制，被拦下时 `vite build` 会失败；
+# pnpm 12 更是直接以 ERR_PNPM_IGNORED_BUILDS 终止安装。
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true
