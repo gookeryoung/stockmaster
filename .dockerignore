@@ -42,6 +42,11 @@ data
 logs
 *.log
 
+# 运行期配置与备份归档（绝不打进镜像；配置由 compose 的 environment 注入）
+.env
+.env.*
+backups
+
 # 工作区元数据
 .workbuddy
 .trae

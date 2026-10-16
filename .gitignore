@@ -59,6 +59,7 @@ logs/
 .env.*
 # 示例配置必须入库（.env.* 会误伤它）
 !.env.example
+!deploy/.env.prod.example
 
 # --- 本地协作产物 ---
 # 规则文件入库（团队共享的开发约定），其余工作区内容不入库

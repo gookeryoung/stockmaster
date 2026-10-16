@@ -86,7 +86,46 @@ make doctor         # 环境自检（依赖/编码/路径）
 > ```
 > 实测：8 只标的 × 2.8 年约 105 秒。全市场 5500+ 只建议分批进行，命令支持断点续传。
 
-### 2.5 开发模式
+### 2.5 Docker 部署（生产形态）
+
+单容器形态：镜像内已含前端构建产物，FastAPI 同源托管 SPA + API，无需额外 nginx。
+数据（SQLite 库 + 模型产物）落在命名卷 `stockmaster-data`，换版本不动卷。
+
+```bash
+# 服务器上（首次）
+git clone <仓库地址> /opt/stockmaster && cd /opt/stockmaster
+cp deploy/.env.prod.example .env && vim .env      # 改 SM_BIND 端口等
+./deploy/deploy.sh                                # 本地构建镜像 → 备份 → 重建 → 健康探测
+```
+
+`deploy.sh` 的关键行为：
+
+| 行为 | 说明 |
+|------|------|
+| **服务器本地构建** | 镜像不过网，不依赖镜像仓库；基础镜像走 `mirror.ccs.tencentyun.com` 内网源 |
+| **预备份** | 重建前把数据卷打包到 `backups/pre-deploy-<版本>-<时间戳>.tar.gz`，仅保留最近 5 份 |
+| **健康探测** | 轮询 `/api/v1/health` 最长 180s，失败自动回滚到上一个镜像并打印容器日志 |
+
+容器内运维命令（`app.cli` 与本地 CLI 完全等价）：
+
+```bash
+docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli stats
+docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli sync-calendar
+docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli sync-daily
+```
+
+相关文件：
+
+| 文件 | 作用 |
+|---|---|
+| `docker-compose.prod.yml` | 生产编排（单容器 / 数据卷 / 日志轮转 / 健康检查） |
+| `deploy/Dockerfile.prod` | 生产镜像（多阶段：node 构建前端 → python 运行时） |
+| `deploy/deploy.sh` | 服务器端部署（本地构建 / 预备份 / 健康探测 / 失败回滚） |
+| `deploy/.env.prod.example` | 生产环境变量模板 |
+
+完整部署链路、端口与防火墙、数据初始化：见 **[docs/DEPLOY_TENCENT.md](docs/DEPLOY_TENCENT.md)**。
+
+### 2.6 开发模式
 
 ```bash
 make dev            # 一条命令在当前控制台启动后端(8770) + 前端 Vite(5173)，Ctrl+C 一并停止

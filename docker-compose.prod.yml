@@ -1,0 +1,75 @@
+# ═══════════════════════════════════════════════════════════════════
+# StockMaster 生产编排 — 腾讯云轻量应用服务器（单机单容器形态）
+#
+# 与同机的 cndb 并存：cndb 的 nginx 容器独占 80/443，本服务因此
+# 对外使用独立端口 8770（http://<域名>:8770），互不影响。
+#
+# 设计要点：
+#   - 镜像由 deploy/deploy.sh 在服务器本地构建，本文件只引用 .env 里的镜像地址
+#   - 唯一数据卷 stockmaster-data 挂 /data（SQLite 库 + 训练模型），换版本不动它
+#   - restart: unless-stopped 保证开机自启 + 崩溃拉起
+#
+# 首次上线：
+#   cp deploy/.env.prod.example .env && vim .env
+#   ./deploy/deploy.sh            # 服务器本地构建 → 备份 → 重建 → 健康探测
+#
+# 常用运维命令：
+#   docker compose --env-file .env -f docker-compose.prod.yml logs -f app
+#   docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli stats
+#   docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli doctor
+# ═══════════════════════════════════════════════════════════════════
+
+services:
+  app:
+    # 完整地址由 deploy.sh 写入 .env（形如 stockmaster:v0.1.4）
+    image: ${SM_IMAGE:?SM_IMAGE 未设置，请在 .env 中配置镜像地址}
+    container_name: stockmaster
+    restart: unless-stopped
+
+    volumes:
+      - stockmaster-data:/data
+
+    environment:
+      # 容器内必须绑 0.0.0.0：默认的 127.0.0.1 只能在容器内部可达，宿主映射进不来
+      - SM_HOST=0.0.0.0
+      - SM_PORT=8770
+      # 数据根目录整体覆盖：库、模型产物、日志都落在这个卷里
+      - SM_DATA_DIR=/data
+      - SM_LOG_LEVEL=${SM_LOG_LEVEL:-INFO}
+      - SM_TIMEZONE=Asia/Shanghai
+      # 内置 APScheduler（收盘后自动同步/预警巡检）。多副本时只能开一个实例。
+      - SM_SCHEDULER_ENABLED=${SM_SCHEDULER_ENABLED:-true}
+      # 数据源优先级：主源失败自动降级到备源
+      - SM_PROVIDER_ORDER=${SM_PROVIDER_ORDER:-baostock,tencent,sina}
+      # baostock 对并发敏感，不要调高
+      - SM_SYNC_WORKERS=${SM_SYNC_WORKERS:-4}
+      # 留空即关闭外发 webhook 通知
+      - SM_ALERT_WEBHOOK_URL=${SM_ALERT_WEBHOOK_URL:-}
+      # 容器内固定 UTF-8，避免中文日志乱码/报错
+      - SM_CONSOLE_ENCODING=utf-8
+
+    # 对外端口。改端口需同步：Lighthouse 防火墙规则、下方 SM_BIND、健康探测地址
+    ports:
+      - "${SM_BIND:-0.0.0.0:8770}:8770"
+
+    # 日志轮转：不配的话 json-file 会无限增长把磁盘写满
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+    # 首次启动要建库 + 起调度器，start_period 给足余量
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8770/api/v1/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  stockmaster-data:
+    name: ${SM_VOLUME:-stockmaster-data}
