@@ -219,6 +219,23 @@ class SyncService:
         return report
 
     # ----------------------------------------------------------- bulk/backfill
+    def sync_index_daily(self, code: str, start: date, end: date, adjust: str = ADJUST_RAW) -> int:
+        """Fetch and store one index's daily bars; returns rows written.
+
+        Indices must use the dedicated index endpoint (see
+        ``ProviderRegistry.fetch_index_daily``): the equity endpoint resolves a
+        *stock* symbol and fails for index codes on the backup providers.
+
+        Exposed as a service method so callers (the index sync job, tests) do not
+        have to reach through the private registry attribute.
+        """
+        canon = normalize(code)
+        bars = self._registry.fetch_index_daily(canon, start, end)
+        if not bars:
+            return 0
+        with session_scope() as session:
+            return repo.upsert_daily_bars(session, canon, bars, adjust)
+
     def sync_universe_daily(
         self,
         codes: list[str],

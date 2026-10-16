@@ -167,3 +167,21 @@ def approximate_trade_days(start: date, end: date) -> int:
 
 def default_history_start(years: int = 5, today: date | None = None) -> date:
     return (today or date.today()) - timedelta(days=365 * years)
+
+
+#: Indices shown on the dashboard. The sync job and the market-overview endpoint
+#: both derive from this list; keeping them separate previously left three cards
+#: permanently empty because the job only synced the first three.
+DASHBOARD_INDICES: tuple[tuple[str, str], ...] = (
+    ("000001.SH", "上证指数"),
+    ("399001.SZ", "深证成指"),
+    ("399006.SZ", "创业板指"),
+    ("000300.SH", "沪深300"),
+    ("000905.SH", "中证500"),
+    ("000852.SH", "中证1000"),
+)
+
+
+def dashboard_index_codes() -> tuple[str, ...]:
+    """Codes of the indices the dashboard displays."""
+    return tuple(code for code, _name in DASHBOARD_INDICES)

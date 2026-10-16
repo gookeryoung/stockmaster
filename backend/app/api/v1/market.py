@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import canonical_code, db_session, require_instrument
 from app.core.logging import get_logger
-from app.core.market import is_limit_down, is_limit_up
+from app.core.market import DASHBOARD_INDICES, is_limit_down, is_limit_up
 from app.db.models import DailyBar, Instrument
 from app.schemas import (
     BarOut,
@@ -26,15 +26,8 @@ from app.sync import repository as repo
 log = get_logger(__name__)
 router = APIRouter(tags=["market"])
 
-#: Indices shown on the dashboard.
-OVERVIEW_INDICES = (
-    ("000001.SH", "上证指数"),
-    ("399001.SZ", "深证成指"),
-    ("399006.SZ", "创业板指"),
-    ("000300.SH", "沪深300"),
-    ("000905.SH", "中证500"),
-    ("000852.SH", "中证1000"),
-)
+#: Indices shown on the dashboard (shared with the sync job so the two cannot drift).
+OVERVIEW_INDICES = DASHBOARD_INDICES
 
 
 @router.get("/stocks", response_model=InstrumentPage)

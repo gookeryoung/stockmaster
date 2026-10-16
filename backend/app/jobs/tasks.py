@@ -14,6 +14,7 @@ from time import monotonic
 from app.alert.channels import Notification, notify
 from app.alert.engine import AlertEngine
 from app.core.logging import get_logger
+from app.core.market import dashboard_index_codes
 from app.db.models import DataSyncTask, Prediction
 from app.db.session import session_scope
 from app.model.train import load_active_model, score_symbols
@@ -118,8 +119,15 @@ def _default_universe() -> list[str]:
         return known
 
 
-def job_sync_index_daily(index_codes: tuple[str, ...] = ("000300.SH", "000905.SH", "000001.SH")) -> dict:
-    """Sync index daily bars (used by the market overview page)."""
+def job_sync_index_daily(index_codes: tuple[str, ...] | None = None) -> dict:
+    """Sync index daily bars for every index the dashboard shows.
+
+    Defaults to `DASHBOARD_INDICES` rather than a hand-written subset, so a card can
+    never be empty simply because the job's list was shorter than the page's.
+    """
+    if index_codes is None:
+        index_codes = dashboard_index_codes()
+
     service = get_sync_service()
     written = 0
     errors: list[str] = []
@@ -128,12 +136,10 @@ def job_sync_index_daily(index_codes: tuple[str, ...] = ("000300.SH", "000905.SH
             last = repo.last_bar_date(session, code, "raw")
         start = (last - timedelta(days=1)) if last else date.today() - timedelta(days=365 * 5)
         try:
-            bars = service._registry.fetch_index_daily(code, start, date.today())
+            written += service.sync_index_daily(code, start, date.today())
         except Exception as exc:
             errors.append(f"{code}: {exc}")
             continue
-        with session_scope() as session:
-            written += repo.upsert_daily_bars(session, code, bars, "raw")
     return {"job": "index_daily", "bars_written": written, "errors": errors}
 
 
