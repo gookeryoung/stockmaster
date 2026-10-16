@@ -26,6 +26,17 @@ from app.providers.base import (
 
 log = get_logger(__name__)
 
+#: Actions whose *first positional argument* is a single security code, and are
+#: therefore subject to the per-provider :meth:`BaseProvider.supports` check.
+#:
+#: Every other action must be exempt: ``fetch_calendar(start, end)`` takes dates
+#: and ``fetch_snapshot(codes)`` takes a list, so probing them with ``supports``
+#: fed a ``date``/``list`` into ``normalize(code)``. Each provider swallowed the
+#: resulting ``DataError`` and reported "unsupported", which made the registry
+#: skip *every* provider and fail the whole action — calendar sync was silently
+#: dead. Keep this set in sync with the dispatch sites below.
+_SYMBOL_ACTIONS = frozenset({"fetch_daily", "fetch_index_daily"})
+
 
 @dataclass
 class ProviderState:
@@ -135,8 +146,8 @@ class ProviderRegistry:
                 errors.append(f"{name}: unsupported {action}")
                 continue
             # Capability gap, not a failure: skip without touching provider health.
-            supported = getattr(provider, "supports", None)
-            if supported is not None and args and not supported(args[0]):
+            # Only symbol-scoped actions are probed — see ``_SYMBOL_ACTIONS``.
+            if action in _SYMBOL_ACTIONS and args and not self._supports(provider, args[0]):
                 errors.append(f"{name}: does not support {args[0]}")
                 continue
             try:
@@ -159,6 +170,24 @@ class ProviderRegistry:
 
         detail = "; ".join(errors) if errors else "no providers configured"
         raise ProviderUnavailable(f"all providers failed for {action}: {detail}")
+
+    @staticmethod
+    def _supports(provider: BaseProvider, code: str) -> bool:
+        """Ask a provider whether it covers ``code``, tolerating a broken hook.
+
+        A raising ``supports`` is a bug in the provider, not evidence of a
+        coverage gap. Assume support so the real call runs and produces a
+        diagnosable error, instead of silently black-holing the action the way
+        the old unconditional probe did.
+        """
+        hook = getattr(provider, "supports", None)
+        if hook is None:
+            return True
+        try:
+            return bool(hook(code))
+        except Exception as exc:
+            log.warning("supports() raised for %s(%r): %s", provider.name, code, exc)
+            return True
 
     # -------------------------------------------------------------- interface
     def fetch_daily(

@@ -158,6 +158,63 @@ class TestMockProvider:
         assert snaps[0].code == "600519.SH"
 
 
+class TestCapabilityProbe:
+    """``supports()`` must only ever see a security code.
+
+    Regression guard: the probe used to run for every action, so
+    ``fetch_calendar(start, end)`` had its ``date`` fed into ``normalize()``;
+    all three providers answered "unsupported" and calendar sync died with
+    ``ProviderUnavailable: all providers failed``.
+    """
+
+    def test_calendar_never_calls_supports(self, window):
+        class DatePhobic(MockProvider):
+            name = "datephobic"
+
+            def supports(self, code):
+                raise AssertionError("supports() must not be called for fetch_calendar")
+
+        reg = ProviderRegistry([DatePhobic()], order=["datephobic"])
+        days = reg.fetch_calendar(*window)
+        assert days
+
+    def test_snapshot_never_calls_supports(self):
+        class ListPhobic(MockProvider):
+            name = "listphobic"
+
+            def supports(self, code):
+                raise TypeError("expected str, got list")
+
+        reg = ProviderRegistry([ListPhobic()], order=["listphobic"])
+        snaps = reg.fetch_snapshot(["600519.SH"])
+        assert snaps and snaps[0].code == "600519.SH"
+
+    def test_symbol_action_still_honours_supports(self, window):
+        class NoBeijing(MockProvider):
+            name = "nobj"
+
+            def supports(self, code):
+                return not code.endswith(".BJ")
+
+        reg = ProviderRegistry([NoBeijing(), MockProvider(name="backup")], order=["nobj", "backup"])
+        bars, source = reg.fetch_daily_with_source("430047.BJ", *window)
+        assert source == "backup" and bars
+        # A capability gap must not be charged against the provider's health.
+        assert reg._states["nobj"].failures == 0
+        assert reg._states["nobj"].consecutive_failures == 0
+
+    def test_raising_supports_is_treated_as_supported(self, window):
+        class Broken(MockProvider):
+            name = "broken"
+
+            def supports(self, code):
+                raise RuntimeError("hook is broken")
+
+        reg = ProviderRegistry([Broken()], order=["broken"])
+        bars = reg.fetch_daily("600519.SH", *window)
+        assert bars
+
+
 class TestFailingProvider:
     def test_counts_calls(self, window):
         p = FailingProvider()
