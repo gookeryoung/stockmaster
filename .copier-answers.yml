@@ -1,0 +1,19 @@
+# Changes here will be overwritten by Copier
+_commit: v1.0.10
+_src_path: https://gitee.com/gooker_young/coopie.git
+author_email: gooker_young@qq.com
+author_name: gookeryoung
+coverage_fail_under: 95
+description: 日线股票分析工具
+license: MIT
+max_python_version: '3.13'
+min_python_version: '3.13'
+package_name: stockmaster
+project_name: stockmaster
+project_type: web
+use_cicd: true
+use_docker: true
+use_docs: true
+use_domestic_mirrors: true
+use_tox: true
+
