@@ -16,9 +16,15 @@ ARG BASE_REGISTRY=mirror.ccs.tencentyun.com/library
 
 # ── 阶段 1：前端构建 ────────────────────────────────────────────────
 FROM ${BASE_REGISTRY}/node:22-alpine AS frontend-build
-ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
-    NPM_CONFIG_FUND=false \
-    NPM_CONFIG_AUDIT=false
+# 国内 npm 源。变量名必须是小写 npm_config_*：pnpm 只认小写形式与 .npmrc，
+# 大写 NPM_CONFIG_REGISTRY 它读不到。一旦 registry 没生效，pnpm 会用默认的
+# registry.npmjs.org 取元数据，而 lockfile 里 193 条 resolution 记录的是
+# registry.npmmirror.com 的 tarball 地址 —— 两者不一致会直接触发 pnpm 的
+# 供应链校验错误 ERR_PNPM_TARBALL_URL_MISMATCH 并终止安装。
+ENV npm_config_registry=https://registry.npmmirror.com \
+    npm_config_fund=false \
+    npm_config_audit=false
+RUN printf 'registry=https://registry.npmmirror.com\nfund=false\naudit=false\n' > /root/.npmrc
 WORKDIR /build/frontend
 # 先只拷依赖清单命中层缓存；lock 与 package.json 失配时 --frozen-lockfile 直接失败，
 # 而不是静默重新解析（避免线上产物与本地/CI 不一致）。
