@@ -3,6 +3,8 @@
 #
 # 与同机的 cndb 并存：cndb 的 nginx 容器独占 80/443，本服务因此
 # 对外使用独立端口 8770（http://<域名>:8770），互不影响。
+# 需要 HTTPS 时跑 deploy/setup-tls.sh：借道 cndb 的 nginx 加一个
+# server_name=stock.gookeryoung.cn 的 server 块反代到本容器（443 无法再绑）。
 #
 # 设计要点：
 #   - 镜像由 deploy/deploy.sh 在服务器本地构建，本文件只引用 .env 里的镜像地址
@@ -47,6 +49,10 @@ services:
       - SM_ALERT_WEBHOOK_URL=${SM_ALERT_WEBHOOK_URL:-}
       # 容器内固定 UTF-8，避免中文日志乱码/报错
       - SM_CONSOLE_ENCODING=utf-8
+      # 反向代理（deploy/setup-tls.sh 接入的 stock.gookeryoung.cn）不在 127.0.0.1，
+      # uvicorn 默认只信 127.0.0.1 的 X-Forwarded-*，不放开会把 nginx 容器的 IP
+      # 记成客户端 IP，也认不出 X-Forwarded-Proto=https。
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-*}
 
     # 对外端口。改端口需同步：Lighthouse 防火墙规则、下方 SM_BIND、健康探测地址
     ports:
