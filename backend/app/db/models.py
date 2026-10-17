@@ -554,6 +554,109 @@ class WorkspaceMember(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Strategy configuration — workspace-scoped presets (选股 / 样本 / 算法)
+# --------------------------------------------------------------------------- #
+
+
+class ScreeningConfig(Base):
+    """选股配置：可复用的筛选条件 + 排序 + 条数上限。
+
+    条件集合整体以 JSON 存放（分数阈值、波动/成交额门槛、板块、逐字段条件等），
+    因为这些字段会随筛选能力演进增删，而且**从不参与 SQL 过滤**——求值在应用层
+    对 ``factors`` 表做，SQL 只负责按 ``workspace_id`` 取本工作区的配置。需要真正
+    约束的只有两件事：归属（``workspace_id``）与工作区内重名（唯一约束）。
+    """
+
+    __tablename__ = "screening_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, default=WORKSPACE_UNASSIGNED, nullable=False)
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str] = mapped_column(String(256), default="")
+    params_json: Mapped[str] = mapped_column(Text, default="{}")
+    # 审计用：谁建的。不加外键——账号不硬删除，且工作区数据要能在鉴权关闭时独立存在。
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        # 名字是用户识别配置的唯一入口；同工作区两条同名配置会让「按名字选」变得
+        # 不确定，所以放在数据库约束里，而不是只在服务层靠先查再插（并发会漏）。
+        UniqueConstraint("workspace_id", "name", name="uq_screening_config_name"),
+        Index("ix_screening_configs_workspace", "workspace_id"),
+    )
+
+
+class SampleConfig(Base):
+    """样本配置：训练/评估用哪个标的池、哪段日期、预测多远。
+
+    ``universe_type`` 决定 ``universe_value`` 怎么解释：
+
+    * ``watchlist`` —— 本工作区某个自选清单的名字；
+    * ``screening`` —— 某个选股配置的 id（字符串存，求值时解析）；
+    * ``codes`` —— 逗号/空白分隔的显式代码；
+    * ``default`` —— 交给 ``_default_universe()`` 的默认宇宙（自选/指数成分/全部标的）。
+
+    日期窗口二选一：显式 ``start_date``/``end_date``，或相对最新数据的
+    ``lookback_days``。两者都空时用全量历史。
+    """
+
+    __tablename__ = "sample_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, default=WORKSPACE_UNASSIGNED, nullable=False)
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str] = mapped_column(String(256), default="")
+    universe_type: Mapped[str] = mapped_column(String(16), default="default")
+    universe_value: Mapped[str] = mapped_column(String(512), default="")
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    lookback_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    horizon: Mapped[int] = mapped_column(Integer, default=5)
+    min_bars: Mapped[int] = mapped_column(Integer, default=60)
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_sample_config_name"),
+        Index("ix_sample_configs_workspace", "workspace_id"),
+    )
+
+
+class AlgorithmConfig(Base):
+    """算法配置：用哪个算法、什么超参、在哪个样本上训练。
+
+    ``sample_id`` 可空（空 = 用默认宇宙/默认窗口）；删除样本配置时置空而不是级联
+    删除算法配置——算法定义本身仍然有效，只是暂时没有绑定样本。
+    """
+
+    __tablename__ = "algorithm_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, default=WORKSPACE_UNASSIGNED, nullable=False)
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str] = mapped_column(String(256), default="")
+    algo: Mapped[str] = mapped_column(String(32), default="hist_gbdt")
+    params_json: Mapped[str] = mapped_column(Text, default="{}")
+    sample_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("sample_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    horizon: Mapped[int] = mapped_column(Integer, default=5)
+    test_fraction: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_algorithm_config_name"),
+        Index("ix_algorithm_configs_workspace", "workspace_id"),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Accounts and authentication
 # --------------------------------------------------------------------------- #
 

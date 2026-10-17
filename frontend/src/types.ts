@@ -344,3 +344,126 @@ export interface RestoreInspection {
   backup_ahead: boolean;
   target: { tables: number; rows: number; schema_version: string };
 }
+
+// ---------------------------------------------------------------------------
+// Strategy configuration (workspace-scoped presets: 选股 / 样本 / 算法)
+// ---------------------------------------------------------------------------
+
+/** 选股条件的比较运算符（后端白名单同此集合）。 */
+export type ScreeningOp = ">=" | "<=" | ">" | "<" | "==";
+
+export interface ScreeningCondition {
+  field: string;
+  op: ScreeningOp;
+  value: number;
+}
+
+export interface ScreeningParams {
+  min_score: number | null;
+  max_vol: number | null;
+  min_amount_log: number | null;
+  exclude_st: boolean;
+  boards: string[];
+  conditions: ScreeningCondition[];
+  order_by: string;
+  direction: "asc" | "desc";
+  limit: number;
+}
+
+export interface ScreeningConfigInput {
+  name: string;
+  description?: string;
+  params?: Partial<ScreeningParams>;
+}
+
+export interface ScreeningConfig {
+  id: number;
+  workspace_id: number;
+  name: string;
+  description: string;
+  params: ScreeningParams;
+  created_by: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ScreeningRunResult {
+  trade_date: string | null;
+  count: number;
+  items: ScreenRow[];
+}
+
+/** 样本的标的来源：自选清单 / 引用选股配置 / 显式代码 / 默认宇宙。 */
+export type SampleUniverseType = "watchlist" | "screening" | "codes" | "default";
+
+export interface SampleConfigInput {
+  name: string;
+  description?: string;
+  universe_type: SampleUniverseType;
+  universe_value?: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  lookback_days?: number | null;
+  horizon?: number;
+  min_bars?: number;
+}
+
+export interface SampleConfig {
+  id: number;
+  workspace_id: number;
+  name: string;
+  description: string;
+  universe_type: SampleUniverseType;
+  universe_value: string;
+  start_date: string | null;
+  end_date: string | null;
+  lookback_days: number | null;
+  horizon: number;
+  min_bars: number;
+  created_by: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SampleResolveResult {
+  codes: string[];
+  count: number;
+  start: string | null;
+  end: string | null;
+  horizon: number;
+}
+
+export interface AlgorithmConfigInput {
+  name: string;
+  description?: string;
+  algo: string;
+  /** 超参只接受数值：后端按算法白名单校验类型与范围。 */
+  params?: Record<string, number>;
+  sample_id?: number | null;
+  horizon?: number;
+  test_fraction?: number | null;
+}
+
+export interface AlgorithmConfig {
+  id: number;
+  workspace_id: number;
+  name: string;
+  description: string;
+  algo: string;
+  params: Record<string, number>;
+  sample_id: number | null;
+  horizon: number;
+  test_fraction: number | null;
+  created_by: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AlgorithmTrainResult {
+  model_id: string;
+  algo: string;
+  horizon: number;
+  metrics: Record<string, unknown>;
+  n_train: number;
+  n_test: number;
+}

@@ -50,17 +50,23 @@ def train_model(
     validation_fraction: float = 0.0,
     persist: bool = True,
     walk_forward: bool = False,
+    algo_params: dict | None = None,
 ) -> TrainedModel:
     """Fit, evaluate out-of-sample, and optionally persist a model.
 
     The test partition is never touched during fitting, and the training tail is
     purged of rows whose labels overlap it (see
     :func:`app.model.dataset.chronological_split`).
+
+    ``algo_params`` overrides the estimator's defaults (validated by the caller:
+    ``app.strategy.algorithm.validate_algo_params``), and is recorded in
+    ``model_registry.params_json`` so a configured model can be reproduced.
     """
     if algo not in AVAILABLE_ALGOS:
         raise ValueError(f"unknown algo {algo!r}; expected {AVAILABLE_ALGOS}")
     if dataset.frame.empty:
         raise InsufficientData("dataset is empty; sync history before training")
+    overrides = dict(algo_params or {})
 
     test_fraction = settings.test_fraction if test_fraction is None else test_fraction
     split: Split = chronological_split(dataset, test_fraction=test_fraction, validation_fraction=validation_fraction)
@@ -71,7 +77,13 @@ def train_model(
             f"({len(split.train)} train rows, {len(split.test)} test rows)"
         )
 
-    estimator = fit_model(algo, split.train, dataset.feature_columns, label_column=dataset.label_column)
+    estimator = fit_model(
+        algo,
+        split.train,
+        dataset.feature_columns,
+        label_column=dataset.label_column,
+        **overrides,
+    )
     probabilities = predict_proba(estimator, split.test, dataset.feature_columns)
     metrics = evaluate_predictions(
         split.test,
@@ -101,7 +113,7 @@ def train_model(
         }
 
     if walk_forward:
-        metrics["walk_forward"] = _walk_forward_report(dataset, algo)
+        metrics["walk_forward"] = _walk_forward_report(dataset, algo, overrides)
 
     importance = extract_importance(estimator, dataset.feature_columns)
 
@@ -117,6 +129,7 @@ def train_model(
         test_span=_span(split.test),
         n_train=len(split.train),
         n_test=len(split.test),
+        params=overrides,
     )
 
     log.info(
@@ -144,13 +157,19 @@ def _fmt(value) -> str:
     return "n/a" if value is None else f"{value:.4f}"
 
 
-def _walk_forward_report(dataset: Dataset, algo: str) -> list[dict]:
+def _walk_forward_report(dataset: Dataset, algo: str, overrides: dict | None = None) -> list[dict]:
     """Walk-forward stability report across expanding windows."""
     folds = time_series_folds(dataset.frame, n_splits=5, horizon=dataset.horizon)
     report: list[dict] = []
     for index, (train, test) in enumerate(folds):
         try:
-            estimator = fit_model(algo, train, dataset.feature_columns, label_column=dataset.label_column)
+            estimator = fit_model(
+                algo,
+                train,
+                dataset.feature_columns,
+                label_column=dataset.label_column,
+                **(overrides or {}),
+            )
             probabilities = predict_proba(estimator, test, dataset.feature_columns)
             metrics = evaluate_predictions(
                 test,
@@ -199,7 +218,7 @@ def _persist(model: TrainedModel) -> Path:
                 model_id=model.model_id,
                 algo=model.algo,
                 horizon=model.horizon,
-                params_json=json.dumps({"algo": model.algo}),
+                params_json=json.dumps({"algo": model.algo, "params": model.params}, default=str),
                 features_json=json.dumps(model.feature_columns),
                 train_start=_date_or_none(model.train_span, 0),
                 train_end=_date_or_none(model.train_span, 1),
@@ -243,6 +262,7 @@ def load_active_model(horizon: int = 1) -> TrainedModel:
             "artifact_path": row.artifact_path,
             "metrics_json": row.metrics_json,
             "importance_json": row.importance_json,
+            "params_json": row.params_json,
             "n_train": row.n_train,
             "n_test": row.n_test,
             "train_start": row.train_start,
@@ -268,6 +288,7 @@ def load_active_model(horizon: int = 1) -> TrainedModel:
         n_test=payload["n_test"],
         train_span=((str(payload["train_start"]), str(payload["train_end"])) if payload["train_start"] else None),
         test_span=((str(payload["test_start"]), str(payload["test_end"])) if payload["test_start"] else None),
+        params=json.loads(payload["params_json"] or "{}").get("params", {}),
     )
 
 

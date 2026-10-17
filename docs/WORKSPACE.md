@@ -71,6 +71,10 @@ workspace_id: Mapped[int] = mapped_column(Integer, default=WORKSPACE_UNASSIGNED,
 
 同名清单同一只股票，现在允许在不同工作区各存一份（之前按用户也各存一份）。
 
+选股 / 样本 / 算法三类策略配置同样是工作区私有数据（`workspace_id` 归属同上、工作区内
+`name` 唯一），它们如何被命名复用、谁能运行与训练见
+[`docs/STRATEGY_CONFIGS.md`](STRATEGY_CONFIGS.md)。
+
 ### 共享参考数据不动
 
 行情/指标/模型（类别 A）与同步任务/审计（类别 B）仍然全局一份。
@@ -193,4 +197,9 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 
 - **按工作区通知通道**：webhook 仍是全站一个（原 PR-3）；
 - **配额与统计**：工作区级配额、用户页数据量统计（原 PR-4）；
-- 工作区级预警参数覆盖、共享清单细粒度可见性。
+- 工作区级预警参数覆盖、共享清单细粒度可见性；
+- ~~工作区级策略配置~~：**已实现** —— 选股 / 样本 / 算法三类命名配置随工作区隔离与角色权限，
+  支持 `viewer` 只读运行；详见 [`docs/STRATEGY_CONFIGS.md`](STRATEGY_CONFIGS.md)。三张新表
+  （`screening_configs` / `sample_configs` / `algorithm_configs`）已加入 `DATA_MODELS`：
+  删除工作区时计入 `data_counts()` 与 `purge` 清理，`workspace claim` 也能认领
+  `workspace_id = 0` 的未归属配置（同名冲突计入 `duplicates_skipped`）。

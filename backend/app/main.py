@@ -126,7 +126,7 @@ def create_app() -> FastAPI:
     )
 
     # --- API routers ---
-    from app.api.v1 import admin, alerts, analysis, auth, backtest, market, predict, system, users, workspaces
+    from app.api.v1 import admin, alerts, analysis, auth, backtest, market, predict, strategy, system, users, workspaces
 
     api_prefix = "/api/v1"
     app.include_router(market.router, prefix=api_prefix)
@@ -134,6 +134,7 @@ def create_app() -> FastAPI:
     app.include_router(predict.router, prefix=api_prefix)
     app.include_router(backtest.router, prefix=api_prefix)
     app.include_router(alerts.router, prefix=api_prefix)
+    app.include_router(strategy.router, prefix=api_prefix)
     app.include_router(system.router, prefix=api_prefix)
     app.include_router(auth.router, prefix=api_prefix)
     app.include_router(users.router, prefix=api_prefix)

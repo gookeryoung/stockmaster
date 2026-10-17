@@ -11,6 +11,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { todayISO, yearsAgoISO } from "./format";
+import type { SampleUniverseType } from "./types";
 
 export interface MarketView {
   search: string;
@@ -62,6 +63,57 @@ export interface SettingsView {
   newWatchCode: string;
 }
 
+/** 策略配置页的三个 tab 与各自的表单草稿。
+ *
+ * ``conditions`` 用纯文本维护（每行 ``field op value``），提交前解析成
+ * ``ScreeningCondition[]``：用 JSON 文本框对普通用户太不友好，而结构化条件行
+ * 编辑器在表单里会占掉半屏。``params`` 同理保存超参的字符串草稿。
+ */
+export interface ScreeningConfigForm {
+  name: string;
+  description: string;
+  min_score: string;
+  max_vol: string;
+  min_amount_log: string;
+  exclude_st: boolean;
+  boards: string;
+  conditions: string;
+  order_by: string;
+  direction: "asc" | "desc";
+  limit: number;
+}
+
+export interface SampleConfigForm {
+  name: string;
+  description: string;
+  universe_type: SampleUniverseType;
+  universe_value: string;
+  start: string;
+  end: string;
+  lookback_days: number;
+  horizon: number;
+  min_bars: number;
+}
+
+export interface AlgorithmConfigForm {
+  name: string;
+  description: string;
+  algo: string;
+  sample_id: string;
+  horizon: number;
+  test_fraction: string;
+  params: Record<string, string>;
+}
+
+export type StrategyTab = "screening" | "sample" | "algorithm";
+
+export interface StrategyView {
+  tab: StrategyTab;
+  screening: ScreeningConfigForm;
+  sample: SampleConfigForm;
+  algorithm: AlgorithmConfigForm;
+}
+
 interface ViewState {
   market: MarketView;
   analyze: AnalyzeView;
@@ -69,6 +121,7 @@ interface ViewState {
   backtest: BacktestView;
   alerts: AlertsView;
   settings: SettingsView;
+  strategy: StrategyView;
 
   setMarket: (patch: Partial<MarketView>) => void;
   setAnalyze: (patch: Partial<AnalyzeView>) => void;
@@ -77,6 +130,10 @@ interface ViewState {
   setAlerts: (patch: Partial<Omit<AlertsView, "form">>) => void;
   setAlertForm: (patch: Partial<AlertRuleForm>) => void;
   setSettings: (patch: Partial<SettingsView>) => void;
+  setStrategy: (patch: Partial<Omit<StrategyView, "screening" | "sample" | "algorithm">>) => void;
+  setScreeningForm: (patch: Partial<ScreeningConfigForm>) => void;
+  setSampleForm: (patch: Partial<SampleConfigForm>) => void;
+  setAlgorithmForm: (patch: Partial<AlgorithmConfigForm>) => void;
 }
 
 const DEFAULT_MARKET: MarketView = { search: "", selected: "600519.SH", adjust: "qfq" };
@@ -111,6 +168,42 @@ const DEFAULT_ALERTS: AlertsView = {
   params: { threshold: "100", direction: "above" },
 };
 const DEFAULT_SETTINGS: SettingsView = { newWatchCode: "" };
+const DEFAULT_STRATEGY: StrategyView = {
+  tab: "screening",
+  screening: {
+    name: "",
+    description: "",
+    min_score: "60",
+    max_vol: "",
+    min_amount_log: "",
+    exclude_st: true,
+    boards: "",
+    conditions: "",
+    order_by: "score",
+    direction: "desc",
+    limit: 50,
+  },
+  sample: {
+    name: "",
+    description: "",
+    universe_type: "watchlist",
+    universe_value: "default",
+    start: "",
+    end: "",
+    lookback_days: 730,
+    horizon: 5,
+    min_bars: 60,
+  },
+  algorithm: {
+    name: "",
+    description: "",
+    algo: "hist_gbdt",
+    sample_id: "",
+    horizon: 5,
+    test_fraction: "0.2",
+    params: { max_iter: "300", learning_rate: "0.05", max_depth: "4", min_samples_leaf: "50" },
+  },
+};
 
 export const useViewState = create<ViewState>()(
   persist(
@@ -125,6 +218,12 @@ export const useViewState = create<ViewState>()(
         params: { ...DEFAULT_ALERTS.params },
       },
       settings: { ...DEFAULT_SETTINGS },
+      strategy: {
+        ...DEFAULT_STRATEGY,
+        screening: { ...DEFAULT_STRATEGY.screening },
+        sample: { ...DEFAULT_STRATEGY.sample },
+        algorithm: { ...DEFAULT_STRATEGY.algorithm, params: { ...DEFAULT_STRATEGY.algorithm.params } },
+      },
 
       setMarket: (patch) => set((state) => ({ market: { ...state.market, ...patch } })),
       setAnalyze: (patch) => set((state) => ({ analyze: { ...state.analyze, ...patch } })),
@@ -134,6 +233,15 @@ export const useViewState = create<ViewState>()(
       setAlertForm: (patch) =>
         set((state) => ({ alerts: { ...state.alerts, form: { ...state.alerts.form, ...patch } } })),
       setSettings: (patch) => set((state) => ({ settings: { ...state.settings, ...patch } })),
+      setStrategy: (patch) => set((state) => ({ strategy: { ...state.strategy, ...patch } })),
+      setScreeningForm: (patch) =>
+        set((state) => ({ strategy: { ...state.strategy, screening: { ...state.strategy.screening, ...patch } } })),
+      setSampleForm: (patch) =>
+        set((state) => ({ strategy: { ...state.strategy, sample: { ...state.strategy.sample, ...patch } } })),
+      setAlgorithmForm: (patch) =>
+        set((state) => ({
+          strategy: { ...state.strategy, algorithm: { ...state.strategy.algorithm, ...patch } },
+        })),
     }),
     {
       name: "stockmaster.view",
@@ -145,6 +253,7 @@ export const useViewState = create<ViewState>()(
         backtest: state.backtest,
         alerts: state.alerts,
         settings: state.settings,
+        strategy: state.strategy,
       }),
     },
   ),

@@ -15,7 +15,7 @@ Deliberate choices
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import numpy as np
@@ -53,6 +53,8 @@ class TrainedModel:
     test_span: tuple | None = None
     n_train: int = 0
     n_test: int = 0
+    #: 实际生效的超参（算法配置训练时由调用方传入），写进 model_registry 以便复现。
+    params: dict = field(default_factory=dict)
 
     def predict_proba(self, feature_frame: pd.DataFrame) -> np.ndarray:
         """Positive-class probability for each row."""

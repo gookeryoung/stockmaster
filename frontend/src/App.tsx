@@ -9,6 +9,7 @@ import Analyze from "./pages/Analyze";
 import Predict from "./pages/Predict";
 import Backtest from "./pages/Backtest";
 import Alerts from "./pages/Alerts";
+import StrategyConfigs from "./pages/StrategyConfigs";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
@@ -81,6 +82,7 @@ function Layout() {
     { to: "/", label: "总览" },
     { to: "/market", label: "行情" },
     { to: "/analyze", label: "分析" },
+    { to: "/strategy", label: "策略" },
     { to: "/predict", label: "预测" },
     { to: "/backtest", label: "回测" },
     { to: "/alerts", label: "预警" },
@@ -139,6 +141,7 @@ function Layout() {
           <Route path="/predict" element={<Predict />} />
           <Route path="/backtest" element={<Backtest />} />
           <Route path="/alerts" element={<Alerts />} />
+          <Route path="/strategy" element={<StrategyConfigs />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/workspace" element={<WorkspacePage />} />
           <Route path="/account" element={<Account />} />

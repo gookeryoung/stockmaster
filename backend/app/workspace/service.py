@@ -22,7 +22,10 @@ from app.core.logging import get_logger
 from app.db.models import (
     AlertRule,
     AlertTrigger,
+    AlgorithmConfig,
     BacktestRun,
+    SampleConfig,
+    ScreeningConfig,
     User,
     WatchlistItem,
     Workspace,
@@ -43,7 +46,20 @@ SHARED_KIND = "shared"
 
 #: 工作区里的「用户私有数据」表。行情、因子、模型、任务不在此列 —— 它们是全站
 #: 共享的参考数据，复制 N 份同样的 K 线没有意义。
-DATA_MODELS = (WatchlistItem, AlertRule, AlertTrigger, BacktestRun)
+#: 顺序有讲究：``algorithm_configs`` 引用 ``sample_configs``，删除/搬运时先处理前者。
+DATA_MODELS = (
+    WatchlistItem,
+    AlertRule,
+    AlertTrigger,
+    BacktestRun,
+    AlgorithmConfig,
+    SampleConfig,
+    ScreeningConfig,
+)
+
+#: 带「工作区内唯一名称」约束的配置表。认领数据时必须特殊处理：直接 UPDATE 会把
+#: 两条同名行塞进同一个工作区并撞唯一约束。
+CONFIG_MODELS = (ScreeningConfig, SampleConfig, AlgorithmConfig)
 
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 256
@@ -291,6 +307,9 @@ def _format_counts(counts: dict[str, int]) -> str:
         "alert_rules": "规则",
         "alert_triggers": "预警",
         "backtest_runs": "回测",
+        "screening_configs": "选股配置",
+        "sample_configs": "样本配置",
+        "algorithm_configs": "算法配置",
     }
     return "、".join(f"{labels.get(k, k)} {v}" for k, v in counts.items() if v)
 
@@ -427,11 +446,12 @@ def claim_unassigned(
 
     为什么不直接 ``UPDATE ... SET workspace_id = ?``
     -----------------------------------------------
-    ``watchlist_items`` 的唯一约束是 ``(workspace_id, list_name, code)``。如果目标
-    工作区已经手动加过同一只股票，直接搬会撞约束。这里对冲突行只删「旧的无主副本」，
-    保留工作区自己那份（连同它自己的 note），并如实报告跳过数量。
+    ``watchlist_items`` 的唯一约束是 ``(workspace_id, list_name, code)``，三张策略配置
+    表还有 ``(workspace_id, name)``。如果目标工作区已经有同键数据，直接搬会撞约束。
+    这里对冲突行只删「旧的无主副本」，保留工作区自己那份（连同它自己的 note / 参数），
+    并如实报告跳过数量。
 
-    单条 UPDATE 搬其余三张表：逐行循环在大表上会把 SQLite 写锁占满。
+    普通表单条 UPDATE；配置表必须逐行搬：名称冲突要按「先到先得」保留目标工作区那份。
     """
     workspace_or_404(session, workspace_id)
 
@@ -457,6 +477,28 @@ def claim_unassigned(
         )
     counts["duplicates_skipped"] = len(conflicts)
 
+    # 配置表：先算出每张表能搬多少行（同名冲突的旧副本会被删掉）。
+    config_movable: dict[type, list] = {}
+    config_conflicts: dict[type, list] = {}
+    for model in CONFIG_MODELS:
+        target_names = set(session.execute(select(model.name).where(model.workspace_id == workspace_id)).scalars())
+        rows = list(session.execute(select(model).where(clause(model))).scalars())
+        if overwrite:
+            rows = [row for row in rows if row.workspace_id != workspace_id]
+        movable_rows: list = []
+        conflicting_rows: list = []
+        used = set(target_names)
+        for row in rows:
+            if row.name in used:
+                conflicting_rows.append(row)
+                continue
+            used.add(row.name)
+            movable_rows.append(row)
+        config_movable[model] = movable_rows
+        config_conflicts[model] = conflicting_rows
+        counts[model.__tablename__] = len(movable_rows)
+        counts["duplicates_skipped"] += len(conflicting_rows)
+
     if dry_run:
         return counts
 
@@ -466,11 +508,19 @@ def claim_unassigned(
         row.workspace_id = workspace_id
     for model in (AlertRule, AlertTrigger, BacktestRun):
         session.execute(update(model).where(clause(model)).values(workspace_id=workspace_id))
+    # 配置表逐行改归属：同名冲突的旧副本删除，其余搬进目标工作区。
+    for rows in config_conflicts.values():
+        for row in rows:
+            session.delete(row)
+    for rows in config_movable.values():
+        for row in rows:
+            row.workspace_id = workspace_id
     session.commit()
     return counts
 
 
 __all__ = [
+    "CONFIG_MODELS",
     "DATA_MODELS",
     "PERSONAL_KIND",
     "SHARED_KIND",
