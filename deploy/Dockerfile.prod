@@ -57,6 +57,10 @@ WORKDIR /app
 # 装运行期依赖：只装 pyproject 的基础依赖，dev/test/docs 额外组一律不装
 RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock README.md ./
+# backend/migrations 随下面的 COPY 一起进镜像；alembic.ini 在仓库根，必须单独拷，
+# 否则容器内 `stockmaster db current` 找不到迁移目录（app.db.migrations 用的是绝对路径，
+# 不依赖 cwd，但根目录下的 ini 仍是开发者用 alembic CLI 的入口）。
+COPY alembic.ini ./
 COPY backend/ ./backend/
 RUN uv sync --frozen --no-install-project
 

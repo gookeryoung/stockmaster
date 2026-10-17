@@ -88,17 +88,35 @@ def get_db() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Create all tables. Idempotent; Alembic is used for real migrations.
+    """Bring the schema to the current version. Idempotent.
 
-    Imports the model module explicitly so ``Base.metadata`` is fully populated
-    even when a caller reaches ``init_db`` without importing ``app.db`` first.
-    Without that, ``create_all`` would silently build a partial schema.
+    Order matters: ``create_all`` first (a brand-new database gets every table in
+    one shot), then the Alembic bridge, which either stamps an existing
+    un-versioned database or applies pending deltas. Doing it the other way round
+    would make a fresh install replay migrations against an empty database.
+
+    The model module is imported explicitly so ``Base.metadata`` is fully
+    populated even when a caller reaches ``init_db`` without importing ``app.db``
+    first. Without that, ``create_all`` would silently build a partial schema.
     """
     settings.ensure_dirs()
     import app.db.models  # noqa: F401 - registers ORM mappers
+    from app.db.migrations import current_revision, ensure_migrated, head_revision
 
     engine = get_engine()
-    Base.metadata.create_all(engine)
+    if settings.db_auto_migrate:
+        ensure_migrated(engine)
+    else:
+        # 运维要求「先显式迁移再启动」时：只建缺失的表，不改版本、不跑增量。
+        # 版本落后要吭声，否则会以「少一列」的形式在业务查询里才爆出来。
+        Base.metadata.create_all(engine)
+        current, head = current_revision(engine=engine), head_revision()
+        if current != head:
+            log.warning(
+                "SM_DB_AUTO_MIGRATE=false 且数据库版本 %s ≠ 最新 %s；请执行 `stockmaster db upgrade`",
+                current or "未纳管",
+                head,
+            )
 
     # Verify the schema is complete rather than trusting create_all.
     from sqlalchemy import inspect

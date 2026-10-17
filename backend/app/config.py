@@ -80,6 +80,16 @@ class Settings(BaseSettings):
     # Bootstrap administrator, created on startup when it does not exist yet.
     auth_admin_username: str = ""
     auth_admin_password: str = ""
+    # --- Maintenance ---
+    # 启动时自动把库结构带到最新（create_all + Alembic）。生产若要求「先显式迁移
+    # 再启动」，把它设为 false，启动时只告警不升级，由 deploy.sh 调 `db upgrade`。
+    db_auto_migrate: bool = True
+    # 自动备份保留份数（本地 backups 目录，0 表示不清理）
+    backup_keep: int = 7
+    # 备份是否包含 <数据目录>/.auth_secret。包含才能「整体回到过去」（否则恢复后
+    # 所有人被踢下线、已签发的微信 state 全部失效），但归档因此等同凭据，需妥善保管。
+    backup_include_secret: bool = True
+
     # --- WeChat login ---
     # open = 网站应用扫码 (open.weixin.qq.com), mp = 公众号网页授权,
     # mock = 本地模拟（无凭据时演练流程）, off = 关闭。
@@ -135,6 +145,11 @@ class Settings(BaseSettings):
         return self.data_path / "models"
 
     @property
+    def backups_path(self) -> Path:
+        """Local backup directory (inside the data volume, so volume backups carry it)."""
+        return self.data_path / "backups"
+
+    @property
     def provider_priority(self) -> list[str]:
         return [p.strip() for p in self.provider_order.split(",") if p.strip()]
 
@@ -184,6 +199,7 @@ class Settings(BaseSettings):
         """Create the data directories if missing."""
         self.data_path.mkdir(parents=True, exist_ok=True)
         self.models_dir.mkdir(parents=True, exist_ok=True)
+        self.backups_path.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)
