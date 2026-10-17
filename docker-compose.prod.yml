@@ -80,9 +80,16 @@ services:
       # 记成客户端 IP，也认不出 X-Forwarded-Proto=https。
       - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-*}
 
-    # 对外端口。改端口需同步：Lighthouse 防火墙规则、下方 SM_BIND、健康探测地址
+    # 对外端口。生产与 cndb 的 nginx 同机反代（HTTPS 入口），SM_BIND 设 127.0.0.1
+    # 只绑宿主回环，公网不再直达 8770；独立部署时可改回 0.0.0.0 直连。
     ports:
-      - "${SM_BIND:-0.0.0.0:8770}:8770"
+      - "${SM_BIND:-127.0.0.1:8770}:8770"
+
+    # 与 cndb 的 nginx 共用一张网，nginx 用容器名回源，不依赖 172.18.0.1 网关。
+    # 没有 cndb 的部署环境删除本段与下方 networks 定义即可。
+    networks:
+      - default
+      - cndb_net
 
     # 日志轮转：不配的话 json-file 会无限增长把磁盘写满
     logging:
@@ -105,3 +112,8 @@ services:
 volumes:
   stockmaster-data:
     name: ${SM_VOLUME:-stockmaster-data}
+
+networks:
+  cndb_net:
+    external: true
+    name: cndb_default
