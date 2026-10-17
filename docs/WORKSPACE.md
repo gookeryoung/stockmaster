@@ -1,6 +1,7 @@
 # 工作区与角色权限设计
 
-> 状态：**已实施**（`0003_workspaces` 迁移 + Workspace/WorkspaceMember 表 + 读写路径改造 + 角色矩阵测试）。
+> 状态：**已实施**（`0003_workspaces` 迁移 + Workspace/WorkspaceMember 表 + 读写路径改造 +
+> 角色矩阵测试；`0005_workspace_channels` 起支持按工作区配置通知通道，见 §5.1）。
 > 开关：`SM_DATA_ISOLATION`，默认 `false`（= 无工作区概念的共享语义），可随时回退。
 > 前置：账号体系（`src/stockmaster/plugins/auth/`）已落地。
 > 本文取代 `docs/USER_ISOLATION.md` 的设计（owner_id 用户级隔离 → cndb 式工作区隔离），
@@ -121,7 +122,49 @@ def require_editor(...) -> WorkspaceCtx:
 |---|---|
 | 预警扫描 | `scope_type=watchlist` 时按 `(rule.workspace_id, list_name)` 解析自选（`AlertEngine._resolve_scope`） |
 | 每日同步 `_default_universe(workspace_id=None)` | `None` = 取**全站自选并集**（`DISTINCT code`）——调度器服务所有工作区；手动触发按单工作区取 |
-| 通知投递 | 仍是全站一个 webhook（`SM_ALERT_WEBHOOK_URL`），按工作区配通道是后续 PR |
+| 通知投递 | 按工作区路由：规则属于哪个工作区，就发到哪个工作区配置的通道（§5.1）。全局 `SM_ALERT_WEBHOOK_URL` 只用于 `workspace_id=0` 的未归属数据，或显式开启 `SM_ALERT_GLOBAL_FALLBACK` 时兜底 |
+
+### 5.1 工作区级通知通道（`0005_workspace_channels`）
+
+**问题**：隔离做到读写路径之后，通知出口仍是全站一个 `SM_ALERT_WEBHOOK_URL`。两个工作区同时触发预警时，提醒会混进同一个群机器人 —— A 组的股票代码、阈值和触发消息出现在 B 组的频道里。这不是显示问题，而是隔离在最后一步漏了。
+
+**数据模型**：`workspace_channels`
+
+| 列 | 语义 |
+|---|---|
+| `workspace_id` | FK → `workspaces.id`，`ON DELETE CASCADE`。通道**只属于真实工作区**：不存在 `workspace_id=0` 的「未归属通道」，隔离关闭时也不会写这张表 |
+| `name` | 成员识别「这条发到哪」的入口；`(workspace_id, name)` 唯一 |
+| `kind` | `webhook`（通用 JSON POST，适合钉钉/企微/Server酱中转）或 `bark`（iOS 推送） |
+| `url` | 含凭据（webhook token / Bark device key）；API **只返回掩码**，更新时省略 `url` 表示保持原值 |
+| `enabled` | 停用的通道留在列表里但不参与投递 |
+
+**投递路由**（`plugins/alerts/services/channels.py`）：
+
+| 场景 | 投递目标 |
+|---|---|
+| `SM_DATA_ISOLATION=false` | 全局通道 = database sink + `SM_ALERT_WEBHOOK_URL`，与引入工作区之前完全一致 |
+| 隔离开启，`workspace_id > 0` | database sink + 本工作区所有 `enabled` 通道；一个启用的都没有 → 不外发（严格隔离，默认） |
+| 隔离开启，工作区无通道且 `SM_ALERT_GLOBAL_FALLBACK=true` | 追加全局 webhook 兜底（给「先开隔离、通道后配」的过渡期留的开关） |
+| 隔离开启，`workspace_id = 0` | 全局通道 —— 未归属的历史触发记录本来就不属于任何工作区 |
+
+`notify()` 按 `workspace_id` 分组解析通道，返回的投递计数在隔离开启时带 `ws{id}:` 前缀（例如 `ws3:webhook`），便于排查「哪个工作区发出去了」。database sink 始终存在，所以即使没有任何外发通道，触发记录也不会丢。
+
+**权限**：通道是**数据出口**，写操作（增删改、发测试消息）仅 `owner`；任何成员可读列表，但 URL 一律脱敏。让 editor 能改通道等于允许他把工作区数据转发到任意地址，因此不随「可写数据」一起下放。接口：
+
+| 方法 | 路径 | 依赖 |
+|---|---|---|
+| `GET` | `/api/v1/workspaces/{id}/channels` | 成员（`path_workspace`），返回掩码 |
+| `POST` | `/api/v1/workspaces/{id}/channels` | `require_workspace_owner`，201 |
+| `PATCH` | `/api/v1/workspaces/{id}/channels/{channel_id}` | `require_workspace_owner` |
+| `DELETE` | `/api/v1/workspaces/{id}/channels/{channel_id}` | `require_workspace_owner`，204 |
+| `POST` | `/api/v1/workspaces/{id}/channels/{channel_id}/test` | `require_workspace_owner`；网络失败返回 `delivered=false`，不抛 500 |
+
+跨工作区拿 `channel_id` 访问一律 404（与其他私有资源同一约定）；同工作区重名 409。
+
+**前端**：「工作区」页新增「通知通道」区块：成员看到名称/类型/脱敏地址/启停状态，owner 追加增删改与「测试」按钮。没有通道时会提示「本工作区触发预警时不会外发」。隔离关闭时整页仍是「未启用数据隔离」说明，不出现该区块。
+
+**迁移与开关**：`0005_workspace_channels` 幂等建表（`create_all` 已建则跳过），不改任何既有表；不配置通道时升级后行为不变。`SM_ALERT_GLOBAL_FALLBACK` 默认 `false`。
+
 
 ## 6. 迁移：`0003_workspaces`
 
@@ -176,12 +219,19 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 - `tests/test_isolation.py`：重写为工作区语义 —— 两个工作区对每个私有端点交叉访问，
   参数化断言「404 或空列表，绝不返回对方数据」；同名清单同码股票在两个工作区互不冲突；
   预警规则只命中本工作区自选；匿名 + 隔离关闭落 workspace 0。
+- `tests/test_workspace_channels.py`：通道 CRUD 与角色矩阵 —— 仅 owner 可增删改/测试，
+  editor/viewer 403，非成员/跨工作区 404，URL 掩码不回显密钥，重名 409；
+- `tests/test_alert_notify.py`：按工作区投递 —— 隔离关闭保持旧 key 与全站 webhook；
+  两个工作区各收各的通知；停用/无通道/`SM_ALERT_GLOBAL_FALLBACK` 的三种分支；
+  `workspace_id=0` 走全局；`job_scan_alerts` 把触发所属工作区透传到 Notification。
 
 ## 10. 配置
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `SM_DATA_ISOLATION` | `false` | `false` = 无工作区概念，全员共享（旧语义，单机推荐）；`true` = 启用工作区隔离与角色权限 |
+| `SM_ALERT_WEBHOOK_URL` | 空 | 全局外发 webhook。隔离关闭时是唯一外发通道；隔离开启时只服务 `workspace_id=0` 或 fallback |
+| `SM_ALERT_GLOBAL_FALLBACK` | `false` | 隔离开启时，没有配置任何启用通道的工作区是否回落到全局 webhook；默认 `false` = 严格隔离 |
 
 `false` 时：workspace store 为空、请求不带 `X-Workspace-Id`、后端过滤退化为恒真、
 `require_editor` 恒通过 —— 行为与引入工作区之前逐字节一致。
@@ -195,7 +245,8 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 
 ## 11. 未做的（后续 PR）
 
-- **按工作区通知通道**：webhook 仍是全站一个（原 PR-3）；
+- ~~按工作区通知通道~~：**已实现** —— 见 §5.1（`0005_workspace_channels`、owner 管理
+  webhook/Bark 通道、按工作区路由投递、`SM_ALERT_GLOBAL_FALLBACK` 兜底开关）；
 - **配额与统计**：工作区级配额、用户页数据量统计（原 PR-4）；
 - 工作区级预警参数覆盖、共享清单细粒度可见性；
 - ~~工作区级策略配置~~：**已实现** —— 选股 / 样本 / 算法三类命名配置随工作区隔离与角色权限，

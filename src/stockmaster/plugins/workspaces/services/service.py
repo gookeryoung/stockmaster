@@ -15,7 +15,10 @@ HTTPException」而写两遍。
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from stockmaster.core.logging import get_logger
@@ -29,6 +32,7 @@ from stockmaster.db.models import (
     User,
     WatchlistItem,
     Workspace,
+    WorkspaceChannel,
     WorkspaceMember,
 )
 from stockmaster.plugins.workspaces.services.roles import (
@@ -63,6 +67,15 @@ CONFIG_MODELS = (ScreeningConfig, SampleConfig, AlgorithmConfig)
 
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 256
+
+#: 工作区级通知通道支持的投递类型。webhook 是通用 JSON POST（钉钉/企微/Server酱
+#: 中转），bark 走 iOS 推送；新增类型时 ``alerts.services.channels.build_channel``
+#: 必须同步支持，否则通道能建出来却发不出去。
+CHANNEL_KINDS = ("webhook", "bark")
+MAX_CHANNEL_NAME_LENGTH = 64
+MAX_CHANNEL_URL_LENGTH = 512
+#: 短于这个长度的 URL 去掉主机名后没有可展示的信息，掩码直接整体打码。
+_CHANNEL_MASK_MIN_LENGTH = 16
 
 
 class WorkspaceError(Exception):
@@ -295,6 +308,10 @@ def delete_workspace(session: Session, workspace: Workspace, *, purge: bool = Fa
     if total:
         for model in DATA_MODELS:
             session.execute(model.__table__.delete().where(model.workspace_id == workspace.id))
+    # 通道不是「数据」，不计入 data_counts（否则删除非空工作区会突然多出计数、
+    # 破坏既有 purge 语义与计数测试），但它必须随工作区一起消失。FK 上虽然写了
+    # ON DELETE CASCADE，SQLite 默认并不开启外键约束，所以这里显式删除。
+    session.execute(WorkspaceChannel.__table__.delete().where(WorkspaceChannel.workspace_id == workspace.id))
     session.execute(WorkspaceMember.__table__.delete().where(WorkspaceMember.workspace_id == workspace.id))
     session.delete(workspace)
     session.commit()
@@ -312,6 +329,188 @@ def _format_counts(counts: dict[str, int]) -> str:
         "algorithm_configs": "算法配置",
     }
     return "、".join(f"{labels.get(k, k)} {v}" for k, v in counts.items() if v)
+
+
+# --------------------------------------------------------------------------- #
+# 工作区级通知通道
+# --------------------------------------------------------------------------- #
+
+
+def channels(session: Session, workspace_id: int) -> list[WorkspaceChannel]:
+    """工作区的通知通道，按创建顺序（id 升序）返回。"""
+    return list(
+        session.execute(
+            select(WorkspaceChannel).where(WorkspaceChannel.workspace_id == workspace_id).order_by(WorkspaceChannel.id)
+        ).scalars()
+    )
+
+
+def channel_or_404(session: Session, workspace_id: int, channel_id: int) -> WorkspaceChannel:
+    """取通道；不存在与「属于别的工作区」都返回 404。
+
+    不区分两种情况的理由与工作区本身一致：能靠状态码判断出「这个 id 存在，只是不在
+    你的工作区」就等于泄露了别的租户有多少条通道。
+    """
+    channel = session.get(WorkspaceChannel, channel_id)
+    if channel is None or channel.workspace_id != workspace_id:
+        raise not_found("通知通道不存在")
+    return channel
+
+
+def _clean_channel_name(name: str) -> str:
+    value = (name or "").strip()
+    if not value:
+        raise WorkspaceError("通道名称不能为空", status_code=422, code="invalid_channel")
+    if len(value) > MAX_CHANNEL_NAME_LENGTH:
+        raise WorkspaceError(f"通道名称最多 {MAX_CHANNEL_NAME_LENGTH} 个字符", status_code=422, code="invalid_channel")
+    return value
+
+
+def _clean_channel_kind(kind: str) -> str:
+    value = (kind or "").strip().lower()
+    if value not in CHANNEL_KINDS:
+        options = " / ".join(CHANNEL_KINDS)
+        raise WorkspaceError(f"不支持的通道类型：{kind}（可选 {options}）", status_code=422, code="invalid_channel")
+    return value
+
+
+def _clean_channel_url(url: str) -> str:
+    """校验外发地址：非空、http(s)、无空白/控制字符。
+
+    这里不检查主机是否存在、也不允许 ``file:`` / ``ftp:`` 之类的 scheme —— 通道地址
+    会被服务端主动请求，限制成 http(s) 是防止「配置一个通道就等于让服务器访问任意
+    本地资源」的最小防线。
+    """
+    value = (url or "").strip()
+    if not value:
+        raise WorkspaceError("通道地址不能为空", status_code=422, code="invalid_channel")
+    if len(value) > MAX_CHANNEL_URL_LENGTH:
+        raise WorkspaceError(f"通道地址最多 {MAX_CHANNEL_URL_LENGTH} 个字符", status_code=422, code="invalid_channel")
+    if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+        raise WorkspaceError("通道地址不能包含空白或控制字符", status_code=422, code="invalid_channel")
+    try:
+        parts = urlsplit(value)
+    except ValueError as exc:  # 例如非法的 IPv6 字面量
+        raise WorkspaceError("通道地址不是合法的 URL", status_code=422, code="invalid_channel") from exc
+    if (parts.scheme or "").lower() not in ("http", "https") or not parts.netloc:
+        raise WorkspaceError("通道地址必须是 http(s):// 开头的完整 URL", status_code=422, code="invalid_channel")
+    return value
+
+
+def mask_url(url: str) -> str:
+    """把含凭据的 URL 变成可展示的掩码：``scheme://主机/****最后4位``。
+
+    只保留 scheme 与主机名（成员要靠它分辨「发到哪个群 / 哪台服务器」），路径和查询
+    串里的 webhook token、Bark device key 一律不出现——包括查询参数名。URL 过短、
+    无法解析或不是 http(s) 时整体返回 ``****``：宁可什么都不显示，也不冒险回显密钥。
+    """
+    value = (url or "").strip()
+    if not value:
+        return "****"
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return "****"
+    scheme = (parts.scheme or "").lower()
+    if scheme not in ("http", "https") or not parts.netloc or len(value) <= _CHANNEL_MASK_MIN_LENGTH:
+        return "****"
+    return f"{scheme}://{parts.netloc}/****{value[-4:]}"
+
+
+def _channel_name_taken(session: Session, workspace_id: int, name: str, *, exclude_id: int | None = None) -> bool:
+    stmt = select(WorkspaceChannel.id).where(
+        WorkspaceChannel.workspace_id == workspace_id,
+        WorkspaceChannel.name == name,
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(WorkspaceChannel.id != exclude_id)
+    return session.execute(stmt.limit(1)).first() is not None
+
+
+def _duplicate_channel(name: str) -> WorkspaceError:
+    return WorkspaceError(f"该工作区已有同名通道：{name}", status_code=409, code="duplicate_channel")
+
+
+def create_channel(
+    session: Session,
+    workspace: Workspace,
+    *,
+    name: str,
+    kind: str,
+    url: str,
+    enabled: bool = True,
+    created_by: int | None = None,
+    commit: bool = True,
+) -> WorkspaceChannel:
+    """新建通道。重名返回 409（预检查 + 唯一约束兜并发）。"""
+    cleaned_name = _clean_channel_name(name)
+    channel_kind = _clean_channel_kind(kind)
+    channel_url = _clean_channel_url(url)
+    if _channel_name_taken(session, workspace.id, cleaned_name):
+        raise _duplicate_channel(cleaned_name)
+    channel = WorkspaceChannel(
+        workspace_id=workspace.id,
+        name=cleaned_name,
+        kind=channel_kind,
+        url=channel_url,
+        enabled=bool(enabled),
+        created_by=created_by,
+    )
+    session.add(channel)
+    try:
+        session.flush()
+    except IntegrityError as exc:  # 并发下先查后插仍可能撞唯一约束
+        session.rollback()
+        raise _duplicate_channel(cleaned_name) from exc
+    if commit:
+        session.commit()
+    return channel
+
+
+def update_channel(
+    session: Session,
+    workspace: Workspace,
+    channel: WorkspaceChannel,
+    *,
+    name: str | None = None,
+    kind: str | None = None,
+    url: str | None = None,
+    enabled: bool | None = None,
+    commit: bool = True,
+) -> WorkspaceChannel:
+    """改通道。``url=None`` 表示保持原值——API 只返回掩码，前端回传不了明文地址。"""
+    if channel.workspace_id != workspace.id:
+        raise not_found("通知通道不存在")
+    if name is not None:
+        cleaned_name = _clean_channel_name(name)
+        if cleaned_name != channel.name and _channel_name_taken(
+            session, workspace.id, cleaned_name, exclude_id=channel.id
+        ):
+            raise _duplicate_channel(cleaned_name)
+        channel.name = cleaned_name
+    if kind is not None:
+        channel.kind = _clean_channel_kind(kind)
+    if url is not None:
+        channel.url = _clean_channel_url(url)
+    if enabled is not None:
+        channel.enabled = bool(enabled)
+    if commit:
+        session.commit()
+    return channel
+
+
+def delete_channel(
+    session: Session,
+    workspace: Workspace,
+    channel: WorkspaceChannel,
+    *,
+    commit: bool = True,
+) -> None:
+    if channel.workspace_id != workspace.id:
+        raise not_found("通知通道不存在")
+    session.delete(channel)
+    if commit:
+        session.commit()
 
 
 # --------------------------------------------------------------------------- #
@@ -520,19 +719,27 @@ def claim_unassigned(
 
 
 __all__ = [
+    "CHANNEL_KINDS",
     "CONFIG_MODELS",
     "DATA_MODELS",
+    "MAX_CHANNEL_NAME_LENGTH",
+    "MAX_CHANNEL_URL_LENGTH",
     "PERSONAL_KIND",
     "SHARED_KIND",
     "WorkspaceError",
     "add_member",
     "all_workspaces",
+    "channel_or_404",
+    "channels",
     "claim_unassigned",
+    "create_channel",
     "create_workspace",
     "data_counts",
+    "delete_channel",
     "delete_workspace",
     "ensure_personal_workspace",
     "forbidden",
+    "mask_url",
     "member_count",
     "member_of",
     "member_rows",
@@ -545,6 +752,7 @@ __all__ = [
     "role_of",
     "set_member_role",
     "transfer_owner",
+    "update_channel",
     "update_workspace",
     "workspace_or_404",
 ]

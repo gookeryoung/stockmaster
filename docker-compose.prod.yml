@@ -47,6 +47,8 @@ services:
       - SM_SYNC_WORKERS=${SM_SYNC_WORKERS:-4}
       # 留空即关闭外发 webhook 通知
       - SM_ALERT_WEBHOOK_URL=${SM_ALERT_WEBHOOK_URL:-}
+      # 隔离开启时，没有配置通道的工作区是否回落到上面的全站 webhook（默认严格隔离）
+      - SM_ALERT_GLOBAL_FALLBACK=${SM_ALERT_GLOBAL_FALLBACK:-false}
       # 容器内固定 UTF-8，避免中文日志乱码/报错
       - SM_CONSOLE_ENCODING=utf-8
       # ── 账号与登录 ────────────────────────────────────────────

@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     # --- Alerts ---
     alert_poll_seconds: int = 60
     alert_webhook_url: str = ""
+    # 隔离开启时，没有配置任何**启用**通道的工作区是否回落到全站 webhook。
+    # 默认 False = 严格隔离：工作区的提醒只发到工作区自己配置的通道，避免 A 的
+    # 触发内容出现在全站群机器人里。``workspace_id=0``（未归属历史数据）始终走
+    # 全局通道，因为它们本来就不属于任何工作区。
+    alert_global_fallback: bool = False
 
     # --- Scheduler ---
     scheduler_enabled: bool = True

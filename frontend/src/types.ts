@@ -276,6 +276,29 @@ export interface WorkspaceMember {
   joined_at: string | null;
 }
 
+/** 工作区通知通道：预警触发时把消息外发到 webhook / Bark。
+ *
+ * `url` 由后端返回时已经脱敏（只保留协议与尾部少量字符），编辑时省略 = 不修改。
+ */
+export type WorkspaceChannelKind = "webhook" | "bark";
+
+export interface WorkspaceChannel {
+  id: number;
+  name: string;
+  kind: WorkspaceChannelKind;
+  /** 脱敏后的地址，不能直接用于请求。 */
+  url: string;
+  enabled: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface WorkspaceChannelTestResult {
+  delivered: boolean;
+  channel: string;
+  kind: string;
+}
+
 export interface TokenResponse {
   token: string;
   token_type: string;

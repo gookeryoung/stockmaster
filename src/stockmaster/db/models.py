@@ -553,6 +553,46 @@ class WorkspaceMember(Base):
     )
 
 
+class WorkspaceChannel(Base):
+    """工作区级外发通知通道（webhook / Bark）。
+
+    为什么通道要挂在**工作区**而不是账号
+    ----------------------------------
+    预警规则、触发记录都是工作区的数据，通知自然也该按工作区投递。放在账号上会
+    出现「A 的规则触发后，通知发到 B 的手机」；放在全局环境变量上则所有工作区的
+    提醒混进同一个 webhook —— 隔离做到最后一步，却在出口处漏掉。
+
+    URL 含凭据
+    ----------
+    webhook 的 token、Bark 的 device key 都在 URL 里，所以 API **永远只返回掩码**；
+    更新时省略 ``url`` 表示保持原值。数据库不加密（与 ``SM_ALERT_WEBHOOK_URL``
+    同级的信任边界：能看到库文件的人本来就能看到它），但接口不回显明文。
+
+    ``workspace_id`` 加外键的原因：通道只属于真实工作区，不存在 ``workspace_id=0``
+    的「未归属通道」——隔离关闭时的外发仍由全局 ``SM_ALERT_WEBHOOK_URL`` 负责。
+    """
+
+    __tablename__ = "workspace_channels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16), default="webhook")  # webhook | bark
+    url: Mapped[str] = mapped_column(String(512), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 审计用：谁建的。账号不硬删除，且通道在隔离关闭时不存在，所以不加外键。
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        # 名字是成员识别「这条通道发到哪」的入口；同工作区重名会让停用/删除无从选择。
+        UniqueConstraint("workspace_id", "name", name="uq_workspace_channel_name"),
+        # 投递时按（工作区, 启用）取通道，是唯一的热查询。
+        Index("ix_workspace_channels_workspace", "workspace_id", "enabled"),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Strategy configuration — workspace-scoped presets (选股 / 样本 / 算法)
 # --------------------------------------------------------------------------- #

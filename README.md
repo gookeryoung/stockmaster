@@ -402,7 +402,8 @@ uv run --with prek prek run --all-files   # 手动全量运行
 | `SM_SYNC_WORKERS` | 4 | 并发取数线程 |
 | `SM_PREDICT_HORIZONS` | 1,5,20 | 预测周期 |
 | `SM_SCHEDULER_ENABLED` | true | 是否启用定时任务 |
-| `SM_ALERT_WEBHOOK_URL` | 空 | 预警推送 Webhook（留空则不外部推送） |
+| `SM_ALERT_WEBHOOK_URL` | 空 | 预警推送 Webhook（留空则不外部推送）；隔离关闭时是唯一外发通道 |
+| `SM_ALERT_GLOBAL_FALLBACK` | false | 隔离开启时，无通道的工作区是否回落到全局 webhook；false = 严格隔离 |
 | `SM_AUTH_ENABLED` | false | 是否强制登录（false 时接口开放，账号页仍可用） |
 | `SM_AUTH_SECRET_KEY` | 空 | JWT 签名密钥，留空自动生成到 `<数据目录>/.auth_secret` |
 | `SM_AUTH_ALLOW_REGISTER` | true | 是否允许自助注册（首个账号自动成为管理员） |
@@ -469,6 +470,12 @@ owner 可创建共享工作区并邀请成员。前端顶栏可随时切换工�
 迁移前的历史数据落在 `workspace_id = 0`（「未归属」桶），用
 `stockmaster workspace claim --id <工作区>` 移交。列与迁移始终存在，改回 `false`
 即恢复共享语义，不需要回滚数据库。
+
+通知同样按工作区路由：owner 在「工作区」页配置本工作区的 webhook / Bark 通道，成员只能
+看到脱敏地址；触发记录属于哪个工作区，就只发到那个工作区的通道，不会混进别人的群机器人。
+隔离开启时，没有配置任何启用通道的工作区**默认不外发**（严格隔离），过渡期可置
+`SM_ALERT_GLOBAL_FALLBACK=true` 回落到全局 `SM_ALERT_WEBHOOK_URL`；`workspace_id=0`
+的未归属数据始终走全局通道。详见 **[docs/WORKSPACE.md](docs/WORKSPACE.md)** §5.1。
 
 策略配置（选股 / 样本 / 算法）同样按工作区归属：editor 及以上可增删改与训练，viewer 只读但可运行
 选股、解析样本；回测请求可直接引用 `screening_id` 使用某套选股口径。字段、JSON 约定、API 与权限矩阵见

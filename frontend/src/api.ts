@@ -40,6 +40,9 @@ import type {
   UserPage,
   WatchlistItem,
   Workspace,
+  WorkspaceChannel,
+  WorkspaceChannelKind,
+  WorkspaceChannelTestResult,
   WorkspaceMember,
   WorkspaceRole,
 } from "./types";
@@ -274,6 +277,32 @@ export const api = {
     request<WorkspaceMember>(`/workspaces/${id}/transfer`, {
       method: "POST",
       body: JSON.stringify({ user_id: userId }),
+    }),
+
+  // --- workspaces: 通知通道（地址读接口已脱敏；写操作仅 owner） ---
+  workspaceChannels: (id: number) => request<WorkspaceChannel[]>(`/workspaces/${id}/channels`),
+  createWorkspaceChannel: (
+    id: number,
+    payload: { name: string; kind: WorkspaceChannelKind; url: string; enabled?: boolean },
+  ) =>
+    request<WorkspaceChannel>(`/workspaces/${id}/channels`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateWorkspaceChannel: (
+    id: number,
+    channelId: number,
+    payload: { name?: string; kind?: WorkspaceChannelKind; url?: string; enabled?: boolean },
+  ) =>
+    request<WorkspaceChannel>(`/workspaces/${id}/channels/${channelId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteWorkspaceChannel: (id: number, channelId: number) =>
+    request<void>(`/workspaces/${id}/channels/${channelId}`, { method: "DELETE" }),
+  testWorkspaceChannel: (id: number, channelId: number) =>
+    request<WorkspaceChannelTestResult>(`/workspaces/${id}/channels/${channelId}/test`, {
+      method: "POST",
     }),
 
   // --- admin: system backup / restore ---

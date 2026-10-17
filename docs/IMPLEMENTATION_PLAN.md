@@ -17,8 +17,9 @@
 | 恢复（含预备份 / 恢复后迁移） | ✅ | `stockmaster/maintenance/restore.py`、`stockmaster restore` |
 | 备份管理 API + 设置页入口 | ✅ | `api/v1/admin.py`、`components/BackupPanel.tsx` |
 | 用户隔离 PR-1 / PR-2（owner_id，已被 0003 取代） | ✅ 已完成 | `0002_owner_columns`、`tests/test_isolation.py` |
-| 工作区隔离（Workspace + owner/editor/viewer） | ✅ 已完成，默认关闭 | `0003_workspaces`、`stockmaster/workspace/`、`tests/test_workspace.py`、见 `WORKSPACE.md` |
-| 按工作区通知投递 / 配额 | ❌ 未开始 | `WORKSPACE.md` §11 |
+| 工作区隔离（Workspace + owner/editor/viewer） | ✅ 已完成，默认关闭 | `0003_workspaces`、`src/stockmaster/plugins/workspaces/`、`tests/test_workspace.py`、见 `WORKSPACE.md` |
+| 工作区级通知通道（webhook / Bark） | ✅ 已完成 | `0005_workspace_channels`、`plugins/workspaces/routers/workspaces.py`、`plugins/alerts/services/channels.py`、见 `WORKSPACE.md` §5.1 |
+| 工作区配额 / 管理员统计列 | ❌ 未开始 | `WORKSPACE.md` §11 |
 
 ### 关键设计决定（已落地，改动前先读）
 
@@ -53,7 +54,8 @@ P1 数据隔离（已完成）
  ├─ PR-1 加归属列 + 0002 迁移 + 写入记录（行为不变，可灰度）
  ├─ PR-2 读路径隔离 + 预警引擎按归属解析 + 测试矩阵
  ├─ PR-3 升级为工作区隔离：0003 迁移 + owner/editor/viewer 角色 + 成员管理
- └─ 待办：按工作区通知通道、管理员统计列、配额
+ ├─ PR-4 工作区级通知通道：0005 迁移 + owner 管理通道 + 按工作区投递
+ └─ 待办：管理员统计列、配额
         │
         ▼
 P2 备份自动化（1 个 PR）
@@ -174,6 +176,31 @@ editor 不可管成员、最后 owner 保护、跨工作区 404、转让）；`t
 **回滚**：`SM_DATA_ISOLATION=false`（迁移不回滚 —— 列名变化无害，旧代码读不到
 `owner_id` 才是问题，因此代码回滚需连 `git revert` 一起做）。
 
+### PR-4：工作区级通知通道 —— ✅ 已完成
+
+> 设计细节见 `WORKSPACE.md` §5.1。核心变化：预警外发从「全站一个 webhook」变成
+> 「规则属于哪个工作区，就发到哪个工作区配置的通道」；全局 webhook 只服务
+> `workspace_id=0` 或显式 fallback。
+
+| 文件 | 改动 |
+|---|---|
+| `src/stockmaster/alembic/versions/0005_workspace_channels.py` | 幂等建 `workspace_channels`：`workspace_id` FK（CASCADE）、`(workspace_id, name)` 唯一、`(workspace_id, enabled)` 索引 |
+| `src/stockmaster/db/models.py` | `WorkspaceChannel` 模型（kind=webhook/bark、url 含凭据、enabled） |
+| `src/stockmaster/config.py` | `SM_ALERT_GLOBAL_FALLBACK`（默认 false = 严格隔离） |
+| `src/stockmaster/plugins/workspaces/{services/service.py,schemas/workspace.py,routers/workspaces.py}` | 通道 CRUD 服务 + 校验 + URL 掩码；`/workspaces/{id}/channels` 五个端点（写仅 owner） |
+| `src/stockmaster/plugins/alerts/services/channels.py` | `Notification.workspace_id`、`channels_for_workspace()`、`build_channel()`、`send_test()`；`notify()` 按工作区分组路由 |
+| `src/stockmaster/jobs/tasks.py` | `job_scan_alerts` 把触发所属 `workspace_id` 透传到 `Notification` |
+| frontend | 「工作区」页新增通知通道区块：成员只读（地址脱敏），owner 增删改/测试；无通道提示不外发 |
+| `.env.example` / `docker-compose.prod.yml` | 同步 `SM_ALERT_GLOBAL_FALLBACK`（compose 不会自动透传 `.env`） |
+
+**验收**：`tests/test_workspace_channels.py`（仅 owner 可写、跨工作区 404、URL 掩码、
+重名 409、测试端点）；`tests/test_alert_notify.py`（隔离关闭保持旧行为、两个工作区
+各收各的、停用/无通道/fallback、workspace 0 走全局、job 透传工作区）。
+
+**回滚**：不配置任何通道 + 保持 `SM_ALERT_GLOBAL_FALLBACK=false` 即不外发；需要恢复
+旧的全站推送时，配置 `SM_ALERT_WEBHOOK_URL` 并置 `SM_ALERT_GLOBAL_FALLBACK=true`，
+或直接回退代码（`0005` 建的表可安全保留，旧代码不读它）。
+
 ---
 
 ## 4. P2 备份自动化
@@ -205,7 +232,7 @@ docker compose --env-file .env -f docker-compose.prod.yml exec app \
 
 # 4) 确认启动时已自动认领版本并执行增量
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m stockmaster.cli db current      # 应输出 当前=最新=0002_owner_columns
+  python -m stockmaster.cli db current      # 应输出 当前=最新=0005_workspace_channels
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
   python -m stockmaster.cli db check        # 应无「缺列」输出
 

@@ -61,10 +61,56 @@ class WorkspaceDeleted(BaseModel):
     purged: dict[str, int] = Field(default_factory=dict)
 
 
+# --------------------------------------------------------------------------- #
+# 工作区级通知通道
+# --------------------------------------------------------------------------- #
+
+
+class ChannelIn(BaseModel):
+    """新建通道。
+
+    ``kind`` / ``url`` 的业务校验（合法类型、http(s)、无空白、控制字符）放在服务层，
+    这样 CLI 与 API 走同一套规则；非法值由 ``WorkspaceError`` 统一翻译成 422。
+    """
+
+    name: str = Field(min_length=1, max_length=64)
+    kind: str = Field(default="webhook", min_length=1, max_length=16)
+    url: str = Field(min_length=1, max_length=512)
+    enabled: bool = True
+
+
+class ChannelUpdate(BaseModel):
+    """改通道；字段全部可选。
+
+    ``url=None``（省略或显式传 null）表示**保持原值**，因为 API 只回显掩码，前端
+    无法把明文地址原样传回来。
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    kind: str | None = Field(default=None, min_length=1, max_length=16)
+    url: str | None = Field(default=None, min_length=1, max_length=512)
+    enabled: bool | None = None
+
+
+class WorkspaceChannelOut(BaseModel):
+    """通道的对外形状：``url`` 永远是掩码，明文 token 不会离开服务端。"""
+
+    id: int
+    name: str
+    kind: str
+    url: str
+    enabled: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 __all__ = [
+    "ChannelIn",
+    "ChannelUpdate",
     "MemberIn",
     "MemberRoleIn",
     "TransferIn",
+    "WorkspaceChannelOut",
     "WorkspaceDeleted",
     "WorkspaceIn",
     "WorkspaceMemberOut",

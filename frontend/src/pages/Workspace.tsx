@@ -19,7 +19,7 @@ import {
   useCurrentWorkspace,
   useWorkspace,
 } from "../workspace";
-import type { WorkspaceRole } from "../types";
+import type { WorkspaceChannelKind, WorkspaceRole } from "../types";
 
 const ROLE_HINT: Record<WorkspaceRole, string> = {
   owner: "可改工作区信息、管理成员、转让所有权",
@@ -41,6 +41,10 @@ export default function WorkspacePage() {
   const [memberName, setMemberName] = useState("");
   const [memberRole, setMemberRole] = useState<WorkspaceRole>("viewer");
   const [rename, setRename] = useState("");
+  const [channelName, setChannelName] = useState("");
+  const [channelKind, setChannelKind] = useState<WorkspaceChannelKind>("webhook");
+  const [channelUrl, setChannelUrl] = useState("");
+  const [channelEnabled, setChannelEnabled] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
   const canManage = canManageWorkspace(current);
@@ -50,6 +54,12 @@ export default function WorkspacePage() {
   const members = useQuery({
     queryKey: ["workspace-members", workspaceId],
     queryFn: () => api.workspaceMembers(workspaceId as number),
+    enabled: workspaceId !== null,
+  });
+
+  const channels = useQuery({
+    queryKey: ["workspace-channels", workspaceId],
+    queryFn: () => api.workspaceChannels(workspaceId as number),
     enabled: workspaceId !== null,
   });
 
@@ -103,6 +113,53 @@ export default function WorkspacePage() {
       queryClient.invalidateQueries({ queryKey: ["workspace-members", workspaceId] });
     },
     onError: (error) => flash(`转让失败：${(error as Error).message}`),
+  });
+
+  // 通知通道：读对所有成员开放（地址已脱敏），写操作只出现在 owner 的界面上，
+  // 真正的权限校验在服务端。
+  const createChannel = useMutation({
+    mutationFn: () =>
+      api.createWorkspaceChannel(workspaceId as number, {
+        name: channelName.trim(),
+        kind: channelKind,
+        url: channelUrl.trim(),
+        enabled: channelEnabled,
+      }),
+    onSuccess: (channel) => {
+      setChannelName("");
+      setChannelUrl("");
+      setChannelEnabled(true);
+      flash(`已添加通道「${channel.name}」`);
+      queryClient.invalidateQueries({ queryKey: ["workspace-channels", workspaceId] });
+    },
+    onError: (error) => flash(`添加通道失败：${(error as Error).message}`),
+  });
+
+  const toggleChannel = useMutation({
+    mutationFn: ({ channelId, enabled }: { channelId: number; enabled: boolean }) =>
+      api.updateWorkspaceChannel(workspaceId as number, channelId, { enabled }),
+    onSuccess: (channel) => {
+      flash(channel.enabled ? `已启用通道「${channel.name}」` : `已停用通道「${channel.name}」`);
+      queryClient.invalidateQueries({ queryKey: ["workspace-channels", workspaceId] });
+    },
+    onError: (error) => flash(`切换通道状态失败：${(error as Error).message}`),
+  });
+
+  const testChannel = useMutation({
+    mutationFn: (channelId: number) => api.testWorkspaceChannel(workspaceId as number, channelId),
+    onSuccess: (result) => {
+      flash(result.delivered ? `已发送测试通知（${result.channel}）` : "测试失败：通道未送达");
+    },
+    onError: (error) => flash(`测试失败：${(error as Error).message}`),
+  });
+
+  const deleteChannel = useMutation({
+    mutationFn: (channelId: number) => api.deleteWorkspaceChannel(workspaceId as number, channelId),
+    onSuccess: () => {
+      flash("已删除通道");
+      queryClient.invalidateQueries({ queryKey: ["workspace-channels", workspaceId] });
+    },
+    onError: (error) => flash(`删除通道失败：${(error as Error).message}`),
   });
 
   const updateInfo = useMutation({
@@ -361,6 +418,157 @@ export default function WorkspacePage() {
           <p className="mt-3 text-xs text-slate-500">
             只有所有者可以增删成员或调整角色。需要变更请让「{current?.name}」的所有者操作。
           </p>
+        )}
+      </section>
+
+      {/* 通知通道：本工作区的预警外发目标 */}
+      <section className="card">
+        <div className="mb-2">
+          <h2 className="text-sm font-semibold text-slate-100">通知通道</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            通道只接收当前工作区的预警；服务端保存后地址仅以脱敏形式展示。
+            {canManage ? "启用、测试、删除与新增均由你管理。" : "只有所有者可以增删改通道或发送测试通知。"}
+          </p>
+        </div>
+
+        <div className="table-wrap">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-slate-800">
+                <th className="th">名称</th>
+                <th className="th">类型</th>
+                <th className="th">地址（脱敏）</th>
+                <th className="th">状态</th>
+                {canManage && <th className="th" />}
+              </tr>
+            </thead>
+            <tbody>
+              {(channels.data ?? []).map((row) => (
+                <tr key={row.id} className="border-b border-slate-800/50 last:border-0">
+                  <td className="td font-medium text-slate-100">{row.name}</td>
+                  <td className="td text-slate-400">{row.kind === "bark" ? "Bark" : "Webhook"}</td>
+                  <td className="td font-mono text-xs text-slate-500">{row.url || "—"}</td>
+                  <td className="td">
+                    <span
+                      className={`badge ${
+                        row.enabled
+                          ? "bg-emerald-900/50 text-emerald-300"
+                          : "bg-slate-800 text-slate-400"
+                      }`}
+                    >
+                      {row.enabled ? "启用" : "停用"}
+                    </span>
+                  </td>
+                  {canManage && (
+                    <td className="td text-right">
+                      <div className="flex justify-end gap-1">
+                        <button
+                          className="btn px-2 py-1 text-xs"
+                          disabled={toggleChannel.isPending}
+                          onClick={() => toggleChannel.mutate({ channelId: row.id, enabled: !row.enabled })}
+                        >
+                          {row.enabled ? "停用" : "启用"}
+                        </button>
+                        <button
+                          className="btn px-2 py-1 text-xs"
+                          disabled={testChannel.isPending}
+                          onClick={() => testChannel.mutate(row.id)}
+                          title="向该通道发送一条测试通知"
+                        >
+                          测试
+                        </button>
+                        <button
+                          className="btn px-2 py-1 text-xs"
+                          disabled={deleteChannel.isPending}
+                          onClick={() => {
+                            if (window.confirm(`确定删除通道「${row.name}」？`)) {
+                              deleteChannel.mutate(row.id);
+                            }
+                          }}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {channels.isLoading && (
+                <tr>
+                  <td className="td text-slate-500" colSpan={canManage ? 5 : 4}>
+                    加载中…
+                  </td>
+                </tr>
+              )}
+              {!channels.isLoading && (channels.data ?? []).length === 0 && (
+                <tr>
+                  <td className="td text-slate-500" colSpan={canManage ? 5 : 4}>
+                    尚未配置通道，本工作区触发预警时不会外发。
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {canManage && (
+          <form
+            className="mt-3 flex flex-wrap items-end gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (channelName.trim() && channelUrl.trim()) createChannel.mutate();
+            }}
+          >
+            <div>
+              <label className="label">名称</label>
+              <input
+                className="input w-40"
+                placeholder="例如：投研群机器人"
+                value={channelName}
+                onChange={(event) => setChannelName(event.target.value)}
+                maxLength={64}
+              />
+            </div>
+            <div>
+              <label className="label">类型</label>
+              <select
+                className="input"
+                value={channelKind}
+                onChange={(event) => setChannelKind(event.target.value as WorkspaceChannelKind)}
+              >
+                <option value="webhook">Webhook</option>
+                <option value="bark">Bark</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">URL</label>
+              <input
+                className="input w-96"
+                placeholder={
+                  channelKind === "bark"
+                    ? "https://api.day.app/你的Key"
+                    : "https://oapi.dingtalk.com/robot/send?access_token=..."
+                }
+                value={channelUrl}
+                onChange={(event) => setChannelUrl(event.target.value)}
+                maxLength={512}
+              />
+            </div>
+            <label className="flex items-center gap-2 pb-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={channelEnabled}
+                onChange={(event) => setChannelEnabled(event.target.checked)}
+              />
+              启用
+            </label>
+            <button
+              className="btn btn-primary"
+              disabled={!channelName.trim() || !channelUrl.trim() || createChannel.isPending}
+            >
+              添加通道
+            </button>
+          </form>
         )}
       </section>
 

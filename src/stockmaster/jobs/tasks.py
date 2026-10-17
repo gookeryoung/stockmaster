@@ -411,6 +411,8 @@ def job_scan_alerts(notify_channels: bool = True) -> dict:
                     body=c.message,
                     code=c.code,
                     rule_id=c.rule_id,
+                    # 触发记录自带 workspace_id；投递据此路由到该工作区的通道。
+                    workspace_id=c.workspace_id,
                 )
                 for c in candidates
             ]

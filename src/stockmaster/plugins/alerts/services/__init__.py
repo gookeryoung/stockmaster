@@ -6,8 +6,11 @@ from stockmaster.plugins.alerts.services.channels import (
     DatabaseChannel,
     Notification,
     WebhookChannel,
+    build_channel,
+    channels_for_workspace,
     get_channels,
     notify,
+    send_test,
 )
 from stockmaster.plugins.alerts.services.engine import AlertEngine, TriggerCandidate
 from stockmaster.plugins.alerts.services.rules import RULE_TYPES, RuleContext, describe_rule, normalize_params
@@ -22,8 +25,11 @@ __all__ = [
     "RuleContext",
     "TriggerCandidate",
     "WebhookChannel",
+    "build_channel",
+    "channels_for_workspace",
     "describe_rule",
     "get_channels",
     "normalize_params",
     "notify",
+    "send_test",
 ]

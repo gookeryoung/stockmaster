@@ -24,12 +24,16 @@ from sqlalchemy.orm import Session
 
 from stockmaster.core.auth_deps import require_user
 from stockmaster.core.deps import db_session
+from stockmaster.core.logging import get_logger
 from stockmaster.core.workspace_deps import WorkspaceCtx, path_workspace, require_workspace_owner
 from stockmaster.db.models import User
 from stockmaster.plugins.workspaces.schemas.workspace import (
+    ChannelIn,
+    ChannelUpdate,
     MemberIn,
     MemberRoleIn,
     TransferIn,
+    WorkspaceChannelOut,
     WorkspaceDeleted,
     WorkspaceIn,
     WorkspaceMemberOut,
@@ -39,6 +43,8 @@ from stockmaster.plugins.workspaces.schemas.workspace import (
 from stockmaster.plugins.workspaces.services import service
 
 router = APIRouter(tags=["workspaces"])
+
+log = get_logger(__name__)
 
 
 def _out(session: Session, workspace, role: str) -> WorkspaceOut:
@@ -63,6 +69,19 @@ def _member_out(member, user: User | None) -> WorkspaceMemberOut:
         avatar_url=(user.avatar_url if user is not None else "") or "",
         role=member.role,
         joined_at=member.created_at,
+    )
+
+
+def _channel_out(channel) -> WorkspaceChannelOut:
+    """对外只给掩码 URL：明文 token 不离开服务端。"""
+    return WorkspaceChannelOut(
+        id=channel.id,
+        name=channel.name,
+        kind=channel.kind,
+        url=service.mask_url(channel.url),
+        enabled=channel.enabled,
+        created_at=channel.created_at,
+        updated_at=channel.updated_at,
     )
 
 
@@ -130,6 +149,100 @@ def delete_workspace(
     """删除工作区（仅 owner；personal 工作区不可删除）。"""
     purged = service.delete_workspace(session, ctx.workspace, purge=purge)
     return WorkspaceDeleted(status="deleted", purged=purged)
+
+
+# --------------------------------------------------------------------------- #
+# 通知通道
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/{workspace_id}/channels", response_model=list[WorkspaceChannelOut])
+def list_channels(
+    ctx: Annotated[WorkspaceCtx, Depends(path_workspace)],
+    session: Annotated[Session, Depends(db_session)],
+):
+    """通道列表（成员可见；URL 一律掩码）。"""
+    return [_channel_out(channel) for channel in service.channels(session, ctx.id)]
+
+
+@router.post(
+    "/{workspace_id}/channels",
+    response_model=WorkspaceChannelOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_channel(
+    payload: ChannelIn,
+    ctx: Annotated[WorkspaceCtx, Depends(require_workspace_owner)],
+    session: Annotated[Session, Depends(db_session)],
+):
+    """新建通道（仅 owner —— 通道是数据出口，不随「可写数据」下放给 editor）。"""
+    channel = service.create_channel(
+        session,
+        ctx.workspace,
+        name=payload.name,
+        kind=payload.kind,
+        url=payload.url,
+        enabled=payload.enabled,
+        created_by=ctx.user.id if ctx.user is not None else None,
+    )
+    return _channel_out(channel)
+
+
+@router.patch("/{workspace_id}/channels/{channel_id}", response_model=WorkspaceChannelOut)
+def update_channel(
+    channel_id: int,
+    payload: ChannelUpdate,
+    ctx: Annotated[WorkspaceCtx, Depends(require_workspace_owner)],
+    session: Annotated[Session, Depends(db_session)],
+):
+    """改名 / 改类型 / 改地址 / 启停（仅 owner；省略 url 表示保持原值）。"""
+    channel = service.channel_or_404(session, ctx.id, channel_id)
+    channel = service.update_channel(
+        session,
+        ctx.workspace,
+        channel,
+        name=payload.name,
+        kind=payload.kind,
+        url=payload.url,
+        enabled=payload.enabled,
+    )
+    return _channel_out(channel)
+
+
+@router.delete("/{workspace_id}/channels/{channel_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_channel(
+    channel_id: int,
+    ctx: Annotated[WorkspaceCtx, Depends(require_workspace_owner)],
+    session: Annotated[Session, Depends(db_session)],
+):
+    """删除通道（仅 owner）。"""
+    channel = service.channel_or_404(session, ctx.id, channel_id)
+    service.delete_channel(session, ctx.workspace, channel)
+
+
+@router.post("/{workspace_id}/channels/{channel_id}/test")
+def test_channel(
+    channel_id: int,
+    ctx: Annotated[WorkspaceCtx, Depends(require_workspace_owner)],
+    session: Annotated[Session, Depends(db_session)],
+):
+    """给通道发一条测试消息（仅 owner）。网络失败返回 ``delivered=false``，绝不 500。"""
+    channel = service.channel_or_404(session, ctx.id, channel_id)
+    try:
+        # 惰性导入：投递实现属于 alerts 插件。放在函数内既避免工作区插件对投递实现的
+        # 启动期依赖，也让两个插件可以各自独立演进（测试里也是 monkeypatch 这个符号）。
+        from stockmaster.plugins.alerts.services.channels import send_test
+    except Exception:
+        log.warning("通知投递模块不可用，通道 #%s 的测试按未送达处理", channel.id)
+        delivered = False
+    else:
+        try:
+            delivered = bool(send_test(channel))
+        except Exception as exc:
+            # 配错地址、网络不通都是「预期内的失败」，接口只回报结果，不抛 500。
+            log.warning("通道 #%s 测试投递失败：%s", channel.id, exc)
+            delivered = False
+    return {"delivered": delivered, "channel": channel.name, "kind": channel.kind}
 
 
 # --------------------------------------------------------------------------- #
