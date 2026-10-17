@@ -4,6 +4,19 @@
 完整版本历史与分发包见 GitHub Releases：
 https://github.com/gookeryoung/stockmaster/releases
 
+v0.2.0
+------
+
+- 账号体系：管理员/普通用户、PBKDF2 密码、自签 JWT（改密即失效）、
+  微信登录（网站应用扫码 / 公众号 / mock 三模式）、用户管理页。
+- 引入 Alembic 迁移链：存量库自动 stamp + 增量升级，``db`` 命令组运维入口。
+- 系统备份与恢复：应用级 tar.gz 归档 + manifest、在线备份协议、
+  恢复前自动预备份、CLI 与 Web 双通道。
+- 工作区隔离（默认关闭）：``SM_DATA_ISOLATION=true`` 时数据按工作区归属，
+  成员角色 owner/editor/viewer，viewer 只读（写操作 403 + 页面按钮禁用）；
+  存量数据按用户自动回填个人工作区，无主数据用 ``workspace claim`` 移交。
+- 版本号与 ``uv.lock`` 保持同步。
+
 v0.1.4
 ------
 
