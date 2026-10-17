@@ -23,6 +23,10 @@ import pytest
 from app.providers.mock_provider import MockProvider
 from app.providers.registry import ProviderRegistry
 
+# 全链路 e2e（sync→…→alerts），模块级种子库 + 每例整链遍历，串行约 19s。
+# 标记为 slow：默认快速门禁与 CI 排除，需要时用 `make test-slow` 运行。
+pytestmark = pytest.mark.slow
+
 _ENV_KEYS = ("SM_DATA_DIR", "SM_DB_FILENAME", "SM_SCHEDULER_ENABLED")
 
 

@@ -19,6 +19,10 @@ from pathlib import Path
 
 import pytest
 
+# 本模块每条用例都拉起一个真实 CLI 子进程（子进程启动/退出是主要成本，串行约 6.5s），
+# 标记为 slow：默认快速门禁与 CI 排除，需要时用 `make test-slow` 运行。
+pytestmark = pytest.mark.slow
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND = REPO_ROOT / "backend"
 

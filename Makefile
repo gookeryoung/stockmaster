@@ -30,7 +30,7 @@ export SM_CONSOLE_ENCODING
 endif
 
 .PHONY: help sync serve backend frontend-dev dev dev-stop init frontend-sync fs frontend-typecheck ft \
-        frontend-build fb build b clean c test cov test-network lint format format-check \
+        frontend-build fb build b clean c test test-slow test-all cov test-network lint format format-check \
         typecheck check-fast check bump patch minor major stats doctor data-quality acceptance \
         pub push pack-cache-clean
 
@@ -115,11 +115,20 @@ format: ## 后端代码自动格式化（ruff format）
 
 check-fast: lint frontend-typecheck ## 轻量静态门禁（不含测试，适合实现阶段快速反馈）
 
-test: ## 运行测试（不含覆盖率；网络测试默认跳过）
+# 快/慢分离（参考 cndb）：`-m "not slow"` 排除真实子进程/服务器与全链路 e2e 等慢用例，
+# 让提交时的默认门禁保持快速反馈；需要完整覆盖时显式跑 test-slow / test-all。
+# 网络契约测试始终不在此列（由 conftest 默认 skip，需 `-m network` 显式开启）。
+test: ## 运行测试（快速集：排除 slow；网络测试默认跳过；不含覆盖率）
+	uv run pytest -m "not slow" -n $(PYTEST_JOBS)
+
+test-slow: ## 运行慢测试集（真实子进程/服务器、全链路 e2e；不含覆盖率）
+	uv run pytest -m "slow" -n $(PYTEST_JOBS)
+
+test-all: ## 运行全部离线测试（快 + 慢；不含覆盖率）
 	uv run pytest -n $(PYTEST_JOBS)
 
-cov: ## 运行测试并生成覆盖率报告（HTML + 终端门槛）
-	uv run pytest -n $(PYTEST_JOBS) --cov=$(PACKAGE) --cov-report=term-missing --cov-report=html --cov-fail-under=$(COV_THRESHOLD)
+cov: ## 运行测试并生成覆盖率报告（HTML + 终端门槛；排除 slow）
+	uv run pytest -m "not slow" -n $(PYTEST_JOBS) --cov=$(PACKAGE) --cov-report=term-missing --cov-report=html --cov-fail-under=$(COV_THRESHOLD)
 	uv run python scripts/say.py "覆盖率报告：htmlcov/index.html"
 
 test-network: ## 运行网络契约测试（实盘数据源，需联网）

@@ -52,9 +52,11 @@ jobs:
         # data sources, which would make CI flaky and slow. SM_PROVIDER_OFFLINE
         # makes any *other* accidental live fetch fail in milliseconds instead of
         # waiting for provider timeouts — the suite must stay hermetic.
+        # Slow-marked tests (real subprocess/server spawn, full-chain e2e) are also
+        # excluded to keep push/PR feedback fast; they run locally via `make test-slow`.
         env:
           SM_PROVIDER_OFFLINE: "true"
-        run: uv run pytest -n auto -m "not network" --cov=app --cov-report=term --cov-fail-under=75
+        run: uv run pytest -n auto -m "not network and not slow" --cov=app --cov-report=term --cov-fail-under=75
 
       - name: 构建 wheel 与 sdist
         run: uv build

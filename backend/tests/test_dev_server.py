@@ -141,6 +141,7 @@ class TestTerminateTree:
     # verified below against the real `uvicorn --reload` process structure, which is
     # the shape that actually matters.
 
+    @pytest.mark.slow
     def test_run_dev_releases_port_after_shutdown(self, monkeypatch):
         """The real reloader tree must not outlive shutdown.
 
@@ -192,6 +193,7 @@ class TestTerminateTree:
             time.sleep(0.1)
         assert not port_in_use("127.0.0.1", port), "reloader child survived shutdown and kept the port bound"
 
+    @pytest.mark.slow
     def test_stop_event_shuts_down_and_releases_the_port(self, monkeypatch):
         """Setting the stop event must terminate the tree and free the port.
 

@@ -114,6 +114,10 @@ markers = [
     "contract: provider contract tests (offline, fixture-driven)",
     "network: requires live network access to a data provider (run with -m network)",
     "integration: full-chain integration test",
+    # 慢测试：真实子进程/服务器或全链路 e2e，单条 >1s 且与并行不友好。
+    # 默认 `make test`/`make cov` 与 CI 以 `-m "not slow"` 排除，快速反馈；
+    # 需要覆盖慢集时用 `make test-slow`（或 `make test-all`）本地显式运行。
+    "slow: heavy tests (real subprocess/server or full-chain e2e); run with -m slow",
 ]
 # 单测超时保护：数据源偶发挂起，避免 CI 被卡死。
 # 300s 是刻意留出的余量：全市场训练类测试在单 worker 上可达 ~100s，

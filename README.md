@@ -254,26 +254,34 @@ stockmaster/
 ## 6. 测试与验收
 
 ```bash
-make test            # 离线测试（并行；网络测试自动跳过）
-make cov             # 测试 + 覆盖率报告（当前 76%，门槛 75%）
+make test            # 快速离线测试（并行；排除 slow 与 network）
+make test-slow       # 慢测试集（真实子进程/服务器、全链路 e2e）
+make test-all        # 全部离线测试（快 + 慢）
+make cov             # 快速集 + 覆盖率报告（当前 79.6%，门槛 75%）
 make test-network    # 网络契约测试（验证真实数据源与跨源一致性）
 make acceptance      # 端到端实盘验收（真实数据走完整链路）
 make lint            # ruff check + format 校验
 make check-fast      # 轻量静态门禁（lint + 前端类型检查，不含测试）
-make check           # 全套门禁（lint + 前端类型检查 + 测试 + 覆盖率）
+make check           # 全套门禁（lint + 前端类型检查 + 快速测试 + 覆盖率）
 ```
+
+**快 / 慢分离（参考 cndb）**：真实子进程/服务器（`test_dev_server`、`test_console_bytes`）
+与全链路 e2e（`test_pipeline_e2e`）等重用例以 `@pytest.mark.slow` 标记，默认 `make test` /
+`make cov` 与 CI 用 `-m "not slow"` 排除，让提交时的门禁保持快速反馈；需要完整覆盖时显式
+运行 `make test-slow`（或 `make test-all`）。
 
 等价的手动命令：
 
 ```powershell
-.venv\Scripts\python.exe -m pytest backend/tests -q        # 离线
-.venv\Scripts\python.exe -m pytest backend/tests -q -m network
+.venv\Scripts\python.exe -m pytest backend/tests -q -m "not slow"   # 快速离线
+.venv\Scripts\python.exe -m pytest backend/tests -q -m slow         # 慢测试集
+.venv\Scripts\python.exe -m pytest backend/tests -q -m network      # 网络契约
 .venv\Scripts\python.exe -u scripts\acceptance_live.py
 cd frontend; pnpm exec tsc --noEmit; pnpm build
 ```
 
-当前状态：**448 项测试通过（12 项网络契约测试默认跳过）**，网络契约测试可实盘通过，
-覆盖率 **76.25%**，实盘端到端验收全部通过。
+当前状态：**快速集 586 项通过**（另有 19 项 slow、12 项网络契约默认不跑），网络契约测试可实盘通过，
+覆盖率 **79.60%**（门槛 75%），实盘端到端验收全部通过。
 
 ### 6.1 全部 Make 命令
 
@@ -290,7 +298,8 @@ cd frontend; pnpm exec tsc --noEmit; pnpm build
 | `make doctor` (`typecheck`) | 环境自检：依赖、控制台编码、路径、数据源配置 |
 | `make stats` | 数据库概况（证券数、日线行数、最新行情日、模型数） |
 | `make data-quality` | **数据质量体检**：覆盖率、缺口、陈旧、异常、复权一致性 |
-| `make test` / `make cov` / `make test-network` | 离线测试 / 覆盖率 / 网络契约测试 |
+| `make test` / `make test-slow` / `make test-all` | 快速离线测试 / 慢测试集 / 全部离线测试 |
+| `make cov` / `make test-network` | 快速集 + 覆盖率报告 / 网络契约测试 |
 | `make acceptance` | 端到端实盘验收（真实数据源，需联网） |
 | `make lint` / `make format` | ruff 检查 / 自动格式化 |
 | `make check-fast` / `make check` | 轻量静态门禁 / 全套门禁 |
@@ -352,7 +361,7 @@ UTF-8（这也是现代终端/编辑器/CI 日志的通行假设），行为在�
 
 | Job | 内容 |
 |---|---|
-| `backend` | `uv sync --frozen` → ruff check + format → `pytest -m "not network"`（覆盖率门槛 75%）→ `uv build` |
+| `backend` | `uv sync --frozen` → ruff check + format → `pytest -m "not network and not slow"`（覆盖率门槛 75%）→ `uv build` |
 | `frontend` | `pnpm install --frozen-lockfile` → `tsc --noEmit` → `vite build` |
 | `release` | 仅 `v*` tag：汇总 wheel/sdist + 前端 zip + `SHA256SUMS.txt`，创建 GitHub Release |
 
@@ -360,6 +369,8 @@ UTF-8（这也是现代终端/编辑器/CI 日志的通行假设），行为在�
 
 - **网络契约测试不进 CI**。它们依赖公开数据源（baostock/腾讯/新浪），在 CI 上会带来
   不确定性；需要时用 `make test-network` 本地手动运行。
+- **慢测试（`slow`）不进 CI**。真实子进程/服务器启动与全链路 e2e 占用 CI 主要时长，
+  且与并行不友好；本地用 `make test-slow` 显式运行，CI 只跑快速集以缩短 push / PR 反馈。
 - **发布只用仓库自带的 `GITHUB_TOKEN`**，`permissions: contents: write` 仅授予
   release job，不依赖任何外部密钥。
 - 版本号由 `make bump` 维护（同步 `pyproject.toml` 与 `app/__init__.py`），
