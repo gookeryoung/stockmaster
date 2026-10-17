@@ -77,11 +77,16 @@ def job_sync_daily(full: bool = False, codes: list[str] | None = None) -> dict:
     return payload
 
 
-def _default_universe() -> list[str]:
+def _default_universe(owner_id: int | None = None) -> list[str]:
     """The set of symbols the daily pipeline processes.
 
     Preference order: explicit watchlist, then index members, then all known
     instruments — always restricted to symbols that actually have stored bars.
+
+    ``owner_id=None`` means "everybody's watchlists, merged". That is what the
+    scheduled jobs want: market data is shared, so syncing the union once is both
+    cheaper and more correct than per-user copies. Passing an id narrows it to one
+    account, which is what the backtest API uses when isolation is on.
 
     That last constraint matters: a cloud-sourced index-constituent list can
     contain codes that were never synced (or were mis-parsed). Returning them
@@ -101,7 +106,12 @@ def _default_universe() -> list[str]:
             )
             return [c for c in candidates if c in stored]
 
-        watched = with_bars(list(session.execute(select(WatchlistItem.code)).scalars().all()))
+        watched_stmt = select(WatchlistItem.code)
+        if owner_id is not None:
+            watched_stmt = watched_stmt.where(WatchlistItem.owner_id == owner_id)
+        # 并集去重：多个用户把同一只股票加进自选是常态，重复的 code 会让下游
+        # 同步任务对同一个标的跑两遍。
+        watched = with_bars(list(session.execute(watched_stmt.distinct()).scalars().all()))
         if watched:
             return watched
 

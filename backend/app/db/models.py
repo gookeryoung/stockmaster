@@ -34,6 +34,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, utcnow
 
+# Sentinel owner for rows that belong to nobody in particular.
+#
+# ``0`` is not a user id (ids start at 1), which makes it safe to read as "not yet
+# claimed": every row written before accounts existed has it, and single-machine
+# installs (``SM_AUTH_ENABLED=false``) keep writing it forever. That keeps the
+# un-isolated behaviour byte-identical to the pre-isolation code.
+OWNER_UNASSIGNED = 0
+
 # --------------------------------------------------------------------------- #
 # Reference data
 # --------------------------------------------------------------------------- #
@@ -303,6 +311,7 @@ class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)  # uuid4
+    owner_id: Mapped[int] = mapped_column(Integer, default=OWNER_UNASSIGNED, nullable=False)
     name: Mapped[str] = mapped_column(String(128), default="")
     strategy: Mapped[str] = mapped_column(String(64))
     universe: Mapped[str] = mapped_column(String(64), default="")
@@ -315,6 +324,8 @@ class BacktestRun(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")
     error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (Index("ix_backtest_runs_owner", "owner_id", "created_at"),)
 
 
 class BacktestEquity(Base):
@@ -374,6 +385,7 @@ class AlertRule(Base):
     __tablename__ = "alert_rules"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(Integer, default=OWNER_UNASSIGNED, nullable=False)
     name: Mapped[str] = mapped_column(String(128))
     rule_type: Mapped[str] = mapped_column(String(32))
     params_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -387,6 +399,8 @@ class AlertRule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
+    __table_args__ = (Index("ix_alert_rules_owner", "owner_id", "enabled"),)
+
 
 class AlertTrigger(Base):
     """A fired alert. ``dedup_key`` + unique constraint make scanning idempotent."""
@@ -394,6 +408,9 @@ class AlertTrigger(Base):
     __tablename__ = "alert_triggers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Denormalised from the rule on purpose: the history page is the hottest read
+    # path and filtering it must not need a join back to ``alert_rules``.
+    owner_id: Mapped[int] = mapped_column(Integer, default=OWNER_UNASSIGNED, nullable=False)
     rule_id: Mapped[int] = mapped_column(Integer, ForeignKey("alert_rules.id", ondelete="CASCADE"))
     code: Mapped[str] = mapped_column(String(16))
     name: Mapped[str] = mapped_column(String(64), default="")
@@ -410,6 +427,7 @@ class AlertTrigger(Base):
         UniqueConstraint("rule_id", "dedup_key", name="uq_trigger_rule_dedup"),
         Index("ix_triggers_date", "trade_date"),
         Index("ix_triggers_status", "status"),
+        Index("ix_alert_triggers_owner", "owner_id", "trigger_at"),
     )
 
 
@@ -419,12 +437,16 @@ class WatchlistItem(Base):
     __tablename__ = "watchlist_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(Integer, default=OWNER_UNASSIGNED, nullable=False)
     list_name: Mapped[str] = mapped_column(String(64), default="default")
     code: Mapped[str] = mapped_column(String(16))
     note: Mapped[str] = mapped_column(String(256), default="")
     added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
-    __table_args__ = (UniqueConstraint("list_name", "code", name="uq_watchlist_item"),)
+    # Owner is part of the key, not just a filter: without it two users adding the
+    # same symbol to a list named "default" would collide, and the second ``POST``
+    # would silently overwrite the first user's note.
+    __table_args__ = (UniqueConstraint("owner_id", "list_name", "code", name="uq_watchlist_item"),)
 
 
 # --------------------------------------------------------------------------- #

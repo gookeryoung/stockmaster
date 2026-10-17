@@ -126,6 +126,15 @@ def build_parser() -> argparse.ArgumentParser:
     user_unbind = account_sub.add_parser("unbind-wechat", help="解绑账号下的全部微信")
     user_unbind.add_argument("--username", required=True)
 
+    user_claim = account_sub.add_parser("claim", help="把未归属（owner=0）的历史数据移交给某个账号")
+    user_claim.add_argument("--username", required=True)
+    user_claim.add_argument("--dry-run", action="store_true", help="只统计数量，不改数据")
+    user_claim.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="连同别人名下的数据一起搬（仅用于合并账号，默认只搬 owner=0）",
+    )
+
     # --- 数据库迁移 ---
     db = sub.add_parser("db", help="数据库迁移（Alembic）")
     _add_common(db)
@@ -660,6 +669,76 @@ def _generate_password() -> str:
             return candidate
 
 
+def _claim_ownership(session, user, *, dry_run: bool = False, overwrite: bool = False) -> int:
+    """把未归属（``owner_id = 0``）的用户数据划给某个账号。
+
+    为什么需要它
+    ------------
+    隔离上线前写入的自选股、预警规则、回测历史全都是 ``owner_id = 0``。开启
+    ``SM_DATA_ISOLATION`` 之后，登录用户看不到这些数据 —— 它们不是丢了，而是留在
+    「未归属」桶里。这个命令把桶里的东西交给指定账号。
+
+    为什么不直接 ``UPDATE ... SET owner_id = ?``
+    -------------------------------------------
+    ``watchlist_items`` 的唯一约束是 ``(owner_id, list_name, code)``。如果目标账号
+    已经手动加过同一只股票，直接搬会撞约束。这里对冲突行只删「旧的无主副本」，
+    保留账号自己那份（连同它自己的 note），并如实报告跳过了多少条。
+    """
+    from sqlalchemy import func, select, update
+
+    from app.db.models import AlertRule, AlertTrigger, BacktestRun, WatchlistItem
+
+    owner = int(user.id)
+    scope = "全部数据（--overwrite）" if overwrite else "未归属数据（owner=0）"
+
+    def _clause(model):
+        return model.id.isnot(None) if overwrite else model.owner_id == 0
+
+    watch_stmt = select(WatchlistItem).where(_clause(WatchlistItem))
+    watch_rows = list(session.execute(watch_stmt).scalars())
+    if overwrite:
+        watch_rows = [row for row in watch_rows if row.owner_id != owner]
+
+    mine = {
+        (row.list_name, row.code)
+        for row in session.execute(select(WatchlistItem).where(WatchlistItem.owner_id == owner)).scalars()
+    }
+    conflicts = [row for row in watch_rows if (row.list_name, row.code) in mine]
+    movable = [row for row in watch_rows if (row.list_name, row.code) not in mine]
+
+    counts: dict[str, int] = {"watchlist_items": len(movable)}
+    for model, key in (
+        (AlertRule, "alert_rules"),
+        (AlertTrigger, "alert_triggers"),
+        (BacktestRun, "backtest_runs"),
+    ):
+        counts[key] = int(session.execute(select(func.count()).select_from(model).where(_clause(model))).scalar_one())
+
+    print(f"将把 {scope} 移交给 {user.username}（id={owner}）：")
+    for table, count in counts.items():
+        print(f"  {table:<18}{count}")
+    if conflicts:
+        print(f"  另外 {len(conflicts)} 条自选股与账号已有的记录重复，将删除旧的无主副本")
+
+    if dry_run:
+        print("（--dry-run，未写入）")
+        return 0
+
+    for row in conflicts:
+        session.delete(row)
+    for row in movable:
+        row.owner_id = owner
+
+    for model in (AlertRule, AlertTrigger, BacktestRun):
+        session.execute(update(model).where(_clause(model)).values(owner_id=owner))
+
+    session.commit()
+    print(f"已完成。共移交 {sum(counts.values())} 条记录，跳过重复 {len(conflicts)} 条。")
+    if counts.get("alert_rules"):
+        print("提示：这些规则的作用域若是 watchlist，现在会按该账号的自选解析。")
+    return 0
+
+
 def _user_command(args) -> int:
     """Account operations for operators without UI access (break-glass path)."""
     from sqlalchemy import select
@@ -741,6 +820,14 @@ def _user_command(args) -> int:
             session.commit()
             print(f"已删除 {username}")
             return 0
+
+        if args.user_command == "claim":
+            return _claim_ownership(
+                session,
+                user,
+                dry_run=args.dry_run,
+                overwrite=args.overwrite,
+            )
 
         if args.user_command == "unbind-wechat":
             identities = list(session.execute(select(UserIdentity).where(UserIdentity.user_id == user.id)).scalars())

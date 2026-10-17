@@ -11,9 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
+from app.auth.deps import current_owner
 from app.backtest.engine import BacktestConfig, run_backtest
+from app.config import settings
 from app.core.logging import get_logger
 from app.db.models import BacktestEquity, BacktestRun, BacktestTrade
+from app.db.scoped import get_owned_or_404, owned
 from app.db.session import session_scope
 from app.schemas import (
     BacktestRequest,
@@ -59,10 +62,11 @@ def _load_bars(session: Session, codes: list[str], adjust: str = "qfq") -> dict:
 def _default_codes(
     session: Session,  # noqa: ARG001 - kept for call-site symmetry
     limit: int = 50,
+    owner: int | None = None,
 ) -> list[str]:
     from app.jobs.tasks import _default_universe
 
-    codes = _default_universe()
+    codes = _default_universe(owner_id=owner)
     return codes[:limit]
 
 
@@ -154,11 +158,16 @@ def _thin_by_cadence(signals: dict[date, dict[str, float]], rebalance_days: int)
 
 
 @router.post("/backtest/run", response_model=BacktestResponse)
-def run(payload: BacktestRequest, session: Session = Depends(db_session)):
+def run(
+    payload: BacktestRequest,
+    session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
+):
     """Execute a backtest and persist the run, equity curve and trade ledger."""
     codes = [c.strip() for c in payload.codes if c.strip()]
     if not codes:
-        codes = _default_codes(session, limit=50)
+        # 不指定标的时，「默认宇宙」在隔离模式下是本人自选，而不是所有人的并集。
+        codes = _default_codes(session, limit=50, owner=owner if settings.data_isolation else None)
     if not codes:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -210,7 +219,7 @@ def run(payload: BacktestRequest, session: Session = Depends(db_session)):
     )
 
     run_id = str(uuid.uuid4())
-    _persist_run(run_id, payload, result, config, signals)
+    _persist_run(run_id, payload, result, config, signals, owner=owner)
 
     return BacktestResponse(
         run_id=run_id,
@@ -255,6 +264,8 @@ def _persist_run(
     result,
     config,  # noqa: ARG001 - costs already reflected in result.metrics
     signals,  # noqa: ARG001 - persisted via payload for reproducibility
+    *,
+    owner: int = 0,
 ) -> None:
     """Store the run summary, equity curve and trades.
 
@@ -266,6 +277,7 @@ def _persist_run(
         session.add(
             BacktestRun(
                 id=run_id,
+                owner_id=owner,
                 name=f"{payload.strategy} {date.today()}",
                 strategy=payload.strategy,
                 universe=",".join(payload.codes[:50]) if payload.codes else "default",
@@ -323,9 +335,11 @@ def _persist_run(
 def list_runs(
     limit: int = Query(default=20, ge=1, le=200),
     session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
 ):
     """Recent backtest runs."""
-    rows = session.execute(select(BacktestRun).order_by(BacktestRun.created_at.desc()).limit(limit)).scalars()
+    stmt = owned(select(BacktestRun), BacktestRun, owner).order_by(BacktestRun.created_at.desc()).limit(limit)
+    rows = session.execute(stmt).scalars()
     return [
         BacktestSummary(
             run_id=row.id,
@@ -339,11 +353,13 @@ def list_runs(
 
 
 @router.get("/backtest/{run_id}")
-def get_run(run_id: str, session: Session = Depends(db_session)):
+def get_run(
+    run_id: str,
+    session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
+):
     """Full stored result for a run."""
-    row = session.get(BacktestRun, run_id)
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"run {run_id} not found")
+    row = get_owned_or_404(session, BacktestRun, run_id, owner, "run")
     equity = session.execute(
         select(BacktestEquity).where(BacktestEquity.run_id == run_id).order_by(BacktestEquity.trade_date)
     ).scalars()

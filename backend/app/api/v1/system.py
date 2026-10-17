@@ -10,11 +10,12 @@ from sqlalchemy.orm import Session
 
 from app import __version__
 from app.api.deps import db_session
-from app.auth.deps import require_admin
+from app.auth.deps import current_owner, require_admin
 from app.config import settings
 from app.core.logging import get_logger
 from app.core.symbols import normalize
 from app.db.models import DailyBar, DataSyncTask, Instrument, TradeCalendar, WatchlistItem
+from app.db.scoped import get_owned_or_404, owned
 from app.schemas import (
     HealthResponse,
     JobResult,
@@ -49,12 +50,12 @@ def health():
 def list_watchlist(
     list_name: str = Query(default="default"),
     session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
 ):
     """Watchlist entries with current names resolved."""
+    stmt = owned(select(WatchlistItem), WatchlistItem, owner)
     rows = (
-        session.execute(select(WatchlistItem).where(WatchlistItem.list_name == list_name).order_by(WatchlistItem.code))
-        .scalars()
-        .all()
+        session.execute(stmt.where(WatchlistItem.list_name == list_name).order_by(WatchlistItem.code)).scalars().all()
     )
     names = (
         {
@@ -77,7 +78,11 @@ def list_watchlist(
 
 
 @router.post("/watchlist", response_model=WatchlistItemOut, status_code=status.HTTP_201_CREATED)
-def add_watchlist_item(payload: WatchlistItemIn, session: Session = Depends(db_session)):
+def add_watchlist_item(
+    payload: WatchlistItemIn,
+    session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
+):
     """Add a symbol to a watchlist (idempotent on list+code)."""
     try:
         canon = normalize(payload.code)
@@ -87,8 +92,12 @@ def add_watchlist_item(payload: WatchlistItemIn, session: Session = Depends(db_s
             detail=f"invalid code: {exc}",
         ) from exc
 
+    # 归属条件必须出现在「查重」这一步：隔离开启时，同一个 list_name+code 在不同
+    # owner 下是两条独立记录，漏掉过滤会直接改写别人的 note。
     existing = session.execute(
-        select(WatchlistItem).where(WatchlistItem.list_name == payload.list_name, WatchlistItem.code == canon)
+        owned(select(WatchlistItem), WatchlistItem, owner).where(
+            WatchlistItem.list_name == payload.list_name, WatchlistItem.code == canon
+        )
     ).scalar_one_or_none()
     if existing is not None:
         existing.note = payload.note
@@ -96,7 +105,7 @@ def add_watchlist_item(payload: WatchlistItemIn, session: Session = Depends(db_s
         session.refresh(existing)
         item = existing
     else:
-        item = WatchlistItem(list_name=payload.list_name, code=canon, note=payload.note)
+        item = WatchlistItem(owner_id=owner, list_name=payload.list_name, code=canon, note=payload.note)
         session.add(item)
         session.commit()
         session.refresh(item)
@@ -112,11 +121,13 @@ def add_watchlist_item(payload: WatchlistItemIn, session: Session = Depends(db_s
 
 
 @router.delete("/watchlist/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_watchlist_item(item_id: int, session: Session = Depends(db_session)):
-    """Remove a watchlist entry."""
-    item = session.get(WatchlistItem, item_id)
-    if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"item {item_id} not found")
+def remove_watchlist_item(
+    item_id: int,
+    session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
+):
+    """Remove a watchlist entry (someone else's entry is indistinguishable from absent)."""
+    item = get_owned_or_404(session, WatchlistItem, item_id, owner, "item")
     session.delete(item)
     session.commit()
 
@@ -127,7 +138,7 @@ def remove_watchlist_item(item_id: int, session: Session = Depends(db_session)):
 
 
 @router.get("/system/status", response_model=SystemStatus)
-def system_status(session: Session = Depends(db_session)):
+def system_status(session: Session = Depends(db_session), owner: int = Depends(current_owner)):
     """Operational status: providers, scheduler, data coverage.
 
     Provider circuit-breaker state is surfaced here because silent failover is
@@ -168,7 +179,11 @@ def system_status(session: Session = Depends(db_session)):
             "instrument_count": instrument_count,
             "calendar_days": calendar_days,
             "latest_bar_date": str(latest_bar) if latest_bar else None,
-            "watchlist_size": session.execute(select(func.count()).select_from(WatchlistItem)).scalar() or 0,
+            # 隔离开启时是「我的自选数」；关闭时条件退化为恒真，仍是全表计数
+            "watchlist_size": session.execute(
+                owned(select(func.count()).select_from(WatchlistItem), WatchlistItem, owner)
+            ).scalar()
+            or 0,
             "sync_tasks": [
                 {
                     "job": t.job,

@@ -84,14 +84,17 @@ def test_ensure_migrated_is_idempotent(db_env):
     assert _version_rows() == 1
 
 
-def test_history_exposes_baseline(db_env):
+def test_history_marks_every_applied_revision(db_env):
+    """已应用 = 当前版本及其全部祖先，不是只有最后一条。"""
     from app.db import init_db, migrations
 
     init_db()
     rows = migrations.history()
 
-    assert [row["revision"] for row in rows] == ["0001_baseline"]
-    assert rows[0]["applied"] is True
+    revisions = [row["revision"] for row in rows]
+    assert revisions[0] == "0001_baseline"
+    assert revisions[-1] == migrations.head_revision()
+    assert all(row["applied"] for row in rows), "升级到 head 后整条链都算已应用"
 
 
 def test_schema_drift_reports_missing_column(db_env):

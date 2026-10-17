@@ -4,19 +4,24 @@
 --------
 schema 的真源仍是 ORM 模型，迁移链只承载增量。于是建库流程是::
 
-    create_all()          # 新库建齐；存量库无动作
-    ensure_migrated()     # 无版本记录 → stamp head（认领存量库）；有则可 upgrade
-    create_all()          # 补建迁移链从未覆盖过的新模型表
+    has_application_schema()   # 建表之前判空库，之后判不出来
+    create_all()               # 新库建齐；存量库只补缺失的表
+    ensure_migrated()          # 见下表
+    create_all()               # 补建迁移链从未覆盖过的新模型表
 
 三种情形都能落到同一个状态，且**任何一步都能重复执行**：
 
-===============  ==========================  ==================================
-库的状态          ensure_migrated 的行为        结果
-===============  ==========================  ==================================
-全新空库          alembic_version 为空 → stamp   与基线一致，之后只跑增量
-存量库（旧版）    alembic_version 为空 → stamp   不重放 baseline，避免 table exists
-已纳管库          按 current → head 逐步 upgrade  应用增量
-===============  ==========================  ==================================
+===============  ====================================  ==========================
+库的状态          ensure_migrated 的行为                  结果
+===============  ====================================  ==========================
+全新空库          ``create_all`` 已是 head → stamp head    与模型一致
+存量库（旧版）     stamp 到 baseline，再 ``upgrade head``   增量迁移真正执行
+已纳管库          按 current → head 逐步 upgrade            应用增量
+===============  ====================================  ==========================
+
+存量库不能只 stamp 到 head：那样 ``0002`` 的加列会被整条跳过，库自称「最新」却缺列，
+错误会跑到业务查询里才出现（``no such column``）。相应地，迁移脚本必须写成幂等的，
+因为它既可能在「列已存在」的全新库上跑，也可能在「列不存在」的存量库上跑。
 
 调用 ``command.*`` 时自建 ``Config``（不读 alembic.ini）：容器与测试环境里 ini 未必
 在工作目录，而且我们不希望 alembic 的 logging 配置覆盖应用的日志设置。alembic.ini
@@ -104,6 +109,22 @@ def stamp_head(url: str | None = None) -> str | None:
     return head
 
 
+def base_revision(url: str | None = None) -> str | None:
+    """迁移链的起点版本号（第一个迁移）。"""
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(_config(url))
+    bases = script.get_bases()
+    return bases[0] if bases else None
+
+
+def stamp_revision(revision: str, url: str | None = None) -> None:
+    """把版本标记到指定 revision，不执行迁移。"""
+    from alembic import command
+
+    command.stamp(_config(url), revision)
+
+
 def upgrade_to_head(url: str | None = None) -> str | None:
     """把库升级到 head。"""
     from alembic import command
@@ -115,24 +136,27 @@ def upgrade_to_head(url: str | None = None) -> str | None:
 
 
 def history(url: str | None = None) -> list[dict[str, str | bool]]:
-    """按时间顺序列出迁移链，标注是否已应用。"""
+    """按时间顺序列出迁移链，标注是否已应用。
+
+    已应用的是「当前版本及其全部祖先」，不是只有当前那一条 —— 否则链一长，
+    ``history`` 会显示成「只跑过最后一步」，看着像中间步骤全丢了。
+    """
     from alembic.script import ScriptDirectory
 
     cfg = _config(url)
     applied = current_revision(url)
     script = ScriptDirectory.from_config(cfg)
-    seen: set[str] = set()
+    done: set[str] = set()
+    if applied:
+        done = {rev.revision for rev in script.iterate_revisions(applied, "base")}
     rows: list[dict[str, str | bool]] = []
     for rev in script.walk_revisions():  # head → base
-        if rev.revision in seen:
-            continue
-        seen.add(rev.revision)
         rows.append(
             {
                 "revision": rev.revision,
                 "down_revision": rev.down_revision or "",
                 "description": (rev.doc or "").strip().splitlines()[0] if rev.doc else "",
-                "applied": rev.revision == applied,
+                "applied": rev.revision in done,
             }
         )
     rows.reverse()
@@ -170,11 +194,30 @@ def schema_drift(engine: Engine | None = None) -> list[str]:
     return problems
 
 
+def has_application_schema(engine: Engine) -> bool:
+    """库里是否已经存在本项目的业务表（用于区分「空库」与「存量库」）。
+
+    必须在 ``create_all`` **之前** 调用：建表之后两者无法区分，而区分错了会走错
+    分支 —— 空库被当成存量库会去重放增量（撞 duplicate column），存量库被当成空库
+    会直接打标到 head（缺列留到业务查询才炸）。
+    """
+    from app.db.base import Base
+
+    present = set(inspect(engine).get_table_names())
+    return bool(present & set(Base.metadata.tables))
+
+
 def ensure_migrated(engine: Engine | None = None) -> str | None:
     """启动期入口：把库带到「已纳管且等于 head」的状态。
 
-    幂等。认领存量库时只记录版本，不改结构 —— 存量库的结构本来就等于 baseline，
-    此时贸然 ``upgrade`` 会重放 baseline 之下的迁移（没有）或撞上已存在的表。
+    幂等。三种情形：
+
+    * **空库**：``create_all`` 已按当前模型建齐，直接 stamp 到 head（迁移链不需要
+      再跑一遍，跑了反而会撞 duplicate column）。
+    * **存量库（有表无版本表）**：先 stamp 到 **baseline**，再 ``upgrade head``。
+      只 stamp head 是不行的 —— 那样所有增量迁移（比如 ``0002`` 的加列）都会被
+      跳过，库看起来「已是最新」，实际缺列。
+    * **已纳管库**：正常 ``upgrade head``。
     """
     from app.db.base import Base
 
@@ -185,7 +228,8 @@ def ensure_migrated(engine: Engine | None = None) -> str | None:
     # 迁移动作用的是独立引擎，必须指向同一个库，否则会 upgrade 到 settings 的默认路径。
     target_url = str(engine.url)
 
-    # 新库建齐 / 存量库无动作。放在判版本之前，保证 stamp 时表一定存在。
+    # 先判空库，再建表 —— 顺序反了就只剩「有表」这一个错误结论。
+    fresh = not has_application_schema(engine)
     Base.metadata.create_all(engine)
 
     head = head_revision(target_url)
@@ -194,8 +238,14 @@ def ensure_migrated(engine: Engine | None = None) -> str | None:
         return current
 
     if current is None:
-        log.info("数据库尚未纳入迁移管理，标记为 %s（存量库不重放 baseline）", head)
-        stamp_head(target_url)
+        base = base_revision(target_url)
+        if fresh or base is None or base == head:
+            log.info("新库或单步迁移链，直接标记为 %s", head)
+            stamp_head(target_url)
+        else:
+            log.info("存量库认领：先标记 %s，再应用增量到 %s", base, head)
+            stamp_revision(base, target_url)
+            upgrade_to_head(target_url)
     else:
         log.info("数据库 %s → %s，开始应用迁移", current, head)
         upgrade_to_head(target_url)
@@ -223,11 +273,14 @@ __all__ = [
     "MIGRATIONS_DIR",
     "MigrationError",
     "alembic_ini_path",
+    "base_revision",
     "current_revision",
     "ensure_migrated",
+    "has_application_schema",
     "head_revision",
     "history",
     "schema_drift",
     "stamp_head",
+    "stamp_revision",
     "upgrade_to_head",
 ]

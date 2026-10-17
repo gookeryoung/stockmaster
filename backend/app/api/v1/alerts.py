@@ -12,9 +12,12 @@ from sqlalchemy.orm import Session
 from app.alert.engine import AlertEngine
 from app.alert.rules import RULE_TYPES, describe_rule, normalize_params
 from app.api.deps import db_session
+from app.auth.deps import current_owner
+from app.config import settings
 from app.core.errors import DataError
 from app.core.logging import get_logger
 from app.db.models import AlertRule, AlertTrigger
+from app.db.scoped import get_owned_or_404, owned
 from app.schemas import (
     AlertRuleIn,
     AlertRuleOut,
@@ -73,14 +76,18 @@ def list_rule_types():
 
 
 @router.get("/alerts/rules", response_model=list[AlertRuleOut])
-def list_rules(session: Session = Depends(db_session)):
-    """All configured alert rules."""
-    rows = session.execute(select(AlertRule).order_by(AlertRule.id)).scalars()
-    return [_rule_out(row) for row in rows]
+def list_rules(session: Session = Depends(db_session), owner: int = Depends(current_owner)):
+    """The caller's alert rules."""
+    stmt = owned(select(AlertRule), AlertRule, owner).order_by(AlertRule.id)
+    return [_rule_out(row) for row in session.execute(stmt).scalars()]
 
 
 @router.post("/alerts/rules", response_model=AlertRuleOut, status_code=status.HTTP_201_CREATED)
-def create_rule(payload: AlertRuleIn, session: Session = Depends(db_session)):
+def create_rule(
+    payload: AlertRuleIn,
+    session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
+):
     """Create an alert rule (parameters are validated against the rule schema)."""
     try:
         normalized = normalize_params(payload.rule_type, payload.params)
@@ -88,6 +95,7 @@ def create_rule(payload: AlertRuleIn, session: Session = Depends(db_session)):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
     rule = AlertRule(
+        owner_id=owner,
         name=payload.name,
         rule_type=payload.rule_type,
         params_json=json.dumps(normalized),
@@ -106,11 +114,14 @@ def create_rule(payload: AlertRuleIn, session: Session = Depends(db_session)):
 
 
 @router.patch("/alerts/rules/{rule_id}", response_model=AlertRuleOut)
-def update_rule(rule_id: int, payload: AlertRuleIn, session: Session = Depends(db_session)):
+def update_rule(
+    rule_id: int,
+    payload: AlertRuleIn,
+    session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
+):
     """Replace a rule's definition."""
-    rule = session.get(AlertRule, rule_id)
-    if rule is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"rule {rule_id} not found")
+    rule = get_owned_or_404(session, AlertRule, rule_id, owner, "rule")
     try:
         normalized = normalize_params(payload.rule_type, payload.params)
     except DataError as exc:
@@ -132,11 +143,13 @@ def update_rule(rule_id: int, payload: AlertRuleIn, session: Session = Depends(d
 
 
 @router.delete("/alerts/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_rule(rule_id: int, session: Session = Depends(db_session)):
+def delete_rule(
+    rule_id: int,
+    session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
+):
     """Delete a rule and its triggers."""
-    rule = session.get(AlertRule, rule_id)
-    if rule is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"rule {rule_id} not found")
+    rule = get_owned_or_404(session, AlertRule, rule_id, owner, "rule")
     session.delete(rule)
     session.commit()
 
@@ -148,9 +161,10 @@ def list_triggers(
     trade_date: date | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
 ):
     """Trigger history, newest first."""
-    stmt = select(AlertTrigger).order_by(AlertTrigger.trigger_at.desc()).limit(limit)
+    stmt = owned(select(AlertTrigger), AlertTrigger, owner).order_by(AlertTrigger.trigger_at.desc()).limit(limit)
     if status_filter:
         stmt = stmt.where(AlertTrigger.status == status_filter)
     if code:
@@ -161,14 +175,14 @@ def list_triggers(
 
 
 @router.patch("/alerts/triggers/{trigger_id}", response_model=AlertTriggerOut)
-def update_trigger(trigger_id: int, payload: TriggerStatusUpdate, session: Session = Depends(db_session)):
+def update_trigger(
+    trigger_id: int,
+    payload: TriggerStatusUpdate,
+    session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
+):
     """Mark a trigger read or muted."""
-    row = session.get(AlertTrigger, trigger_id)
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"trigger {trigger_id} not found",
-        )
+    row = get_owned_or_404(session, AlertTrigger, trigger_id, owner, "trigger")
     row.status = payload.status
     session.commit()
     session.refresh(row)
@@ -176,13 +190,16 @@ def update_trigger(trigger_id: int, payload: TriggerStatusUpdate, session: Sessi
 
 
 @router.post("/alerts/scan")
-def scan_now():
-    """Evaluate all rules immediately.
+def scan_now(owner: int = Depends(current_owner)):
+    """Evaluate the caller's rules immediately.
 
     Safe to call repeatedly: triggers are de-duplicated by
     ``(rule_id, dedup_key)``, so the response reports only genuinely new alerts.
+
+    Isolation narrows the scan to the caller's own rules — a manual scan must not
+    write trigger rows into somebody else's history.
     """
-    candidates = AlertEngine().evaluate_all()
+    candidates = AlertEngine().evaluate_all(owner_id=owner if settings.data_isolation else None)
     return {
         "triggered": len(candidates),
         "items": [
@@ -201,8 +218,16 @@ def scan_now():
 
 
 @router.post("/alerts/preview")
-def preview_rule(payload: AlertRuleIn, session: Session = Depends(db_session)):
-    """Evaluate a rule definition without saving it (used by the rule editor)."""
+def preview_rule(
+    payload: AlertRuleIn,
+    session: Session = Depends(db_session),
+    owner: int = Depends(current_owner),
+):
+    """Evaluate a rule definition without saving it (used by the rule editor).
+
+    The probe rule carries the caller's owner so a ``watchlist`` scope previews
+    against *their* list rather than the global one.
+    """
     try:
         normalized = normalize_params(payload.rule_type, payload.params)
     except DataError as exc:
@@ -211,6 +236,7 @@ def preview_rule(payload: AlertRuleIn, session: Session = Depends(db_session)):
     engine = AlertEngine()
     probe = AlertRule(
         id=-1,
+        owner_id=owner,
         name=payload.name,
         rule_type=payload.rule_type,
         params_json=json.dumps(normalized),

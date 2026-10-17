@@ -44,6 +44,8 @@ class TriggerCandidate:
     message: str
     snapshot: dict
     dedup_key: str
+    # 冗余自规则：触发记录要能独立按 owner 过滤，不能依赖 join 回 alert_rules。
+    owner_id: int = 0
     trigger_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
 
 
@@ -291,8 +293,15 @@ class AlertEngine:
 
             return repo.index_members(session, rule.scope_value or "000300.SH")
         if scope == "watchlist":
+            from app.db.scoped import scope_enabled
+
             name = rule.scope_value or "default"
-            rows = session.execute(select(WatchlistItem.code).where(WatchlistItem.list_name == name)).scalars().all()
+            stmt = select(WatchlistItem.code).where(WatchlistItem.list_name == name)
+            if scope_enabled():
+                # 最容易漏的一行：规则属于谁，就只能看谁的自选。少了这个条件，
+                # 两个人的 default 清单会被合并，A 的规则会在 B 的股票上触发。
+                stmt = stmt.where(WatchlistItem.owner_id == rule.owner_id)
+            rows = session.execute(stmt).scalars().all()
             if rows:
                 return list(rows)
             # Fall back to all active instruments when the watchlist is empty, so
@@ -404,6 +413,7 @@ class AlertEngine:
         self,
         *,
         rule_ids: list[int] | None = None,
+        owner_id: int | None = None,
         persist: bool = True,
         now: datetime | None = None,
     ) -> list[TriggerCandidate]:
@@ -423,6 +433,8 @@ class AlertEngine:
             query = select(AlertRule).where(AlertRule.enabled.is_(True))
             if rule_ids:
                 query = query.where(AlertRule.id.in_(rule_ids))
+            if owner_id is not None:
+                query = query.where(AlertRule.owner_id == owner_id)
             rules = list(session.execute(query).scalars())
             if not rules:
                 return []
@@ -466,6 +478,7 @@ class AlertEngine:
                             message=message,
                             snapshot={**snapshot, "rule": describe_rule(rule.rule_type, params)},
                             dedup_key=_dedup_key(rule, ctx, now),
+                            owner_id=rule.owner_id,
                             trigger_at=now,
                         )
                     )
@@ -485,6 +498,7 @@ class AlertEngine:
         rows = [
             {
                 "rule_id": c.rule_id,
+                "owner_id": c.owner_id,
                 "code": c.code,
                 "name": c.name,
                 "trade_date": c.trade_date,
@@ -523,6 +537,7 @@ class AlertEngine:
         exclude_st: bool = True,
         min_amount: float = 0.0,
         enabled: bool = True,
+        owner_id: int = 0,
     ) -> int:
         """Validate and store a rule; returns its id."""
         if rule_type not in RULE_TYPES:
@@ -530,6 +545,7 @@ class AlertEngine:
         normalized = normalize_params(rule_type, params)
         with session_scope() as session:
             rule = AlertRule(
+                owner_id=owner_id,
                 name=name,
                 rule_type=rule_type,
                 params_json=json.dumps(normalized),

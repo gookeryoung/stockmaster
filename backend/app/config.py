@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     # Bootstrap administrator, created on startup when it does not exist yet.
     auth_admin_username: str = ""
     auth_admin_password: str = ""
+    # --- User data isolation ---
+    # 自选股 / 预警规则 / 预警记录 / 回测历史是否按 ``owner_id`` 隔离。
+    # 默认 False = 沿用「所有人共享同一份数据」的旧语义（单机升级后行为完全不变）；
+    # 置 True 后 API 只读写本人数据，``owner_id = 0`` 仍代表「未归属」的历史数据。
+    # 列与迁移始终存在，切开关不需要重新迁移，可随时回退。
+    data_isolation: bool = False
     # --- Maintenance ---
     # 启动时自动把库结构带到最新（create_all + Alembic）。生产若要求「先显式迁移
     # 再启动」，把它设为 false，启动时只告警不升级，由 deploy.sh 调 `db upgrade`。
