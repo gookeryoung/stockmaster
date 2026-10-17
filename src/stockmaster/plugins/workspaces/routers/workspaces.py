@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from stockmaster.core import quota
 from stockmaster.core.auth_deps import require_user
 from stockmaster.core.deps import db_session
 from stockmaster.core.logging import get_logger
@@ -39,6 +40,7 @@ from stockmaster.plugins.workspaces.schemas.workspace import (
     WorkspaceMemberOut,
     WorkspaceOut,
     WorkspaceUpdate,
+    WorkspaceUsageOut,
 )
 from stockmaster.plugins.workspaces.services import service
 
@@ -152,6 +154,31 @@ def delete_workspace(
 
 
 # --------------------------------------------------------------------------- #
+# 用量与配额
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/{workspace_id}/stats", response_model=WorkspaceUsageOut)
+def workspace_stats(
+    ctx: Annotated[WorkspaceCtx, Depends(path_workspace)],
+    session: Annotated[Session, Depends(db_session)],
+):
+    """工作区用量与配额（成员可读，只读无副作用）。
+
+    配额只是治理手段：``limits`` 里 ``0`` 表示不限，前端据此展示「不限」而不是
+    「0 条」。隔离关闭时没有工作区语义，这个端点仍按路径 id 回答，但不会限制写路径。
+    """
+    current = quota.usage(session, ctx.id)
+    return WorkspaceUsageOut(
+        workspace_id=ctx.id,
+        usage=current,
+        limits=quota.limits(),
+        labels=quota.USAGE_LABELS,
+        total=sum(current.values()),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # 通知通道
 # --------------------------------------------------------------------------- #
 
@@ -176,6 +203,7 @@ def create_channel(
     session: Annotated[Session, Depends(db_session)],
 ):
     """新建通道（仅 owner —— 通道是数据出口，不随「可写数据」下放给 editor）。"""
+    quota.enforce(session, ctx.id, "channels")
     channel = service.create_channel(
         session,
         ctx.workspace,
@@ -290,6 +318,7 @@ def add_member(
     session: Annotated[Session, Depends(db_session)],
 ):
     """按用户名加成员（仅 owner；只可授予 editor / viewer）。"""
+    quota.enforce(session, ctx.id, "members")
     member = service.add_member(session, ctx.workspace, username=payload.username, role=payload.role)
     user = session.get(User, member.user_id)
     return _member_out(member, user)

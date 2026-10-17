@@ -299,6 +299,19 @@ export interface WorkspaceChannelTestResult {
   kind: string;
 }
 
+/** 工作区用量与配额。
+ *
+ * `usage` 与 `limits` 以资源键（members / watchlist_items / alert_rules / ...）索引；
+ * `limits[key] === 0` 表示不限，由后端按 `SM_WORKSPACE_MAX_*` 配置下发。
+ */
+export interface WorkspaceUsage {
+  workspace_id: number;
+  usage: Record<string, number>;
+  limits: Record<string, number>;
+  labels: Record<string, string>;
+  total: number;
+}
+
 export interface TokenResponse {
   token: string;
   token_type: string;

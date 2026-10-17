@@ -16,6 +16,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
+from stockmaster.core import quota
 from stockmaster.core.deps import db_session
 from stockmaster.core.workspace_deps import WorkspaceCtx, current_workspace, require_editor
 from stockmaster.plugins.strategy.services import service
@@ -60,6 +61,7 @@ def create_screening(
     session: Session = Depends(db_session),
     ws: WorkspaceCtx = Depends(require_editor),
 ):
+    quota.enforce(session, ws.id, "screening_configs")
     return service.create_screening(session, ws.id, user_id=_user_id(ws), payload=payload)
 
 
@@ -120,6 +122,7 @@ def create_sample(
     session: Session = Depends(db_session),
     ws: WorkspaceCtx = Depends(require_editor),
 ):
+    quota.enforce(session, ws.id, "sample_configs")
     return service.create_sample(session, ws.id, user_id=_user_id(ws), payload=payload)
 
 
@@ -180,6 +183,7 @@ def create_algorithm(
     session: Session = Depends(db_session),
     ws: WorkspaceCtx = Depends(require_editor),
 ):
+    quota.enforce(session, ws.id, "algorithm_configs")
     return service.create_algorithm(session, ws.id, user_id=_user_id(ws), payload=payload)
 
 

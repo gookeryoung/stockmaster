@@ -19,7 +19,8 @@
 | 用户隔离 PR-1 / PR-2（owner_id，已被 0003 取代） | ✅ 已完成 | `0002_owner_columns`、`tests/test_isolation.py` |
 | 工作区隔离（Workspace + owner/editor/viewer） | ✅ 已完成，默认关闭 | `0003_workspaces`、`src/stockmaster/plugins/workspaces/`、`tests/test_workspace.py`、见 `WORKSPACE.md` |
 | 工作区级通知通道（webhook / Bark） | ✅ 已完成 | `0005_workspace_channels`、`plugins/workspaces/routers/workspaces.py`、`plugins/alerts/services/channels.py`、见 `WORKSPACE.md` §5.1 |
-| 工作区配额 / 管理员统计列 | ❌ 未开始 | `WORKSPACE.md` §11 |
+| 工作区用量统计 + 可选配额 | ✅ 已完成（配额默认关闭） | `core/quota.py`、`GET /workspaces/{id}/stats`、`SM_WORKSPACE_MAX_*`、见 `WORKSPACE.md` §5.2 |
+| 用户页/管理员统计列 | ❌ 未开始 | `WORKSPACE.md` §11 |
 
 ### 关键设计决定（已落地，改动前先读）
 
@@ -55,7 +56,8 @@ P1 数据隔离（已完成）
  ├─ PR-2 读路径隔离 + 预警引擎按归属解析 + 测试矩阵
  ├─ PR-3 升级为工作区隔离：0003 迁移 + owner/editor/viewer 角色 + 成员管理
  ├─ PR-4 工作区级通知通道：0005 迁移 + owner 管理通道 + 按工作区投递
- └─ 待办：管理员统计列、配额
+ ├─ PR-5 工作区用量统计 + 可选配额：stats 端点 + SM_WORKSPACE_MAX_* + 写路径 409
+ └─ 待办：用户页/管理员统计列
         │
         ▼
 P2 备份自动化（1 个 PR）
@@ -200,6 +202,29 @@ editor 不可管成员、最后 owner 保护、跨工作区 404、转让）；`t
 **回滚**：不配置任何通道 + 保持 `SM_ALERT_GLOBAL_FALLBACK=false` 即不外发；需要恢复
 旧的全站推送时，配置 `SM_ALERT_WEBHOOK_URL` 并置 `SM_ALERT_GLOBAL_FALLBACK=true`，
 或直接回退代码（`0005` 建的表可安全保留，旧代码不读它）。
+
+### PR-5：工作区用量统计 + 可选配额 —— ✅ 已完成
+
+> 设计细节见 `WORKSPACE.md` §5.2。核心变化：工作区页可看到本工作区的用量；运维可
+> 通过 `SM_WORKSPACE_MAX_*` 给每个工作区设软上限，默认全 0 = 不限，隔离关闭时不生效，
+> 因此升级后行为不变。**无 schema 变更、无迁移。**
+
+| 文件 | 改动 |
+|---|---|
+| `src/stockmaster/core/quota.py` | 8 类资源与 ORM 映射、`limits()`（读 env）、`usage()`、`enforce()`（409 + `X-Auth-Error: quota_exceeded`） |
+| `src/stockmaster/config.py` | 6 个 `SM_WORKSPACE_MAX_*`（非负校验，0=不限） |
+| `plugins/workspaces/{schemas/workspace.py,routers/workspaces.py}` | `WorkspaceUsageOut` + `GET /workspaces/{id}/stats`；成员与通道创建前配额校验 |
+| `plugins/system/routers/system.py` | 新增自选前校验（幂等更新已有条目不占额度） |
+| `plugins/alerts/routers/alerts.py` / `plugins/backtest/routers/backtest.py` / `plugins/strategy/routers/strategy.py` | 规则/回测/三类策略配置创建前校验 |
+| frontend | 「工作区」页新增「用量与配额」卡片（资源、用量、上限、合计；所有成员只读） |
+| `.env.example` / `docker-compose.prod.yml` | 同步 6 个配额变量（compose 不会自动透传 `.env`） |
+
+**验收**：`tests/test_workspace_stats_quota.py`（stats 字段与权限；自选/规则/通道/成员/
+策略配置超限 409；删除释放额度；0 与隔离关闭不限制）；默认配额 0 下既有
+`test_workspace.py` / `test_strategy_configs.py` / `test_alerts.py` / `test_isolation.py`
+全部保持通过。
+
+**回滚**：把所有 `SM_WORKSPACE_MAX_*` 置回 0 即完全恢复无配额行为；`stats` 端点可保留。
 
 ---
 

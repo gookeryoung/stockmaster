@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from stockmaster.config import settings
+from stockmaster.core import quota
 from stockmaster.core.deps import db_session
 from stockmaster.core.errors import DataError
 from stockmaster.core.logging import get_logger
@@ -97,6 +98,8 @@ def create_rule(
     except DataError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
+    # 参数校验之后才查配额：非法请求应该得到 422 而不是 409（校验顺序即用户体验）。
+    quota.enforce(session, ws.id, "alert_rules")
     rule = AlertRule(
         workspace_id=ws.id,
         name=payload.name,

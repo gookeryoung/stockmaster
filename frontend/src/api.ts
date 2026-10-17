@@ -45,6 +45,7 @@ import type {
   WorkspaceChannelTestResult,
   WorkspaceMember,
   WorkspaceRole,
+  WorkspaceUsage,
 } from "./types";
 
 export class ApiError extends Error {
@@ -258,6 +259,7 @@ export const api = {
     request<{ status: string; purged: Record<string, number> }>(`/workspaces/${id}?purge=${purge}`, {
       method: "DELETE",
     }),
+  workspaceStats: (id: number) => request<WorkspaceUsage>(`/workspaces/${id}/stats`),
   workspaceMembers: (id: number) => request<WorkspaceMember[]>(`/workspaces/${id}/members`),
   workspaceCandidates: (id: number, search = "") =>
     request<WorkspaceMember[]>(`/workspaces/${id}/members/candidates?search=${encodeURIComponent(search)}`),

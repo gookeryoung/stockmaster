@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from stockmaster.config import settings
+from stockmaster.core import quota
 from stockmaster.core.deps import db_session
 from stockmaster.core.logging import get_logger
 from stockmaster.core.workspace_deps import WorkspaceCtx, current_workspace, require_editor
@@ -168,6 +169,8 @@ def run(
     Editor and above: a run consumes CPU for minutes and writes into the shared
     history, so a read-only member must not be able to trigger it.
     """
+    # 配额先于任何取数与计算：被拒绝的请求不应该先花几分钟跑引擎再报 409。
+    quota.enforce(session, ws.id, "backtest_runs")
     codes = [c.strip() for c in payload.codes if c.strip()]
     if not codes and payload.screening_id is not None:
         # 显式 codes 优先；只有为空时才用工作区的选股配置解析标的池。

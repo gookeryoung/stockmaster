@@ -166,7 +166,44 @@ def require_editor(...) -> WorkspaceCtx:
 **迁移与开关**：`0005_workspace_channels` 幂等建表（`create_all` 已建则跳过），不改任何既有表；不配置通道时升级后行为不变。`SM_ALERT_GLOBAL_FALLBACK` 默认 `false`。
 
 
-## 6. 迁移：`0003_workspaces`
+### 5.2 工作区用量统计与可选配额（无 schema 变更）
+
+**为什么拆成只读统计 + 默认关闭的配额**
+隔离解决「谁能看见谁的数据」，配额解决「一个工作区能放多少」。两者都应该在工作区层回答，但风险不同：统计只是读，可以默认开启；配额会拒绝写请求，默认必须关闭，否则升级后单机用户会突然被一个自己没配过的上限卡住。
+
+**用量统计**：`GET /api/v1/workspaces/{id}/stats`（`path_workspace`，成员可读；管理员凭救援语义同样可读）
+
+| 字段 | 说明 |
+|---|---|
+| `usage` | 8 类用量：成员、自选股、预警规则、回测记录、选股/样本/算法配置、通知通道 |
+| `limits` | 与 `usage` 同键的当前上限；`0` = 不限 |
+| `labels` | 资源的中文名，前端直接展示，避免在 TS 里维护第二份字典 |
+| `total` | 上述 8 类用量之和（注意包含成员与通道，不是「数据行数」） |
+
+只统计工作区私有数据 + 成员 + 通道；行情、指标、因子、模型是全站共享参考数据，不计入任何工作区的用量。前端「工作区」页新增「用量与配额」卡片，所有成员可见（只读）。
+
+**配额**（`core/quota.py`，环境变量见 §10，全部默认 `0` = 不限）：
+
+| 资源 | 校验时机 |
+|---|---|
+| `members` | owner 邀请成员前 |
+| `watchlist_items` | 新增自选前（**幂等更新已有条目不占额度**） |
+| `alert_rules` | 新建规则前（参数 422 校验优先） |
+| `backtest_runs` | 回测请求进入 CPU 计算前 |
+| `screening_configs` / `sample_configs` / `algorithm_configs` | 三类配置共用 `SM_WORKSPACE_MAX_STRATEGY_CONFIGS`，**按表分别计数**（各可建 N 条） |
+| `channels` | owner 新建通知通道前 |
+
+拒写行为：`409` + 响应头 `X-Auth-Error: quota_exceeded`，`detail` 含资源名与上限。关键语义：
+
+- **隔离关闭时不生效**（`workspace_id = 0` 的未归属桶）——单机模式没有工作区概念，保持引入工作区前的行为；
+- **默认全 0 = 不限制**，配置校验拒绝负数；
+- 配额是治理手段而不是精确计费：检查与写入之间没有加锁，并发请求可能短暂超出上限 1～2 条，可接受；
+- 删除数据立即释放额度（计数是实时的，不缓存）；
+- 统计/配额不新增表、不改迁移，升级只需重启。
+
+**回滚**：把所有 `SM_WORKSPACE_MAX_*` 置回 `0`（或不设置）即完全恢复无配额行为；统计端点可保留，不影响任何写路径。
+
+
 
 幂等设计 —— 同一个迁移既要在**全新库**（列建出来就叫 `workspace_id`）跳过改名，
 又要在 **0002 存量库**（还是 `owner_id`）上执行：
@@ -224,6 +261,9 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 - `tests/test_alert_notify.py`：按工作区投递 —— 隔离关闭保持旧 key 与全站 webhook；
   两个工作区各收各的通知；停用/无通道/`SM_ALERT_GLOBAL_FALLBACK` 的三种分支；
   `workspace_id=0` 走全局；`job_scan_alerts` 把触发所属工作区透传到 Notification。
+- `tests/test_workspace_stats_quota.py`：用量统计（usage/limits/labels/total、成员可读、
+  非成员 404）与超限矩阵 —— 自选/规则/通道/成员/策略配置超限均 409 +
+  `X-Auth-Error: quota_exceeded`；删除后释放额度；`SM_WORKSPACE_MAX_*=0` 或隔离关闭时不限制。
 
 ## 10. 配置
 
@@ -232,6 +272,14 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 | `SM_DATA_ISOLATION` | `false` | `false` = 无工作区概念，全员共享（旧语义，单机推荐）；`true` = 启用工作区隔离与角色权限 |
 | `SM_ALERT_WEBHOOK_URL` | 空 | 全局外发 webhook。隔离关闭时是唯一外发通道；隔离开启时只服务 `workspace_id=0` 或 fallback |
 | `SM_ALERT_GLOBAL_FALLBACK` | `false` | 隔离开启时，没有配置任何启用通道的工作区是否回落到全局 webhook；默认 `false` = 严格隔离 |
+| `SM_WORKSPACE_MAX_MEMBERS` | `0` | 工作区成员上限；`0` = 不限 |
+| `SM_WORKSPACE_MAX_WATCHLIST_ITEMS` | `0` | 工作区自选股条数上限；`0` = 不限 |
+| `SM_WORKSPACE_MAX_ALERT_RULES` | `0` | 工作区预警规则上限；`0` = 不限 |
+| `SM_WORKSPACE_MAX_BACKTEST_RUNS` | `0` | 工作区回测记录上限；`0` = 不限 |
+| `SM_WORKSPACE_MAX_STRATEGY_CONFIGS` | `0` | 选股/样本/算法配置各自的上限（按表分别计数）；`0` = 不限 |
+| `SM_WORKSPACE_MAX_CHANNELS` | `0` | 工作区通知通道上限；`0` = 不限 |
+
+配额变量在隔离关闭时一律不生效；超限返回 409 + `X-Auth-Error: quota_exceeded`。
 
 `false` 时：workspace store 为空、请求不带 `X-Workspace-Id`、后端过滤退化为恒真、
 `require_editor` 恒通过 —— 行为与引入工作区之前逐字节一致。
@@ -247,7 +295,9 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 
 - ~~按工作区通知通道~~：**已实现** —— 见 §5.1（`0005_workspace_channels`、owner 管理
   webhook/Bark 通道、按工作区路由投递、`SM_ALERT_GLOBAL_FALLBACK` 兜底开关）；
-- **配额与统计**：工作区级配额、用户页数据量统计（原 PR-4）；
+- **配额与统计**：~~工作区级用量统计与可选配额~~ **已实现** —— 见 §5.2（`GET /workspaces/{id}/stats`、
+  6 个 `SM_WORKSPACE_MAX_*`、写路径 409 `quota_exceeded`；默认全 0 不改变行为）。
+  仍需后续 PR：用户页的个人数据量细粒度统计、管理员工作区列表的统计列；
 - 工作区级预警参数覆盖、共享清单细粒度可见性；
 - ~~工作区级策略配置~~：**已实现** —— 选股 / 样本 / 算法三类命名配置随工作区隔离与角色权限，
   支持 `viewer` 只读运行；详见 [`docs/STRATEGY_CONFIGS.md`](STRATEGY_CONFIGS.md)。三张新表

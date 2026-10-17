@@ -70,6 +70,13 @@ services:
       - SM_AUTH_FRONTEND_BASE=${SM_AUTH_FRONTEND_BASE:-}
       # 工作区隔离（owner/editor/viewer，见 docs/WORKSPACE.md）；false = 共享一份（旧语义）
       - SM_DATA_ISOLATION=${SM_DATA_ISOLATION:-false}
+      # ── 工作区配额（0 = 不限；隔离关闭时不生效）────────────────
+      - SM_WORKSPACE_MAX_MEMBERS=${SM_WORKSPACE_MAX_MEMBERS:-0}
+      - SM_WORKSPACE_MAX_WATCHLIST_ITEMS=${SM_WORKSPACE_MAX_WATCHLIST_ITEMS:-0}
+      - SM_WORKSPACE_MAX_ALERT_RULES=${SM_WORKSPACE_MAX_ALERT_RULES:-0}
+      - SM_WORKSPACE_MAX_BACKTEST_RUNS=${SM_WORKSPACE_MAX_BACKTEST_RUNS:-0}
+      - SM_WORKSPACE_MAX_STRATEGY_CONFIGS=${SM_WORKSPACE_MAX_STRATEGY_CONFIGS:-0}
+      - SM_WORKSPACE_MAX_CHANNELS=${SM_WORKSPACE_MAX_CHANNELS:-0}
       # ── 数据库迁移与备份 ──────────────────────────────────────
       # 启动自动迁移；设 false 则要求先执行 `python -m stockmaster.cli db upgrade`
       - SM_DB_AUTO_MIGRATE=${SM_DB_AUTO_MIGRATE:-true}

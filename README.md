@@ -415,6 +415,7 @@ uv run --with prek prek run --all-files   # 手动全量运行
 | `SM_BACKUP_KEEP` | 7 | 本地备份保留份数，0 表示不清理 |
 | `SM_BACKUP_INCLUDE_SECRET` | true | 备份是否包含 `.auth_secret`（含则归档等同凭据） |
 | `SM_DATA_ISOLATION` | false | 工作区隔离（owner/editor/viewer 角色，见 `docs/WORKSPACE.md`）；false = 所有人共享一份（旧语义） |
+| `SM_WORKSPACE_MAX_*` | 0 | 工作区配额（成员/自选/预警规则/回测/策略配置/通道），`0` = 不限，隔离关闭时不生效；详见 `docs/WORKSPACE.md` §5.2 |
 
 ### 账号与微信登录
 
@@ -476,6 +477,11 @@ owner 可创建共享工作区并邀请成员。前端顶栏可随时切换工�
 隔离开启时，没有配置任何启用通道的工作区**默认不外发**（严格隔离），过渡期可置
 `SM_ALERT_GLOBAL_FALLBACK=true` 回落到全局 `SM_ALERT_WEBHOOK_URL`；`workspace_id=0`
 的未归属数据始终走全局通道。详见 **[docs/WORKSPACE.md](docs/WORKSPACE.md)** §5.1。
+
+「工作区」页还会显示当前工作区的**用量统计**（成员、自选、规则、回测、策略配置、通道），
+数据来自 `GET /api/v1/workspaces/{id}/stats`。管理员可按需通过 `SM_WORKSPACE_MAX_*`
+给每个工作区设上限（默认全 `0` = 不限，隔离关闭时一律不生效）；超限写入返回
+`409` + `X-Auth-Error: quota_exceeded`。设计见 **[docs/WORKSPACE.md](docs/WORKSPACE.md)** §5.2。
 
 策略配置（选股 / 样本 / 算法）同样按工作区归属：editor 及以上可增删改与训练，viewer 只读但可运行
 选股、解析样本；回测请求可直接引用 `screening_id` 使用某套选股口径。字段、JSON 约定、API 与权限矩阵见

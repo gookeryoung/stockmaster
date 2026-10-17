@@ -94,6 +94,16 @@ class Settings(BaseSettings):
     # 置 True 后 API 只读写本人数据，``owner_id = 0`` 仍代表「未归属」的历史数据。
     # 列与迁移始终存在，切开关不需要重新迁移，可随时回退。
     data_isolation: bool = False
+    # --- 工作区配额（0 = 不限，默认全部关闭）---
+    # 隔离回答「谁能看见」，配额回答「一个工作区能放多少」。默认 0 表示不限制，
+    # 升级后行为不变；只有显式配置才生效（隔离关闭时一律不限制，见 core/quota.py）。
+    workspace_max_members: int = 0
+    workspace_max_watchlist_items: int = 0
+    workspace_max_alert_rules: int = 0
+    workspace_max_backtest_runs: int = 0
+    # 选股 / 样本 / 算法三类策略配置共用此上限（每类分别计数）。
+    workspace_max_strategy_configs: int = 0
+    workspace_max_channels: int = 0
     # --- Maintenance ---
     # 启动时自动把库结构带到最新（create_all + Alembic）。生产若要求「先显式迁移
     # 再启动」，把它设为 false，启动时只告警不升级，由 deploy.sh 调 `db upgrade`。
@@ -127,6 +137,21 @@ class Settings(BaseSettings):
     def _validate_workers(cls, v: int) -> int:
         if v < 1:
             raise ValueError("sync_workers must be >= 1")
+        return v
+
+    @field_validator(
+        "workspace_max_members",
+        "workspace_max_watchlist_items",
+        "workspace_max_alert_rules",
+        "workspace_max_backtest_runs",
+        "workspace_max_strategy_configs",
+        "workspace_max_channels",
+    )
+    @classmethod
+    def _validate_workspace_quota(cls, v: int) -> int:
+        # 负数没有意义，还可能把 in_workspace 的判断变成「永远超限」。
+        if v < 0:
+            raise ValueError("workspace quotas must be >= 0 (0 = unlimited)")
         return v
 
     @field_validator("wechat_login_mode")

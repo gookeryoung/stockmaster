@@ -19,13 +19,67 @@ import {
   useCurrentWorkspace,
   useWorkspace,
 } from "../workspace";
-import type { WorkspaceChannelKind, WorkspaceRole } from "../types";
+import type { WorkspaceChannelKind, WorkspaceRole, WorkspaceUsage } from "../types";
 
 const ROLE_HINT: Record<WorkspaceRole, string> = {
   owner: "可改工作区信息、管理成员、转让所有权",
   editor: "可增删自选、预警规则与回测",
   viewer: "只读，不能修改任何数据",
 };
+
+/** 用量与配额表：只读，所有成员可见。
+ *
+ * `limits[key] === 0` 表示该资源不限量；达到上限时用红色 badge 提示，
+ * 但不阻止任何操作（真正的拦截在服务端，且以服务端返回的错误为准）。
+ */
+function UsageTable({ data }: { data: WorkspaceUsage }) {
+  return (
+    <>
+      <div className="table-wrap">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-slate-800">
+              <th className="th">资源</th>
+              <th className="th">用量</th>
+              <th className="th">上限</th>
+              <th className="th">状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.keys(data.usage).length === 0 && (
+              <tr>
+                <td className="td text-slate-500" colSpan={4}>
+                  暂无用量数据。
+                </td>
+              </tr>
+            )}
+            {Object.entries(data.usage).map(([key, used]) => {
+              const limit = data.limits[key] ?? 0;
+              const atLimit = limit > 0 && used >= limit;
+              return (
+                <tr key={key} className="border-b border-slate-800/50 last:border-0">
+                  <td className="td text-slate-300">{data.labels[key] ?? key}</td>
+                  <td className="td text-slate-300">{used}</td>
+                  <td className="td text-slate-400">{limit > 0 ? limit : "不限"}</td>
+                  <td className="td">
+                    {atLimit ? (
+                      <span className="badge bg-rose-900/50 text-rose-300">已达上限</span>
+                    ) : (
+                      <span className="badge bg-slate-800 text-slate-400">正常</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-slate-500">
+        合计 {data.total} 项用量（含成员与通道） · 配额由管理员通过 SM_WORKSPACE_MAX_* 配置，默认不限；隔离关闭时不生效。
+      </p>
+    </>
+  );
+}
 
 export default function WorkspacePage() {
   const queryClient = useQueryClient();
@@ -63,6 +117,14 @@ export default function WorkspacePage() {
     enabled: workspaceId !== null,
   });
 
+  // 用量与配额：失败只在这张卡片里提示，不影响页面其它区块。
+  const usage = useQuery({
+    queryKey: ["workspace-usage", workspaceId],
+    queryFn: () => api.workspaceStats(workspaceId as number),
+    enabled: workspaceId !== null,
+    retry: false,
+  });
+
   const flash = (text: string) => setMessage(text);
 
   const createWorkspace = useMutation({
@@ -83,6 +145,7 @@ export default function WorkspacePage() {
       setMemberName("");
       flash(`已加入 ${member.username}（${ROLE_LABEL[member.role]}）`);
       queryClient.invalidateQueries({ queryKey: ["workspace-members", workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ["workspace-usage", workspaceId] });
       void refresh();
     },
     onError: (error) => flash(`添加失败：${(error as Error).message}`),
@@ -100,6 +163,7 @@ export default function WorkspacePage() {
     onSuccess: () => {
       flash("已移除成员");
       queryClient.invalidateQueries({ queryKey: ["workspace-members", workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ["workspace-usage", workspaceId] });
       void refresh();
     },
     onError: (error) => flash(`移除失败：${(error as Error).message}`),
@@ -131,6 +195,7 @@ export default function WorkspacePage() {
       setChannelEnabled(true);
       flash(`已添加通道「${channel.name}」`);
       queryClient.invalidateQueries({ queryKey: ["workspace-channels", workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ["workspace-usage", workspaceId] });
     },
     onError: (error) => flash(`添加通道失败：${(error as Error).message}`),
   });
@@ -158,6 +223,7 @@ export default function WorkspacePage() {
     onSuccess: () => {
       flash("已删除通道");
       queryClient.invalidateQueries({ queryKey: ["workspace-channels", workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ["workspace-usage", workspaceId] });
     },
     onError: (error) => flash(`删除通道失败：${(error as Error).message}`),
   });
@@ -303,6 +369,21 @@ export default function WorkspacePage() {
             创建
           </button>
         </form>
+      </section>
+
+      {/* 用量与配额（只读，所有成员可见） */}
+      <section className="card">
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold text-slate-100">
+            用量与配额 · {current?.name ?? "未选择"}
+          </h2>
+          <span className="text-xs text-slate-500">只读 · 达到上限时相关写入会被服务端拒绝</span>
+        </div>
+        {usage.isLoading && <p className="text-xs text-slate-500">用量加载中…</p>}
+        {usage.isError && (
+          <p className="text-xs text-slate-500">用量信息暂不可用，不影响页面其他操作。</p>
+        )}
+        {usage.data && <UsageTable data={usage.data} />}
       </section>
 
       {/* 当前工作区成员 */}

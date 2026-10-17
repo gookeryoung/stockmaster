@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from stockmaster import __version__
 from stockmaster.config import settings
+from stockmaster.core import quota
 from stockmaster.core.auth_deps import require_admin
 from stockmaster.core.deps import db_session
 from stockmaster.core.logging import get_logger
@@ -110,6 +111,8 @@ def add_watchlist_item(
         session.refresh(existing)
         item = existing
     else:
+        # 只有「新增条目」占额度；幂等更新已有条目（上面分支）不消耗配额。
+        quota.enforce(session, ws.id, "watchlist_items")
         item = WatchlistItem(workspace_id=ws.id, list_name=payload.list_name, code=canon, note=payload.note)
         session.add(item)
         session.commit()

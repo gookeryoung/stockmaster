@@ -104,6 +104,20 @@ class WorkspaceChannelOut(BaseModel):
     updated_at: datetime | None = None
 
 
+class WorkspaceUsageOut(BaseModel):
+    """工作区用量与配额（只读）。
+
+    ``limits`` 里 ``0`` 表示不限；``labels`` 是资源键的中文名，前端直接展示避免
+    第二份翻译表；``total`` 是全部计入资源之和，供「共 N 条工作区数据」使用。
+    """
+
+    workspace_id: int
+    usage: dict[str, int]
+    limits: dict[str, int]
+    labels: dict[str, str]
+    total: int
+
+
 __all__ = [
     "ChannelIn",
     "ChannelUpdate",
@@ -116,4 +130,5 @@ __all__ = [
     "WorkspaceMemberOut",
     "WorkspaceOut",
     "WorkspaceUpdate",
+    "WorkspaceUsageOut",
 ]
