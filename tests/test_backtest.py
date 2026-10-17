@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stockmaster.backtest.engine import (
+from stockmaster.plugins.backtest.services.engine import (
     BacktestConfig,
     buy_and_hold_signals,
     compute_metrics,

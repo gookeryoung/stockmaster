@@ -218,14 +218,15 @@ stockmaster/
 ├─ .pre-commit-config.yaml
 ├─ .gitattributes      # 行尾规范化
 ├─ src/stockmaster/
+│  ├─ plugins/      # 业务域插件（自动发现并挂载路由）
+│  │  ├─ market/ analysis/ predict/ backtest/ alerts/
+│  │  ├─ strategy/ system/ auth/ workspaces/
+│  │  └─ 每个插件含 plugin.py + routers/ + services/（+ schemas/）
+│  ├─ core/         # 指标、因子、市场规则、错误、日志、控制台（共享基础设施）
 │  ├─ providers/    # 数据源抽象 + baostock/腾讯/新浪 + 熔断注册表
 │  ├─ sync/         # 仓储、增量同步、断点续传、复权重建
-│  ├─ core/         # 指标、因子、市场规则、错误、日志、控制台
-│  ├─ model/        # 数据集、时序切分、模型、评估、训练
-│  ├─ backtest/     # 撮合引擎 + 信号生成
-│  ├─ alert/        # 规则引擎 + 去重 + 推送通道
 │  ├─ jobs/         # 流水线任务 + APScheduler
-│  ├─ api/v1/       # FastAPI 路由
+│  ├─ db/           # ORM 模型、会话、迁移桥接
 │  ├─ alembic/      # 数据库迁移（随包发布）
 │  └─ cli.py        # 命令行（回补/体检/训练等）
 ├─ .github/workflows/ci.yml  # CI（后端+前端）与 tag 触发的 Release

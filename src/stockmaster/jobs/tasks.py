@@ -11,13 +11,13 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from time import monotonic
 
-from stockmaster.alert.channels import Notification, notify
-from stockmaster.alert.engine import AlertEngine
 from stockmaster.core.logging import get_logger
 from stockmaster.core.market import dashboard_index_codes
 from stockmaster.db.models import DataSyncTask, Prediction
 from stockmaster.db.session import session_scope
-from stockmaster.model.train import load_active_model, score_symbols
+from stockmaster.plugins.alerts.services.channels import Notification, notify
+from stockmaster.plugins.alerts.services.engine import AlertEngine
+from stockmaster.plugins.predict.services.train import load_active_model, score_symbols
 from stockmaster.sync import repository as repo
 from stockmaster.sync.sync_service import get_sync_service
 
@@ -339,8 +339,8 @@ def _upsert_factors(session, rows: list[dict]) -> None:
 
 def job_train_models(algo: str = "hist_gbdt", horizon: int | None = None) -> dict:
     """Train (or refresh) the prediction model(s)."""
-    from stockmaster.model.dataset import build_dataset, load_bars_by_symbol
-    from stockmaster.model.train import train_all_horizons, train_model
+    from stockmaster.plugins.predict.services.dataset import build_dataset, load_bars_by_symbol
+    from stockmaster.plugins.predict.services.train import train_all_horizons, train_model
 
     codes = _default_universe()
     with session_scope() as session:
@@ -372,7 +372,7 @@ def job_train_models(algo: str = "hist_gbdt", horizon: int | None = None) -> dic
 
 def job_predict(horizon: int = 1) -> dict:
     """Score the universe with the active model for a horizon."""
-    from stockmaster.model.dataset import load_bars_by_symbol
+    from stockmaster.plugins.predict.services.dataset import load_bars_by_symbol
 
     try:
         model = load_active_model(horizon=horizon)

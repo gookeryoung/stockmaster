@@ -58,8 +58,8 @@ async def lifespan(
 
 def _bootstrap_accounts() -> None:
     """Create the configured administrator and log the effective auth posture."""
-    from stockmaster.auth import service
     from stockmaster.db import session_scope
+    from stockmaster.plugins.auth.services import service
 
     try:
         with session_scope() as session:
@@ -108,7 +108,7 @@ def create_app() -> FastAPI:
     # Registered *before* CORS so that CORS ends up outermost: a 401 emitted by
     # the gate must still carry CORS headers, otherwise the Vite dev server sees
     # an opaque network error instead of "please log in".
-    from stockmaster.auth.gate import AuthGateMiddleware
+    from stockmaster.plugins.auth.middleware import AuthGateMiddleware
 
     app.add_middleware(AuthGateMiddleware)
 
@@ -125,33 +125,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # --- API routers ---
-    from stockmaster.api.v1 import (
-        admin,
-        alerts,
-        analysis,
-        auth,
-        backtest,
-        market,
-        predict,
-        strategy,
-        system,
-        users,
-        workspaces,
-    )
+    # --- API routers: 由插件注册中心统一发现并挂到 /api/v1 ---
+    from stockmaster.plugins.registry import registry
 
-    api_prefix = "/api/v1"
-    app.include_router(market.router, prefix=api_prefix)
-    app.include_router(analysis.router, prefix=api_prefix)
-    app.include_router(predict.router, prefix=api_prefix)
-    app.include_router(backtest.router, prefix=api_prefix)
-    app.include_router(alerts.router, prefix=api_prefix)
-    app.include_router(strategy.router, prefix=api_prefix)
-    app.include_router(system.router, prefix=api_prefix)
-    app.include_router(auth.router, prefix=api_prefix)
-    app.include_router(users.router, prefix=api_prefix)
-    app.include_router(admin.router, prefix=api_prefix)
-    app.include_router(workspaces.router, prefix=f"{api_prefix}/workspaces")
+    registry.discover_and_load()
+    registry.mount_routes(app)
 
     # --- error handling: convert domain errors into meaningful HTTP responses ---
     @app.exception_handler(ProviderUnavailable)
@@ -174,7 +152,7 @@ def create_app() -> FastAPI:
 
     # 工作区服务既被 API 调用也被 CLI 调用，所以它抛的是带状态码的领域异常；
     # 在这里翻译成 HTTP，避免服务层依赖 FastAPI。
-    from stockmaster.workspace.service import WorkspaceError
+    from stockmaster.plugins.workspaces.services.service import WorkspaceError
 
     @app.exception_handler(WorkspaceError)
     async def _workspace_error(_request: Request, exc: WorkspaceError):

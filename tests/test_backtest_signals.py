@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stockmaster.backtest.signals import (
+from stockmaster.plugins.backtest.services.signals import (
     build_score_history,
     factor_frame_for_history,
     summarize_scores,

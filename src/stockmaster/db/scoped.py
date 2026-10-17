@@ -17,7 +17,7 @@
 
 与角色判定的分工
 ----------------
-这里只管「看得见什么」；「能不能改」由 ``app.workspace.deps.require_editor`` 负责。
+这里只管「看得见什么」；「能不能改」由 ``stockmaster.core.workspace_deps.require_editor`` 负责。
 两者分开的原因：同一批数据对不同角色的可见性相同，只有写权限不同。
 """
 

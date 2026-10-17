@@ -43,8 +43,8 @@ def iso_client(tmp_path, monkeypatch):
 
     get_settings.cache_clear()
 
-    from stockmaster.auth import service, tokens
     from stockmaster.db import session as session_mod
+    from stockmaster.plugins.auth.services import service, tokens
 
     session_mod.reset_engine()
     session_mod.init_db()
@@ -280,9 +280,9 @@ def test_watchlist_rule_scope_only_sees_own_list(iso_client):
     client.post("/api/v1/watchlist", headers=_auth(alice), json={"code": "600519.SH"})
     client.post("/api/v1/watchlist", headers=_auth(bob), json={"code": "000001.SZ"})
 
-    from stockmaster.alert.engine import AlertEngine
     from stockmaster.db import session_scope
     from stockmaster.db.models import AlertRule
+    from stockmaster.plugins.alerts.services.engine import AlertEngine
 
     with session_scope() as session:
         rule = AlertRule(

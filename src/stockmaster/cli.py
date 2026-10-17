@@ -632,7 +632,7 @@ def _db_command(args) -> int:
 
 def _backup_command(args) -> int:
     """``stockmaster backup``。"""
-    from stockmaster.maintenance import BackupError, create_backup, list_backups
+    from stockmaster.plugins.system.services import BackupError, create_backup, list_backups
 
     if args.list_only:
         rows = list_backups()
@@ -668,7 +668,7 @@ def _backup_command(args) -> int:
 
 def _restore_command(args) -> int:
     """``stockmaster restore``（main() 已跳过 init_db，坏库也能救）。"""
-    from stockmaster.maintenance import RestoreError, inspect_backup, restore_backup
+    from stockmaster.plugins.system.services import RestoreError, inspect_backup, restore_backup
 
     archive = Path(args.archive).expanduser()
     try:
@@ -722,7 +722,7 @@ def _claim_ownership(session, user, *, dry_run: bool = False, overwrite: bool = 
     实现放在 ``app.workspace.service.claim_unassigned``，因为它同时被
     ``stockmaster workspace claim`` 和 Web 端使用，重复实现必然走样。
     """
-    from stockmaster.workspace import service
+    from stockmaster.plugins.workspaces.services import service
 
     workspace = service.ensure_personal_workspace(session, user)
     counts = service.claim_unassigned(session, workspace.id, dry_run=dry_run, overwrite=overwrite)
@@ -751,8 +751,8 @@ def _workspace_command(args) -> int:
 
     from stockmaster.db import session_scope
     from stockmaster.db.models import User, Workspace
-    from stockmaster.workspace import service
-    from stockmaster.workspace.roles import label
+    from stockmaster.plugins.workspaces.services import service
+    from stockmaster.plugins.workspaces.services.roles import label
 
     def fail(message: str) -> int:
         print(f"错误：{message}", file=sys.stderr)
@@ -871,9 +871,9 @@ def _user_command(args) -> int:
     """Account operations for operators without UI access (break-glass path)."""
     from sqlalchemy import select
 
-    from stockmaster.auth import service
     from stockmaster.db import session_scope
     from stockmaster.db.models import User, UserIdentity
+    from stockmaster.plugins.auth.services import service
 
     def fail(message: str) -> int:
         print(f"错误：{message}", file=sys.stderr)

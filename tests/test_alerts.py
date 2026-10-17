@@ -12,17 +12,17 @@ from datetime import date, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from stockmaster.alert.channels import DatabaseChannel, Notification, WebhookChannel
-from stockmaster.alert.engine import AlertEngine
-from stockmaster.alert.rules import (
+from stockmaster.core.errors import DataError
+from stockmaster.db import session_scope
+from stockmaster.db.models import AlertRule, AlertTrigger, WatchlistItem
+from stockmaster.plugins.alerts.services.channels import DatabaseChannel, Notification, WebhookChannel
+from stockmaster.plugins.alerts.services.engine import AlertEngine
+from stockmaster.plugins.alerts.services.rules import (
     RULE_TYPES,
     RuleContext,
     describe_rule,
     normalize_params,
 )
-from stockmaster.core.errors import DataError
-from stockmaster.db import session_scope
-from stockmaster.db.models import AlertRule, AlertTrigger, WatchlistItem
 from stockmaster.providers.base import Bar
 from stockmaster.sync import repository as repo
 
@@ -108,7 +108,7 @@ class TestNormalizeParams:
 
 class TestRuleEvaluation:
     def test_price_cross_above(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, message, _snapshot = evaluate_rule(
             ctx(close=110.0), "price_cross", {"threshold": 105, "direction": "above"}
@@ -116,19 +116,19 @@ class TestRuleEvaluation:
         assert fired and "110.00" in message
 
     def test_price_cross_below(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, _ = evaluate_rule(ctx(close=90.0), "price_cross", {"threshold": 95, "direction": "below"})
         assert fired
 
     def test_price_cross_not_triggered(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, message, _ = evaluate_rule(ctx(close=100.0), "price_cross", {"threshold": 105, "direction": "above"})
         assert not fired and message == ""
 
     def test_pct_change_uses_derived_value(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, snapshot = evaluate_rule(
             ctx(close=110.0, preclose=100.0, pct_chg=None),
@@ -139,7 +139,7 @@ class TestRuleEvaluation:
         assert snapshot["pct_chg"] == pytest.approx(10.0)
 
     def test_volume_ratio(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, _ = evaluate_rule(
             ctx(indicators={"vol_ratio": 3.5}),
@@ -155,13 +155,13 @@ class TestRuleEvaluation:
         assert not fired
 
     def test_missing_value_does_not_trigger(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, _ = evaluate_rule(ctx(indicators={}), "volume_ratio", {"threshold": 2.0})
         assert not fired
 
     def test_ma_golden_cross(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, message, _ = evaluate_rule(
             ctx(indicators={"ma5": 101.0, "ma20": 100.0, "ma5_prev": 99.0, "ma20_prev": 100.0}),
@@ -171,7 +171,7 @@ class TestRuleEvaluation:
         assert fired and "金叉" in message
 
     def test_ma_no_cross_when_already_above(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, _ = evaluate_rule(
             ctx(indicators={"ma5": 102.0, "ma20": 100.0, "ma5_prev": 101.0, "ma20_prev": 100.0}),
@@ -181,7 +181,7 @@ class TestRuleEvaluation:
         assert not fired
 
     def test_ma_death_cross(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, message, _ = evaluate_rule(
             ctx(indicators={"ma5": 99.0, "ma20": 100.0, "ma5_prev": 101.0, "ma20_prev": 100.0}),
@@ -191,7 +191,7 @@ class TestRuleEvaluation:
         assert fired and "死叉" in message
 
     def test_rsi_oversold(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, _ = evaluate_rule(
             ctx(indicators={"rsi6": 20.0}),
@@ -201,7 +201,7 @@ class TestRuleEvaluation:
         assert fired
 
     def test_kdj_golden_cross(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, _ = evaluate_rule(
             ctx(indicators={"kdj_k": 25.0, "kdj_d": 20.0, "kdj_k_prev": 18.0, "kdj_d_prev": 20.0}),
@@ -211,7 +211,7 @@ class TestRuleEvaluation:
         assert fired
 
     def test_boll_upper_break(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, _ = evaluate_rule(
             ctx(close=110.0, indicators={"boll_up": 105.0}),
@@ -221,7 +221,7 @@ class TestRuleEvaluation:
         assert fired
 
     def test_new_high_uses_prior_window(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         history = [{"high": 10.0, "low": 9.0, "close": 9.5} for _ in range(20)]
         history[-1] = {"high": 15.0, "low": 9.0, "close": 14.0}
@@ -229,13 +229,13 @@ class TestRuleEvaluation:
         assert fired and "新高" in message
 
     def test_new_high_insufficient_history(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, _ = evaluate_rule(ctx(history=[{"high": 10.0, "low": 9.0}]), "new_high", {"window": 20})
         assert not fired
 
     def test_prediction_threshold(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, message, _ = evaluate_rule(
             ctx(prediction={"prob_up": 0.75}),
@@ -245,7 +245,7 @@ class TestRuleEvaluation:
         assert fired and "75.00%" in message
 
     def test_drawdown_from_peak(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         history = [{"close": 100.0}] * 30 + [{"close": 80.0}]
         fired, _message, snapshot = evaluate_rule(ctx(history=history), "drawdown", {"window": 60, "threshold": 10.0})
@@ -253,7 +253,7 @@ class TestRuleEvaluation:
         assert snapshot["drawdown_pct"] == pytest.approx(20.0)
 
     def test_factor_score(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, _ = evaluate_rule(
             ctx(factors={"score": 1.8}),
@@ -263,7 +263,7 @@ class TestRuleEvaluation:
         assert fired
 
     def test_turnover(self):
-        from stockmaster.alert.engine import evaluate_rule
+        from stockmaster.plugins.alerts.services.engine import evaluate_rule
 
         fired, _, _ = evaluate_rule(ctx(turn=8.0), "turnover", {"direction": "above", "threshold": 5.0})
         assert fired
@@ -557,7 +557,7 @@ class TestChannels:
         assert WebhookChannel("").send(Notification(title="t", body="b")) is False
 
     def test_notify_returns_per_channel_counts(self):
-        from stockmaster.alert.channels import notify
+        from stockmaster.plugins.alerts.services.channels import notify
 
         results = notify([Notification(title="t", body="b")])
         assert "database" in results

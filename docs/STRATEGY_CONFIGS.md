@@ -4,7 +4,7 @@
 > `algorithm_configs` 三张工作区私有表 + `/api/v1/strategy/*` 路由 + 前端「策略」页）。
 > 开关：`SM_DATA_ISOLATION`，默认 `false`（= 全部落 `workspace_id = 0`，无工作区语义，可随时回退）。
 > 前置：工作区与角色体系（`docs/WORKSPACE.md`，`0003_workspaces`）；指标/因子数据（`analytics`）；
-> 训练链路（`src/stockmaster/model/train.py`）。
+> 训练链路（`src/stockmaster/plugins/predict/services/train.py`）。
 > 本文沿用 `docs/WORKSPACE.md` 的归属与角色规则，只描述新增的三类「策略配置」资源。
 
 ---
@@ -419,7 +419,7 @@ curl -s -X POST http://127.0.0.1:8770/api/v1/backtest/run \
 
 ### 6.3 与 `data_counts` / `purge` / `claim_unassigned` 的集成
 
-三张表纳入 `src/stockmaster/workspace/service.py` 的 `DATA_MODELS`：
+三张表纳入 `src/stockmaster/plugins/workspaces/services/service.py` 的 `DATA_MODELS`：
 
 - **`data_counts()`**：工作区页会显示「选股/样本/算法配置各 N 条」，删除工作区前可确认；
 - **`delete_workspace(..., purge=True)`**：按表清理这三类配置，返回值计入删除统计；

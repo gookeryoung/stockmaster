@@ -2,7 +2,7 @@
 
 > 状态：**已实施**（`0003_workspaces` 迁移 + Workspace/WorkspaceMember 表 + 读写路径改造 + 角色矩阵测试）。
 > 开关：`SM_DATA_ISOLATION`，默认 `false`（= 无工作区概念的共享语义），可随时回退。
-> 前置：账号体系（`src/stockmaster/auth/`）已落地。
+> 前置：账号体系（`src/stockmaster/plugins/auth/`）已落地。
 > 本文取代 `docs/USER_ISOLATION.md` 的设计（owner_id 用户级隔离 → cndb 式工作区隔离），
 > 设计取舍仍大量沿用前文，冲突处以本文为准。
 
@@ -24,7 +24,7 @@
 ## 2. 角色模型
 
 ```python
-# src/stockmaster/workspace/roles.py
+# src/stockmaster/plugins/workspaces/services/roles.py
 ROLE_RANK = {"owner": 3, "editor": 2, "viewer": 1}
 GRANTABLE_ROLES = {"editor", "viewer"}  # owner 只能通过「转让」产生
 ```
@@ -86,7 +86,7 @@ workspace_id: Mapped[int] = mapped_column(Integer, default=WORKSPACE_UNASSIGNED,
 `workspace/deps`：
 
 ```python
-# src/stockmaster/workspace/deps.py
+# src/stockmaster/core/workspace_deps.py
 @dataclass
 class WorkspaceCtx:
     workspace: Workspace
@@ -100,7 +100,7 @@ def require_editor(...) -> WorkspaceCtx:
     """写端点专用：viewer → 403，响应头 X-Auth-Error: read_only。"""
 ```
 
-端点分层（`src/stockmaster/api/v1/`）：
+端点分层（`src/stockmaster/plugins/<域>/routers/`）：
 
 | 端点 | 依赖 | viewer 结果 |
 |---|---|---|

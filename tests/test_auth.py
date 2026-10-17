@@ -13,7 +13,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from stockmaster.auth import passwords, service, tokens
+from stockmaster.plugins.auth.services import passwords, service, tokens
 
 STRONG = "Passw0rd123"
 

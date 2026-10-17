@@ -231,9 +231,9 @@ class TestPipelineBacktestStage:
         """Backtest must consume stored bars on its own (not the thin factor cache)."""
         _seed(pipeline_env)
 
-        from stockmaster.api.v1.backtest import _build_signals, _load_bars
-        from stockmaster.backtest.engine import BacktestConfig, run_backtest
         from stockmaster.db import session_scope
+        from stockmaster.plugins.backtest.routers.backtest import _build_signals, _load_bars
+        from stockmaster.plugins.backtest.services.engine import BacktestConfig, run_backtest
         from stockmaster.schemas import BacktestRequest
 
         with session_scope() as session:
@@ -259,9 +259,9 @@ class TestPipelineBacktestStage:
 
     def test_buy_and_hold_matches_price_direction(self, pipeline_env):
         _seed(pipeline_env)
-        from stockmaster.api.v1.backtest import _load_bars
-        from stockmaster.backtest.engine import BacktestConfig, buy_and_hold_signals, run_backtest
         from stockmaster.db import session_scope
+        from stockmaster.plugins.backtest.routers.backtest import _load_bars
+        from stockmaster.plugins.backtest.services.engine import BacktestConfig, buy_and_hold_signals, run_backtest
 
         with session_scope() as session:
             bars = _load_bars(session, UNIVERSE)
@@ -275,7 +275,7 @@ class TestPipelineBacktestStage:
 class TestPipelineAlertStage:
     def test_rule_triggers_once_and_stays_deduped(self, pipeline_env):
         _seed(pipeline_env)
-        from stockmaster.alert.engine import AlertEngine
+        from stockmaster.plugins.alerts.services.engine import AlertEngine
 
         engine = AlertEngine()
         engine.create_rule(
@@ -309,8 +309,8 @@ class TestFullChain:
         """Run every stage in dependency order and assert each one produced output."""
         _seed(pipeline_env)
 
-        from stockmaster.alert.engine import AlertEngine
         from stockmaster.jobs.tasks import job_compute_analytics, job_predict, job_train_models
+        from stockmaster.plugins.alerts.services.engine import AlertEngine
 
         analytics = job_compute_analytics(UNIVERSE)
         assert analytics["symbols"] == len(UNIVERSE)
@@ -321,9 +321,9 @@ class TestFullChain:
         scored = job_predict(horizon=1)
         assert scored["scored"] > 0
 
-        from stockmaster.api.v1.backtest import _build_signals, _load_bars
-        from stockmaster.backtest.engine import BacktestConfig, run_backtest
         from stockmaster.db import session_scope
+        from stockmaster.plugins.backtest.routers.backtest import _build_signals, _load_bars
+        from stockmaster.plugins.backtest.services.engine import BacktestConfig, run_backtest
         from stockmaster.schemas import BacktestRequest
 
         with session_scope() as session:

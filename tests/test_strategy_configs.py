@@ -47,8 +47,8 @@ def strategy_client(tmp_path, monkeypatch):
 
     get_settings.cache_clear()
 
-    from stockmaster.auth import service, tokens
     from stockmaster.db import session as session_mod
+    from stockmaster.plugins.auth.services import service, tokens
 
     session_mod.reset_engine()
     session_mod.init_db()
@@ -83,8 +83,8 @@ def shared_client(tmp_path, monkeypatch):
 
     get_settings.cache_clear()
 
-    from stockmaster.auth import service
     from stockmaster.db import session as session_mod
+    from stockmaster.plugins.auth.services import service
 
     session_mod.reset_engine()
     session_mod.init_db()
@@ -1119,8 +1119,8 @@ def test_workspace_purge_counts_strategy_configs(strategy_client):
 def _make_unassigned_configs() -> dict[str, int]:
     """直接走服务层在 workspace_id=0（隔离前的共享桶）造三张表的配置。"""
     from stockmaster.db import session_scope
+    from stockmaster.plugins.strategy.services import service
     from stockmaster.schemas import AlgorithmConfigIn, SampleConfigIn, ScreeningConfigIn
-    from stockmaster.strategy import service
 
     with session_scope() as session:
         screening = service.create_screening(
@@ -1148,7 +1148,7 @@ def test_claim_unassigned_moves_strategy_configs(strategy_client):
 
     from stockmaster.db import session_scope
     from stockmaster.db.models import AlgorithmConfig, SampleConfig, ScreeningConfig
-    from stockmaster.workspace.service import claim_unassigned
+    from stockmaster.plugins.workspaces.services.service import claim_unassigned
 
     # dry_run：只统计、不写库。
     with session_scope() as session:
@@ -1186,9 +1186,9 @@ def test_claim_unassigned_duplicate_dry_run_and_conflict_skipping(strategy_clien
 
     from stockmaster.db import session_scope
     from stockmaster.db.models import ScreeningConfig
+    from stockmaster.plugins.strategy.services import service
+    from stockmaster.plugins.workspaces.services.service import claim_unassigned
     from stockmaster.schemas import ScreeningConfigIn
-    from stockmaster.strategy import service
-    from stockmaster.workspace.service import claim_unassigned
 
     with session_scope() as session:
         service.create_screening(

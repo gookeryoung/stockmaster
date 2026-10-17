@@ -53,8 +53,8 @@ def client(tmp_path, monkeypatch):
 
     get_settings.cache_clear()
 
-    from stockmaster.auth import service, tokens
     from stockmaster.db import session as session_mod
+    from stockmaster.plugins.auth.services import service, tokens
 
     session_mod.reset_engine()
     session_mod.init_db()
@@ -72,8 +72,8 @@ def client(tmp_path, monkeypatch):
 
 
 def _create_user(username: str, *, role: str = "user") -> None:
-    from stockmaster.auth import service
     from stockmaster.db import session_scope
+    from stockmaster.plugins.auth.services import service
 
     with session_scope() as session:
         service.create_user(session, username=username, password=STRONG, role=role)
@@ -101,7 +101,7 @@ def _members(archive) -> list[str]:
 
 
 def test_backup_writes_manifest_and_database(db_env):
-    from stockmaster.maintenance import create_backup
+    from stockmaster.plugins.system.services import create_backup
 
     _create_user("boss", role="admin")
     archive = create_backup(note="unit")
@@ -121,7 +121,7 @@ def test_backup_writes_manifest_and_database(db_env):
 
 def test_backup_can_exclude_secret(db_env):
     from stockmaster.config import settings
-    from stockmaster.maintenance import create_backup
+    from stockmaster.plugins.system.services import create_backup
 
     settings.auth_secret_path.write_text("unit-test-secret", encoding="utf-8")
 
@@ -134,7 +134,7 @@ def test_backup_can_exclude_secret(db_env):
 
 def test_backup_includes_model_artifacts(db_env):
     from stockmaster.config import settings
-    from stockmaster.maintenance import create_backup
+    from stockmaster.plugins.system.services import create_backup
 
     settings.ensure_dirs()
     (settings.models_dir / "m1.joblib").write_bytes(b"fake-model")
@@ -149,7 +149,7 @@ def test_backup_includes_model_artifacts(db_env):
 
 
 def test_list_and_prune_keep_latest(db_env):
-    from stockmaster.maintenance import create_backup, list_backups, prune_backups
+    from stockmaster.plugins.system.services import create_backup, list_backups, prune_backups
 
     for index in range(3):
         create_backup(note=f"n{index}", prune=False)
@@ -170,7 +170,7 @@ def test_list_and_prune_keep_latest(db_env):
 
 
 def test_inspect_rejects_corrupt_archive(db_env, tmp_path):
-    from stockmaster.maintenance import RestoreError, inspect_backup
+    from stockmaster.plugins.system.services import RestoreError, inspect_backup
 
     broken = tmp_path / "broken.tar.gz"
     broken.write_bytes(b"not really a gzip")
@@ -180,7 +180,7 @@ def test_inspect_rejects_corrupt_archive(db_env, tmp_path):
 
 
 def test_inspect_rejects_unknown_manifest_version(db_env, tmp_path):
-    from stockmaster.maintenance import RestoreError, inspect_backup
+    from stockmaster.plugins.system.services import RestoreError, inspect_backup
 
     payload = tmp_path / "payload"
     payload.mkdir()
@@ -199,7 +199,7 @@ def test_inspect_rejects_unknown_manifest_version(db_env, tmp_path):
 
 
 def test_restore_roundtrip_and_pre_backup(db_env):
-    from stockmaster.maintenance import create_backup, restore_backup
+    from stockmaster.plugins.system.services import create_backup, restore_backup
 
     _create_user("boss", role="admin")
     archive = create_backup(note="before")
@@ -220,7 +220,7 @@ def test_restore_roundtrip_and_pre_backup(db_env):
 
 
 def test_restore_requires_force_when_target_has_data(db_env):
-    from stockmaster.maintenance import RestoreError, create_backup, restore_backup
+    from stockmaster.plugins.system.services import RestoreError, create_backup, restore_backup
 
     _create_user("boss", role="admin")
     archive = create_backup()
@@ -231,7 +231,7 @@ def test_restore_requires_force_when_target_has_data(db_env):
 
 def test_restore_accepts_empty_target_without_force(db_env, tmp_path):
     """空库直接恢复是安全的，不该被 force 挡住。"""
-    from stockmaster.maintenance import create_backup, restore_backup
+    from stockmaster.plugins.system.services import create_backup, restore_backup
 
     _create_user("boss", role="admin")
     archive = create_backup()
@@ -255,7 +255,7 @@ def test_restore_reports_schema_drift_for_old_backup(db_env):
     """备份本身缺列时，恢复后要把差异报出来而不是假装成功。"""
     from stockmaster.config import settings
     from stockmaster.db import reset_engine
-    from stockmaster.maintenance import create_backup, restore_backup
+    from stockmaster.plugins.system.services import create_backup, restore_backup
 
     _create_user("boss", role="admin")
 
@@ -353,7 +353,7 @@ def test_admin_restore_rejects_bad_upload(client):
 
 def test_admin_restore_with_bytes_is_not_loaded_in_one_piece(client, monkeypatch):
     """上传必须分块落盘：一次性读进内存会在 2C2G 的机器上 OOM。"""
-    from stockmaster.api.v1 import admin
+    from stockmaster.plugins.system.routers import admin
 
     headers = _admin_headers(client)
     archive = client.post("/api/v1/admin/backups", headers=headers)

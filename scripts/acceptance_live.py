@@ -137,8 +137,8 @@ check(
 )
 
 # ----------------------------------------------------------------- backtest
-from stockmaster.api.v1.backtest import _build_signals, _load_bars
-from stockmaster.backtest.engine import BacktestConfig, run_backtest
+from stockmaster.plugins.backtest.routers.backtest import _build_signals, _load_bars
+from stockmaster.plugins.backtest.services.engine import BacktestConfig, run_backtest
 from stockmaster.schemas import BacktestRequest
 
 with session_scope() as session:
@@ -169,7 +169,7 @@ if signals:
     check("T+1 / limit machinery exercised", isinstance(m.get("skip_reasons"), dict))
 
 # ------------------------------------------------------------------- alerts
-from stockmaster.alert.engine import AlertEngine
+from stockmaster.plugins.alerts.services.engine import AlertEngine
 
 engine = AlertEngine()
 rule_id = engine.create_rule(

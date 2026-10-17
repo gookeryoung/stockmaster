@@ -37,8 +37,8 @@ def ws_client(tmp_path, monkeypatch):
 
     get_settings.cache_clear()
 
-    from stockmaster.auth import service, tokens
     from stockmaster.db import session as session_mod
+    from stockmaster.plugins.auth.services import service, tokens
 
     session_mod.reset_engine()
     session_mod.init_db()
@@ -117,7 +117,7 @@ def test_each_account_gets_a_personal_workspace(ws_client):
 
 
 def test_role_rank_ordering():
-    from stockmaster.workspace.roles import ROLE_RANK, WorkspaceRole, at_least, can_manage, can_write
+    from stockmaster.plugins.workspaces.services.roles import ROLE_RANK, WorkspaceRole, at_least, can_manage, can_write
 
     assert ROLE_RANK[WorkspaceRole.OWNER] > ROLE_RANK[WorkspaceRole.EDITOR] > ROLE_RANK[WorkspaceRole.VIEWER]
     assert can_write("owner") and can_write("editor") and not can_write("viewer")

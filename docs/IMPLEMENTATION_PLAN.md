@@ -80,7 +80,7 @@ P3 按用户通知与配额（可选，按需）
 |---|---|
 | `src/stockmaster/db/models.py` | `WatchlistItem` / `AlertRule` / `AlertTrigger` / `BacktestRun` 加 `owner_id: int = 0`；唯一约束改 `(owner_id, list_name, code)`；新增 4 个复合索引 |
 | `src/stockmaster/alembic/versions/0002_owner_columns.py` | 四张表 `add_column`（`NOT NULL DEFAULT 0`）；`watchlist_items` 用 `batch_alter_table` 重建唯一约束；`alert_triggers.owner_id` 从 `alert_rules` 回填 |
-| `src/stockmaster/auth/deps.py` | 新增 `current_owner()`：登录用户取 `user.id`，匿名回落 `GUEST_OWNER_ID = 0` |
+| `src/stockmaster/core/auth_deps.py` | 新增 `current_owner()`：登录用户取 `user.id`，匿名回落 `GUEST_OWNER_ID = 0` |
 | 各 `create_*` | 显式写 `owner_id=owner`（不依赖模型默认值 0） |
 | `src/stockmaster/cli.py` | `stockmaster user claim --username <name> [--dry-run]`：把 owner 0 的历史数据交给某个账号 |
 | `src/stockmaster/config.py` | `data_isolation: bool = False`（灰度开关，默认关 = 现状） |
@@ -159,7 +159,7 @@ B 的 `scope=watchlist` 规则只命中 B 的自选；匿名（`SM_AUTH_ENABLED=
 |---|---|
 | `src/stockmaster/alembic/versions/0003_workspaces.py` | 幂等迁移：`owner_id` 改名 `workspace_id`、建 `workspaces`/`workspace_members`、按用户回填个人工作区、重建索引与 `uq_watchlist_item` |
 | `src/stockmaster/db/models.py` | `WORKSPACE_UNASSIGNED = 0`；Workspace / WorkspaceMember 模型 |
-| `src/stockmaster/workspace/`（新增） | `roles.py`（ROLE_RANK / at_least，未知角色拒绝）、`service.py`（成员管理、最后 owner 保护、所有权转让、认领）、`deps.py`（`current_workspace` / `require_editor`，解析 `X-Workspace-Id`） |
+| `src/stockmaster/plugins/workspaces/`（新增） | `roles.py`（ROLE_RANK / at_least，未知角色拒绝）、`service.py`（成员管理、最后 owner 保护、所有权转让、认领）、`deps.py`（`current_workspace` / `require_editor`，解析 `X-Workspace-Id`） |
 | `src/stockmaster/db/scoped.py` | `owned_*` 重写为 `in_workspace()` / `get_in_workspace_or_404()` |
 | `api/v1/{system,alerts,backtest}.py` | 读端点 `current_workspace`、写端点 `require_editor`；`/alerts/preview` 保持只读可用 |
 | `alert/engine.py` / `jobs/tasks.py` | watchlist 按 `(rule.workspace_id, list_name)` 解析；调度器取全站并集 |

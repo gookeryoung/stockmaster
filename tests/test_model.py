@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 
 from stockmaster.core.errors import InsufficientData, ModelNotTrained
-from stockmaster.model.dataset import (
+from stockmaster.plugins.predict.services.dataset import (
     FEATURE_COLUMNS,
     add_labels,
     build_dataset,
@@ -23,23 +23,23 @@ from stockmaster.model.dataset import (
     chronological_split,
     time_series_folds,
 )
-from stockmaster.model.evaluate import (
+from stockmaster.plugins.predict.services.evaluate import (
     classification_metrics,
     decile_spread,
     evaluate_predictions,
     information_coefficient,
     quantile_returns,
 )
-from stockmaster.model.models import (
+from stockmaster.plugins.predict.services.models import (
     AVAILABLE_ALGOS,
     build_estimator,
     extract_importance,
     fit_model,
 )
-from stockmaster.model.models import (
+from stockmaster.plugins.predict.services.models import (
     predict_proba as model_predict_proba,
 )
-from stockmaster.model.train import score_symbols, train_model
+from stockmaster.plugins.predict.services.train import score_symbols, train_model
 
 
 def bars(n: int = 400, seed: int = 1, start: date = date(2024, 1, 1), code: str = "600519.SH"):
@@ -491,7 +491,7 @@ class TestTrainModel:
         session_mod.reset_engine()
         session_mod.init_db()
         try:
-            from stockmaster.model.train import load_active_model
+            from stockmaster.plugins.predict.services.train import load_active_model
 
             data = {"600519.SH": bars(600, seed=15)}
             dataset = build_dataset(data, horizon=1)

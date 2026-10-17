@@ -7,7 +7,7 @@
 > 状态：**已实施**（`0002_owner_columns` + 读写路径改造 + 交叉访问测试）；
 > 其中归属列已在 `0003_workspaces` 改名并重新解释为 `workspace_id`。
 > 开关：`SM_DATA_ISOLATION`，默认 `false`（= 隔离前的共享语义），可随时回退。
-> 前置：账号体系（`src/stockmaster/auth/`）已落地，`SM_AUTH_ENABLED` 控制是否强制登录。
+> 前置：账号体系（`src/stockmaster/plugins/auth/`）已落地，`SM_AUTH_ENABLED` 控制是否强制登录。
 > 本文记录设计取舍；实际落地位置见 §9。
 
 ---
@@ -103,7 +103,7 @@ Index("ix_backtest_runs_owner", "owner_id", "created_at")
 选 **B**，并用「交叉访问测试」兜底，而不是靠人肉 review 保证不漏：
 
 ```python
-# src/stockmaster/auth/deps.py —— 归属判定
+# src/stockmaster/core/auth_deps.py —— 归属判定
 def current_owner(user: User | None = Depends(current_user)) -> int:
     if not settings.data_isolation:
         return GUEST_OWNER_ID  # 开关关闭：全部落 0，等价旧语义

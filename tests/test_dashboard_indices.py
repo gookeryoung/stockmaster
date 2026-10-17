@@ -13,7 +13,7 @@ from stockmaster.core.market import DASHBOARD_INDICES, dashboard_index_codes
 class TestSharedIndexList:
     def test_dashboard_and_job_agree(self):
         """The endpoint and the sync job must cover exactly the same indices."""
-        from stockmaster.api.v1.market import OVERVIEW_INDICES
+        from stockmaster.plugins.market.routers.market import OVERVIEW_INDICES
 
         assert OVERVIEW_INDICES is DASHBOARD_INDICES
         assert dashboard_index_codes() == tuple(c for c, _ in DASHBOARD_INDICES)
