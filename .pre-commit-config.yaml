@@ -2,7 +2,8 @@
 # See https://pre-commit.com for more information
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff 版本 - 与 pyproject.toml 保持同步
+    # Ruff 版本 - 必须与 pyproject.toml 的 lint extra（ruff==0.16.8）保持一致，
+    # 否则同一提交在本地 hook 与 CI 会得到不同的 lint 结果。
     rev: v0.16.8
     hooks:
       # 运行 linter

@@ -26,6 +26,7 @@ jobs:
     name: 后端 · lint + 测试
     # 固定 24.04：ubuntu-latest 将于 2026-10 起迁移到 Ubuntu 26，避免构建环境漂移
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -71,6 +72,7 @@ jobs:
   frontend:
     name: 前端 · 类型检查 + 构建
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -110,6 +112,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [backend, frontend]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       # Required to create the release; scoped to this job only.
       contents: write

@@ -1,19 +1,27 @@
-extend-exclude = ["docs", "examples", "template"]
+# Ruff 配置 — 与 cndb 项目保持一致的规则口径
+# 排除 alembic 迁移目录（按 gitignore 语义匹配任意层级）
+extend-exclude = ["alembic", "build", "dist"]
 line-length    = 120
 target-version = "py313"
 
 [lint]
 ignore = [
-    "E501",    # line too long (handled by formatter)
-    "PLC0415", # import should be at top-level (intentional for lazy imports)
-    "PLR0915", # too many statements (intentional for complex methods)
-    "PLR2004", # magic value comparison
-    "RUF001",  # ambiguous unicode characters in string
-    "RUF002",  # ambiguous unicode characters in docstring
-    "RUF003",  # ambiguous unicode characters in comment
-    "RUF012",  # mutable class attributes (intentional for config)
+    "E501",    # line too long (由 formatter 处理)
+    "PLC0415", # import 不在顶层（本项目大量刻意使用惰性导入以避免循环依赖/加速启动）
+    "PLR0911", # too many return statements（数据源适配与规则分派天然多分支）
+    "PLR0912", # too many branches（同上）
+    "PLR0913", # too many arguments（FastAPI 路由天然多参数 + Depends）
+    "PLR0915", # too many statements（指标/回测计算过程较长）
+    "PLR0917", # too many positional arguments（同上）
+    "PLR2004", # magic value comparison（金融阈值如 0.10/0.20 属领域常量）
+    "PLW2901", # for-loop variable overwritten（复权/回测中复用循环变量）
+    "RUF001",  # 字符串中的易混淆 Unicode（中文全角标点属正常）
+    "RUF002",  # docstring 中的易混淆 Unicode
+    "RUF003",  # 注释中的易混淆 Unicode
+    "RUF012",  # mutable class attributes（规则表/常量字典为刻意设计）
+    "RUF030",  # FastAPI path params 需保留 Annotated[type, Path(...)]
     "SIM108",  # use ternary operator
-    "UP045",
+    "B008",    # FastAPI Depends 在默认参数中是标准模式，B008 误报
 ]
 select = [
     "ARG", # flake8-unused-arguments
@@ -31,4 +39,22 @@ select = [
 ]
 
 [lint.per-file-ignores]
-"**/tests/**" = ["ARG001", "ARG002", "ARG005"]
+"**/tests/**" = [
+    "ARG001", # 未使用的函数参数（pytest fixture 依赖注入必需）
+    "ARG002", # 未使用的方法参数
+    "ARG004", # 未使用的静态方法参数（测试替身需匹配被测接口签名）
+    "ARG005", # 未使用的 lambda 参数
+    "PLR2004",# 测试中的魔法值断言
+    "SLF001", # 测试允许访问私有成员（验证内部状态）
+    "E402",   # conftest 需要先改 sys.path 再导入 app
+]
+# 离线替身必须逐字实现 BaseProvider 契约，即使某些参数在该替身中未被使用；
+# 这正是"可替换性"的要求，因此整文件豁免未使用参数检查。
+"src/stockmaster/providers/mock_provider.py" = ["ARG001", "ARG002"]
+# 通知通道统一实现 Channel 协议；DatabaseChannel 只做落库，不需要读取通知内容。
+"src/stockmaster/plugins/alerts/services/channels.py" = ["ARG002"]
+# 验收脚本按顺序执行断言，局部导入与长函数是刻意的
+"scripts/**" = ["PLC0415", "PLR0915", "E402"]
+
+[lint.isort]
+known-first-party = ["stockmaster"]
