@@ -53,7 +53,6 @@ docs = [
 lint = ["ruff==0.17.0"]
 test = [
     "pytest>=8.3",
-    "pytest-asyncio>=0.24",
     "pytest-cov>=5.0.0",
     "pytest-timeout>=2.3.0,<2.5",
     "pytest-xdist>=3.6.1",
@@ -125,8 +124,9 @@ timeout_func_only = false
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::sqlalchemy.exc.LegacyAPIWarning",
-    # starlette TestClient 的 httpx 弃用提示（上游问题）
-    "ignore::DeprecationWarning:starlette.testclient",
+    # starlette TestClient 的 httpx 弃用提示（上游问题）；该类不继承 DeprecationWarning，
+    # 必须按类别单独忽略，否则会出现在测试 warnings 汇总里
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
 ]
 
 [tool.coverage.run]
