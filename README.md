@@ -399,6 +399,7 @@ uv run --with prek prek run --all-files   # 手动全量运行
 | `SM_DB_AUTO_MIGRATE` | true | 启动时自动迁移；设 false 则要求先 `db upgrade`（版本落后会告警） |
 | `SM_BACKUP_KEEP` | 7 | 本地备份保留份数，0 表示不清理 |
 | `SM_BACKUP_INCLUDE_SECRET` | true | 备份是否包含 `.auth_secret`（含则归档等同凭据） |
+| `SM_DATA_ISOLATION` | false | 自选股/预警/回测按账号隔离；false = 所有人共享一份（旧语义） |
 
 ### 账号与微信登录
 
@@ -425,7 +426,18 @@ uv run stockmaster user add --username boss --role admin   # 打印随机初始�
 uv run stockmaster user list
 uv run stockmaster user passwd --username boss
 uv run stockmaster user role --username boss --status disabled
+uv run stockmaster user claim --username boss --dry-run   # 把未归属的历史数据交给某账号
 ```
+
+### 用户数据隔离
+
+默认 `SM_DATA_ISOLATION=false`，所有人共享同一份自选股、预警规则与回测历史 —— 与引入账号体系
+之前的行为完全一致，单机升级后感受不到任何变化。
+
+多人使用时置 `true`：每个账号只看得到自己写的数据，别人的资源返回 404（不是 403，避免泄露
+id 是否存在）。隔离前写入的数据全部落在 `owner_id = 0`（「未归属」桶），开启隔离前用
+`stockmaster user claim --username <账号>` 移交；两边都有同名清单同一只股票时，只删除旧的无主
+副本、保留账号自己的备注。列与迁移始终存在，改回 `false` 即恢复共享语义，不需要回滚数据库。
 
 实现要点：密码用 PBKDF2-HMAC-SHA256（60 万轮，参数写在哈希内可平滑升级）；令牌为自签 HS256 JWT，
 `token_version` 随改密/禁用/退出登录递增，因此旧令牌立即失效；微信回调只把**一次性 ticket**

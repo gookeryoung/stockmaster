@@ -16,15 +16,17 @@
 | 备份体检（dry-run） | ✅ | `app/maintenance/inspect.py`、`--dry-run`、`POST /admin/restore/inspect` |
 | 恢复（含预备份 / 恢复后迁移） | ✅ | `app/maintenance/restore.py`、`stockmaster restore` |
 | 备份管理 API + 设置页入口 | ✅ | `api/v1/admin.py`、`components/BackupPanel.tsx` |
-| 用户数据隔离 | ❌ 未开始 | 设计与迁移方案见 `USER_ISOLATION.md` |
+| 用户数据隔离（PR-1 / PR-2） | ✅ 已完成，默认关闭 | `0002_owner_columns`、`app/db/scoped.py`、`tests/test_isolation.py` |
+| 按用户通知投递 / 配额 | ❌ 未开始 | `USER_ISOLATION.md` §8 |
 
 ### 关键设计决定（已落地，改动前先读）
 
 1. **schema 真源仍是 ORM 模型**。迁移链只承载增量，baseline 是空的。
-   建库顺序固定为 `create_all → ensure_migrated → create_all`，因此：
-   - 全新库：`create_all` 建齐 → 版本表打到 head；
-   - 存量库（`create_all` 时代，21 张表但无 `alembic_version`）：**stamp 认领，不重放 baseline**
-     （重放会撞 `table already exists`）；
+   建库顺序固定为 `has_application_schema → create_all → ensure_migrated → create_all`，因此：
+   - 全新库：`create_all` 建齐 → 直接 stamp head（迁移链无需重放）；
+   - 存量库（`create_all` 时代，有表但无 `alembic_version`）：**stamp 到 baseline 再
+     `upgrade head`** —— 只 stamp head 会让增量的加列被整条跳过，库自称最新却缺列；
+     因此每个迁移脚本都必须写成幂等的（先探测再执行）；
    - 已纳管库：按 `current → head` 应用增量。
 2. **`render_as_batch=True`**。SQLite 不支持 `DROP CONSTRAINT` / `ALTER COLUMN`，
    隔离要改的唯一约束必须靠 batch 重建表，没有这个开关迁移会直接语法错误。
@@ -46,9 +48,10 @@ P0 基础设施（已完成）
  └─ 备份 / 恢复 / 体检 / 审计 / 保留策略
         │
         ▼
-P1 用户隔离（下一个迭代，2 个 PR）
+P1 用户隔离（已完成）
  ├─ PR-1 加归属列 + 0002 迁移 + 写入记录（行为不变，可灰度）
- └─ PR-2 读路径隔离 + 预警引擎按 owner 解析 + 测试矩阵
+ ├─ PR-2 读路径隔离 + 预警引擎按 owner 解析 + 测试矩阵
+ └─ 待办：按用户通知通道、管理员统计列、配额
         │
         ▼
 P2 备份自动化（1 个 PR）
@@ -66,7 +69,10 @@ P3 按用户通知与配额（可选，按需）
 设计细节（三类数据边界、`owner_id=0` 的语义、为什么管理员不跨用户读）已在
 `USER_ISOLATION.md` 里定稿，这里只列**改动清单与顺序**。
 
-### PR-1：加列 + 迁移 + 写路径（行为不变）
+### PR-1：加列 + 迁移 + 写路径（行为不变）—— ✅ 已完成
+
+> 落地后的差异：迁移是幂等的（先探测列/约束是否存在），因为同一条迁移既要在
+> 「列已存在」的全新库上跑，也要在「列不存在」的存量库上跑。
 
 | 文件 | 改动 |
 |---|---|
@@ -106,7 +112,11 @@ def upgrade() -> None:
 
 **回滚**：`db downgrade 0001_baseline`（batch 再重建回旧约束）；或直接不启用隔离开关。
 
-### PR-2：读路径隔离
+### PR-2：读路径隔离 —— ✅ 已完成
+
+> 落地后的名字：`owned()` / `get_owned_or_404()`（`app/db/scoped.py`）、
+> `current_owner`（`app/auth/deps.py`）。开关关闭时两个助手都退化成空操作，
+> 所以 `SM_DATA_ISOLATION=false` 时请求路径与升级前逐字节一致。
 
 | 文件 | 改动 |
 |---|---|
@@ -162,14 +172,16 @@ cd /opt/stockmaster && git pull
 
 # 2) 部署前先看清当前库版本与数据量
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m app.cli db current
+  python -m app.cli db history    # 升级前通常显示「未纳管」
 
 # 3) 构建并发布（deploy.sh 会自动备份 /data 卷，保留 5 份）
 ./deploy/deploy.sh
 
-# 4) 确认启动时已自动认领版本
+# 4) 确认启动时已自动认领版本并执行增量
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m app.cli db current      # 应输出 当前=最新=0001_baseline
+  python -m app.cli db current      # 应输出 当前=最新=0002_owner_columns
+docker compose --env-file .env -f docker-compose.prod.yml exec app \
+  python -m app.cli db check        # 应无「缺列」输出
 
 # 5) 手工打一份基线备份（之后的任何操作都有退路）
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
@@ -190,9 +202,11 @@ SM_DATA_DIR=/tmp/drill python -m app.cli restore ~/backups/xxx.tar.gz --force
 | `SM_DB_AUTO_MIGRATE` | `true` | 启动自动迁移；设 false 则要求先 `db upgrade`（版本落后会告警） |
 | `SM_BACKUP_KEEP` | `7` | 本地备份保留份数，`0` 不清理 |
 | `SM_BACKUP_INCLUDE_SECRET` | `true` | 归档是否含 `.auth_secret` |
+| `SM_DATA_ISOLATION` | `false` | 自选/预警/回测是否按账号隔离；`false` = 共享语义 |
 
 > `docker-compose.prod.yml` 逐项列出 environment，新增变量**必须**同步进去，否则传不进容器。
-> 这三项走 `.env` 默认值即可，暂不加进 compose；需要改时再补（P2 一并处理）。
+> 以上（含 `SM_DATA_ISOLATION`）已逐项写进 `docker-compose.prod.yml` 的 environment。
+> compose 不会自动透传 `.env`，新增变量必须同步进去，否则容器里只会拿到默认值。
 
 ---
 

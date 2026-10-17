@@ -1,8 +1,9 @@
 # 用户数据隔离设计
 
-> 状态：设计稿（未实施）
+> 状态：**已实施**（`0002_owner_columns` + 读写路径改造 + 交叉访问测试）。
+> 开关：`SM_DATA_ISOLATION`，默认 `false`（= 隔离前的共享语义），可随时回退。
 > 前置：账号体系（`backend/app/auth/`）已落地，`SM_AUTH_ENABLED` 控制是否强制登录。
-> 本文解决账号体系留下的已知边界：**自选股、预警规则、回测历史仍是全局共享的**。
+> 本文记录设计取舍；实际落地位置见 §9。
 
 ---
 
@@ -48,8 +49,8 @@
 统一命名 `owner_id`（而不是 `user_id`）：它将来可能指向"组/工作区"，语义上比 `user_id` 更耐改。
 
 ```python
-# backend/app/db/models.py —— 四张表统一追加
-owner_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
+# backend/app/db/models.py —— 四张表统一追加（OWNER_UNASSIGNED = 0）
+owner_id: Mapped[int] = mapped_column(Integer, default=OWNER_UNASSIGNED, nullable=False)
 ```
 
 约定：
@@ -72,10 +73,10 @@ owner_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
 
 ```python
 # 列表页的查询形态决定索引顺序，owner_id 必须打头
-Index("ix_watchlist_owner", "owner_id", "list_name", "code")   # 替换原唯一约束的索引作用
+# watchlist 由唯一约束 (owner_id, list_name, code) 自带索引前缀，不另建
 Index("ix_alert_rules_owner", "owner_id", "enabled")
-Index("ix_triggers_owner_date", "owner_id", "trade_date")
-Index("ix_backtest_owner_created", "owner_id", "created_at")
+Index("ix_alert_triggers_owner", "owner_id", "trigger_at")
+Index("ix_backtest_runs_owner", "owner_id", "created_at")
 ```
 
 原有的 `uq_watchlist_item` 与 `ix_triggers_date` / `ix_triggers_status` 保留或按实际查询删除，
@@ -97,27 +98,24 @@ Index("ix_backtest_owner_created", "owner_id", "created_at")
 选 **B**，并用「交叉访问测试」兜底，而不是靠人肉 review 保证不漏：
 
 ```python
-# backend/app/api/deps.py（新增）
-def current_owner(user: User | None = Depends(optional_user)) -> int:
-    """归属判定：登录用户取自身 id，匿名/单机模式落到 0。"""
-    return user.id if user else GUEST_OWNER_ID
+# backend/app/auth/deps.py —— 归属判定
+def current_owner(user: User | None = Depends(current_user)) -> int:
+    if not settings.data_isolation:
+        return GUEST_OWNER_ID          # 开关关闭：全部落 0，等价旧语义
+    return user.id if user is not None else GUEST_OWNER_ID
 ```
 
 ```python
-# backend/app/db/scoped.py（新增，约 40 行）
-def owned_stmt(model, owner_id: int) -> Select:
-    return select(model).where(model.owner_id == owner_id)
+# backend/app/db/scoped.py —— 统一入口（约 70 行）
+def owned(stmt, model, owner):        # 给查询加 owner 条件；关闭时原样返回
+    return stmt if not scope_enabled() else stmt.where(model.owner_id == owner)
 
-def owned_or_404(session, model, pk, owner_id: int, label: str):
+def get_owned_or_404(session, model, pk, owner, label):
     """按主键取本人记录；不属于本人时返回 404 而不是 403。
 
     用 404 是为了不泄露「这个 id 存在但归别人」——否则可以拿自增 id 扫出
     全站有多少条规则、回测。
     """
-    row = session.get(model, pk)
-    if row is None or row.owner_id != owner_id:
-        raise HTTPException(status_code=404, detail=f"{label} {pk} not found")
-    return row
 ```
 
 要点：
@@ -231,18 +229,20 @@ def owned_or_404(session, model, pk, owner_id: int, label: str):
 
 > 排期、验收口径与回滚方式统一维护在 `docs/IMPLEMENTATION_PLAN.md`；本节只说明「为什么这样切」。
 
-1. **PR-1 归属列 + 迁移 + 写入记录**（隔离关）：加列、重建唯一约束、所有 create 写 owner、
-   `user claim` 命令。此时行为与现在**完全一致**，只是数据开始带上归属。
-2. **PR-2 读路径隔离**：`current_owner` / `owned_stmt` / `owned_or_404` 接入 watchlist + alerts，
-   打开 `SM_DATA_ISOLATION`。同步改 `AlertEngine._resolve_scope` 的 watchlist 分支。
-3. **PR-3 回测与通知归属**：`backtest_runs.owner_id` 过滤、`trigger.owner_id` 冗余与按用户投递。
-4. **PR-4 管理员统计 + 配额 + 文档**。
+1. ✅ **PR-1 归属列 + 迁移 + 写入记录**：`0002_owner_columns`、`user claim` 命令。
+   隔离关时写路径照样记 owner，行为与升级前完全一致。
+2. ✅ **PR-2 读路径隔离**：`current_owner` / `owned` / `get_owned_or_404` 接入
+   watchlist + alerts + backtest，`AlertEngine._resolve_scope` 的 watchlist 分支按
+   `(rule.owner_id, list_name)` 解析。
+3. ⬜ **PR-3 按用户通知投递**：触发记录已冗余 `owner_id`，但 webhook 仍是全站一个
+   （`SM_ALERT_WEBHOOK_URL`）；按用户配置通道需要新增表。
+4. ⬜ **PR-4 管理员统计 + 配额**：用户页暂未显示各自的数据量，配额也未实施。
 
 每一步都能单独回滚（PR-1 的列留着无害；PR-2 之后关掉开关即回到旧行为）。
 
 ## 10. 测试矩阵（这是"不漏"的真正保障）
 
-新增 `backend/tests/test_isolation.py`，用两个账号 A/B 对**每一个私有端点**做交叉访问，
+已落地 `backend/tests/test_isolation.py`（9 项），用两个账号 A/B 对**每一个私有端点**做交叉访问，
 参数化覆盖，新增端点漏加过滤时测试会红：
 
 ```python
