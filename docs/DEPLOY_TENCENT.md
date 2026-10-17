@@ -203,6 +203,39 @@ sudo bash /opt/stockmaster/deploy/setup-tls.sh
 > 令牌签名密钥留空会自动生成到数据卷 `/data/.auth_secret`，随卷一起备份即可；
 > 显式配置 `SM_AUTH_SECRET_KEY` 时，更换它等于让全部已登录会话立即失效。
 
+### 7. 数据库迁移与备份
+
+```bash
+cd /opt/stockmaster
+
+# 当前库版本（应等于最新版本）
+docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli db current
+
+# 手工打一份基线备份（之后的任何操作都有退路；也可在网页「设置」里点按钮）
+docker compose --env-file .env -f docker-compose.prod.yml exec app \
+  python -m app.cli backup --note "manual"
+
+# 结构体检：迁移链漏写时会指出缺哪张表/哪一列
+docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli db check
+```
+
+恢复（**破坏性**，且会暂停定时任务；完成后建议重启服务）：
+
+```bash
+# 归档放在宿主机任意位置，先拷进容器可读的目录再执行
+docker compose --env-file .env -f docker-compose.prod.yml cp ./xxx.tar.gz app:/tmp/xxx.tar.gz
+docker compose --env-file .env -f docker-compose.prod.yml exec app \
+  python -m app.cli restore /tmp/xxx.tar.gz --dry-run     # 先体检
+docker compose --env-file .env -f docker-compose.prod.yml exec app \
+  python -m app.cli restore /tmp/xxx.tar.gz --force       # 覆盖恢复（自动预备份）
+```
+
+网页端路径：登录管理员 → 设置 → 系统备份与恢复 → 选文件即自动体检 → 勾选确认后恢复。
+上传走 raw body（`curl --data-binary @xxx.tar.gz` 也能用），单文件上限 2 GB。
+
+> 备份目录在数据卷内（`/data/backups`），会被 `deploy.sh` 的卷备份一并带走；
+> `SM_BACKUP_KEEP` 控制保留份数，磁盘紧张时先调小它。
+
 ## 三、日常发布
 
 ```bash

@@ -396,6 +396,9 @@ uv run --with prek prek run --all-files   # 手动全量运行
 | `SM_WECHAT_LOGIN_MODE` | open | `open` 网站应用扫码 / `mp` 公众号网页授权 / `mock` 本地模拟 / `off` 关闭 |
 | `SM_WECHAT_APP_ID` / `SM_WECHAT_APP_SECRET` | 空 | 微信开放平台（或公众号）凭据 |
 | `SM_WECHAT_REDIRECT_URI` | 空 | 授权回调，须与微信平台登记完全一致 |
+| `SM_DB_AUTO_MIGRATE` | true | 启动时自动迁移；设 false 则要求先 `db upgrade`（版本落后会告警） |
+| `SM_BACKUP_KEEP` | 7 | 本地备份保留份数，0 表示不清理 |
+| `SM_BACKUP_INCLUDE_SECRET` | true | 备份是否包含 `.auth_secret`（含则归档等同凭据） |
 
 ### 账号与微信登录
 
@@ -427,6 +430,33 @@ uv run stockmaster user role --username boss --status disabled
 实现要点：密码用 PBKDF2-HMAC-SHA256（60 万轮，参数写在哈希内可平滑升级）；令牌为自签 HS256 JWT，
 `token_version` 随改密/禁用/退出登录递增，因此旧令牌立即失效；微信回调只把**一次性 ticket**
 带给前端，真正的令牌通过 `POST /auth/ticket` 换取，避免令牌出现在浏览器历史与 Referer 里。
+
+### 数据库迁移与备份恢复
+
+schema 由 ORM 模型定义，迁移链（Alembic）只记录增量；启动时会自动把库带到最新版本，
+也可以显式执行：
+
+```bash
+uv run stockmaster db current     # 当前版本 / 是否最新（不一致时以非零码退出）
+uv run stockmaster db history     # 迁移链与已应用情况
+uv run stockmaster db upgrade     # 建表并升级到 head
+uv run stockmaster db stamp       # 只写版本标记（认领 create_all 时代的老库）
+uv run stockmaster db check       # 比对模型与库结构，报告缺表/缺列
+```
+
+备份是**应用级归档**（`.tar.gz` + `manifest.json`），含数据库热备份、模型产物与签名密钥，
+可在网页「设置 → 系统备份与恢复」里一键创建/下载/恢复，也可用 CLI：
+
+```bash
+uv run stockmaster backup --note "升级前"      # 落到 <数据目录>/backups/
+uv run stockmaster backup --list               # 列出本地备份
+uv run stockmaster restore <归档> --dry-run    # 只体检，不写入
+uv run stockmaster restore <归档> --force      # 覆盖恢复（自动先打一份预备份）
+```
+
+与 `deploy/deploy.sh` 的 `backups/pre-deploy-*.tar.gz` 分工不同：部署脚本备份整个
+`/data` 卷用于**回滚整个卷**；应用归档可跨机器搬运，恢复时会校验版本、自动迁移 schema、
+重置连接池并暂停/恢复定时任务。
 
 ### 定时任务（Asia/Shanghai，仅交易日）
 `15:20` 日历 → `15:35` 日线 → `16:05` 指数 → `16:30` 指标因子 → `16:45` 预测 → `17:00` 预警 → 盘中每 60s 快照 → 周六 `02:00` 重训。

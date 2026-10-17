@@ -57,6 +57,8 @@ API 参考
 密码哈希、JWT、微信 OAuth 与账号服务。``SM_AUTH_ENABLED=false`` 时网关不拦截，
 但账号页与令牌校验仍然可用。
 
+.. automodule:: app.maintenance
+
 .. automodule:: app.auth
    :members:
    :undoc-members:

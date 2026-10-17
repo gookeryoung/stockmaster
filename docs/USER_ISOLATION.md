@@ -131,96 +131,53 @@ def owned_or_404(session, model, pk, owner_id: int, label: str):
 
 ---
 
-## 5. 存量数据迁移
+## 5. 存量数据迁移（Alembic）
 
-这是本次改动最硬的部分：项目目前**没有 Alembic**（`alembic` 在依赖里但无 `alembic.ini`、
-无 `versions/`），建表靠 `init_db()` 的 `create_all`，而它不会修改已存在的表。
-同时 SQLite **不支持 `DROP CONSTRAINT`**，唯一约束改造必须重建表。
+本节原先建议在 `init_db()` 里挂一个自建的幂等 DDL 模块，**现已改为正式引入 Alembic**。
+原因很实际：恢复旧备份要先把库放回旧 schema、再升级到当前版本，这件事只有版本链能做对；
+自建模块只能覆盖"加列"这一种动作，遇到改唯一约束就得手写表重建脚本并自己保证幂等，
+而「恢复 + 迁移」这条路上容错空间几乎为零。
 
-### 推荐：自带的幂等升级模块（而非引入 Alembic）
+已落地的基础设施（详见 `docs/IMPLEMENTATION_PLAN.md` §1）：
 
-新增 `backend/app/db/migrations.py`，在 `init_db()` 的 `create_all` 之后调用：
+| 组件 | 作用 |
+|---|---|
+| `alembic.ini` + `backend/migrations/env.py` | 从 `settings.database_url` 取库；`render_as_batch=True`、`compare_type=True` |
+| `0001_baseline`（空迁移） | schema 真源仍是 ORM 模型，baseline 只做「存量库可 stamp 的锚点」 |
+| `app/db/migrations.py` | `ensure_migrated()` 处理三态：全新库 / 存量库（无版本表）/ 已纳管库 |
+| `stockmaster db current\|history\|upgrade\|stamp\|check` | 运维入口，坏库也能跑（`main()` 对 `db`/`restore` 跳过 `init_db`） |
 
-```python
-SCHEMA_VERSION = 1
+### 隔离的迁移：`0002_owner_columns`
 
-def upgrade(engine) -> None:
-    """幂等 DDL 升级，用 PRAGMA user_version 记录进度。"""
-    with engine.begin() as conn:
-        current = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
-        if current < 1:
-            _migrate_owner_columns(conn)
-            conn.exec_driver_sql("PRAGMA user_version = 1")
-```
+1. **加列**：四张表 `ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0`。
+   SQLite 允许「非空 + 常量默认值」的加列，不需要重建表。
+2. **回填** `alert_triggers.owner_id` ← `alert_rules.owner_id`（同一条 SQL，可重入）。
+3. **改 `watchlist_items` 唯一约束**：`(list_name, code)` → `(owner_id, list_name, code)`。
+   SQLite 没有 `DROP CONSTRAINT`，只能重建表 —— 这正是必须用 Alembic 的地方：
 
-理由：部署零新增步骤（`deploy.sh` 不用改）、失败可重入、与现有"启动即建表"的运维模型一致。
-代价是没有 downgrade 与分支合并能力——数据文件是单机 SQLite、只有一个写入方，可以接受。
-若将来迁 Postgres 或多实例，再补 Alembic baseline（那时 `user_version` 直接映射成初始 revision）。
-
-### 步骤（全部可重入）
-
-1. **加列**（SQLite 允许 `ADD COLUMN ... NOT NULL DEFAULT`）：
-
-   ```sql
-   ALTER TABLE watchlist_items ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0;
-   ALTER TABLE alert_rules     ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0;
-   ALTER TABLE alert_triggers  ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0;
-   ALTER TABLE backtest_runs   ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0;
+   ```python
+   with op.batch_alter_table("watchlist_items") as batch:
+       batch.drop_constraint("uq_watchlist_item", type_="unique")
+       batch.create_unique_constraint("uq_watchlist_item", ["owner_id", "list_name", "code"])
    ```
 
-   用 `PRAGMA table_info(<t>)` 判存在，重复执行安全。
+   `batch_alter_table` 在 `render_as_batch=True` 下会生成
+   建新表 → `INSERT SELECT` → `DROP` → `RENAME` → 重建索引 的完整序列。
+   手写这段时的坑：`engine.begin()` 事务内无法切换 `PRAGMA foreign_keys`；
+   `watchlist_items` 没有被任何外键引用，所以本表不需要关外键。
+4. **认领历史数据**：`stockmaster user claim --username boss`（先 `--dry-run` 看影响行数）。
 
-2. **回填 `alert_triggers.owner_id`**：从 `alert_rules.owner_id` 复制（此时两者都是 0，但保持
-   幂等所以在同一事务里 `UPDATE ... FROM` 形式写一遍，将来手工修数据也能复用）。
-
-3. **重建 `watchlist_items`**（唯一约束变更）：
-
-   ```sql
-   -- 注意：不要在这里写 PRAGMA foreign_keys / BEGIN。SQLite 在事务内无法切换
-   -- foreign_keys，而 upgrade() 已经在 engine.begin() 里。本表没有被任何外键引用，
-   -- 因此无需关外键；若将来有引用，要单独用 engine.connect() 在事务外处理。
-   CREATE TABLE watchlist_items_new (
-     id INTEGER PRIMARY KEY AUTOINCREMENT,
-     owner_id INTEGER NOT NULL DEFAULT 0,
-     list_name VARCHAR(64) DEFAULT 'default',
-     code VARCHAR(16) NOT NULL,
-     note VARCHAR(256) DEFAULT '',
-     added_at DATETIME,
-     CONSTRAINT uq_watchlist_item UNIQUE (owner_id, list_name, code)
-   );
-   INSERT INTO watchlist_items_new (id, owner_id, list_name, code, note, added_at)
-     SELECT id, owner_id, list_name, code, note, added_at FROM watchlist_items;
-   DROP TABLE watchlist_items;
-   ALTER TABLE watchlist_items_new RENAME TO watchlist_items;
-   CREATE INDEX ix_watchlist_owner ON watchlist_items (owner_id, list_name, code);
-   COMMIT;
-   PRAGMA foreign_keys = ON;
-   ```
-
-   没有任何表外键指向 `watchlist_items`，重建是安全的。`sqlite_sequence` 会随
-   `AUTOINCREMENT` 自动延续（ID 复用风险：若旧表最大 id 被删过，重建前先取 `MAX(id)`，
-   插入时不显式写 id 反而更稳，这里为保 id 稳定而显式写入，可接受）。
-
-4. **认领（可选，显式执行）**：把 owner 0 的历史数据交给某个账号：
-
-   ```bash
-   uv run stockmaster user claim --username boss --dry-run   # 先看会动多少行
-   uv run stockmaster user claim --username boss
-   ```
-
-   `0` 直接保留、匿名人可见，也说得通；但一旦开 `SM_AUTH_ENABLED=true`，匿名访问被网关拦掉，
-   owner 0 的数据就变成"谁都看不见"。所以开鉴权前应认领，命令里要打印各表受影响行数。
-
-### 灰度开关
+### 灰度开关与顺序
 
 `SM_DATA_ISOLATION=false|true`（默认 `false`，与现状等价）：
 
-- `false`：查询不加 owner 过滤，但**写入照样记录 owner**。用来"先上线记录、再看数据、再开闸"。
+- `false`：查询不加 owner 过滤，但**写入照样记录 owner** —— 用来"先上线记录、再看数据、再开闸"；
 - `true`：读写全部按 owner 过滤。
 
-这样出问题时回滚只需要改一个环境变量，不必回滚数据库。
+出问题只需改回环境变量，不必回滚数据库。
 
----
+> 开 `SM_AUTH_ENABLED=true` 之前记得先 `user claim`：匿名访问被网关拦掉后，
+> owner 0 的数据就没人看得见了。
 
 ## 6. 调度器与无用户上下文
 
@@ -271,6 +228,8 @@ def upgrade(engine) -> None:
 ---
 
 ## 9. 实施顺序（四个可独立上线的改动）
+
+> 排期、验收口径与回滚方式统一维护在 `docs/IMPLEMENTATION_PLAN.md`；本节只说明「为什么这样切」。
 
 1. **PR-1 归属列 + 迁移 + 写入记录**（隔离关）：加列、重建唯一约束、所有 create 写 owner、
    `user claim` 命令。此时行为与现在**完全一致**，只是数据开始带上归属。
