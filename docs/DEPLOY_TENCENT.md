@@ -11,7 +11,7 @@
 |---|---|
 | 实例 | 腾讯云轻量应用服务器 `ap-shanghai`（Ubuntu 24.04 / 2C2G / 50G SSD） |
 | 公网 IP | `49.235.154.84` |
-| 访问地址 | **http://gookeryoung.cn:8770**（HTTP；HTTPS 见第五节） |
+| 访问地址 | **https://stock.gookeryoung.cn** （HTTPS，反代 8770）<br>备用直连：http://gookeryoung.cn:8770 |
 | 部署目录 | `/opt/stockmaster` |
 | 容器名 | `stockmaster` |
 | 数据卷 | `stockmaster-data` → 容器 `/data` |
@@ -106,26 +106,48 @@ cd /opt/stockmaster
 首次约 10-20 分钟（拉基础镜像 + 装 pandas/scikit-learn/akshare + 构建前端），
 之后走 Docker 层缓存通常 2-5 分钟。
 
-### 5. HTTPS（可选）
+### 5. HTTPS（已启用）
 
 默认形态是 `http://<域名>:8770` —— **8770 上没有 TLS**，用 `https://` 打这个端口
-必然失败（`SSL23_GET_SERVER_HELLO: unknown protocol`）。要 HTTPS 就得借道
-同机 cndb 的 nginx：80/443 被它独占，起不了第二个 TLS 前端。
+必然失败（`SSL23_GET_SERVER_HELLO: unknown protocol`）。HTTPS 借道同机 cndb 的
+nginx：80/443 被它独占，起不了第二个 TLS 前端。
 
 做法是给 StockMaster 一个独立子域，由 cndb 的 nginx 用 `server_name` 分流：
 
 ```bash
-# 1) 先在 DNSPod 加解析（只有你能做）：
+# 1) 在 DNSPod 加解析（已加）：
 #      类型 A | 主机记录 stock | 记录值 49.235.154.84 | TTL 600
-# 2) 等 1-2 分钟后执行：
+# 2) 执行：
 cd /opt/stockmaster
 sudo DOMAIN=stock.gookeryoung.cn ACME_EMAIL=you@example.com bash deploy/setup-tls.sh
 ```
 
-脚本依次做四件事：DNS 预检 → certbot(HTTP-01) 签发（复用 cndb nginx 在 80 端口
+线上落地结果：
+
+| 项 | 值 |
+|---|---|
+| HTTPS 地址 | **https://stock.gookeryoung.cn** （443，反代宿主 8770） |
+| HTTP：8770 | 仍可用：http://gookeryoung.cn:8770 （保留，便于排查） |
+| 证书 | Let's Encrypt，`/opt/cndb/certs/stock-{fullchain,privkey}.pem`，有效期至 2027-01-14 |
+| 自动续期 | `/etc/cron.d/stockmaster-tls`，每天 03:17 重跑本脚本（幂等） |
+
+脚本依次做五件事：DNS 预检 → certbot(HTTP-01) 签发（复用 cndb nginx 在 80 端口
 已有的 `/.well-known/acme-challenge/` webroot，**不需要停 cndb**）→ 把证书落成
 实体文件到 `/opt/cndb/certs/stock-*.pem` → 把 server 块装进
-`/opt/cndb/deploy/nginx/extra/stockmaster.conf` 并 `nginx -t` + reload。
+`/opt/cndb/deploy/nginx/extra/stockmaster.conf` 并 `nginx -t` + reload →
+安装续期任务 `/etc/cron.d/stockmaster-tls`。
+
+**续期**：本脚本幂等（certbot `--keep-until-expiring` 只在临近到期时真正续签，
+随后自动重装证书 + reload），所以 cron 直接复用脚本本身，不必另写一套。
+
+```bash
+# 验证续期链路（不真正签发）：
+docker run --rm -v /opt/cndb/certbot-www:/var/www/certbot \
+  -v /opt/cndb/.letsencrypt:/etc/letsencrypt \
+  certbot/certbot renew --webroot -w /var/www/certbot --dry-run
+# 手动续期：
+sudo bash /opt/stockmaster/deploy/setup-tls.sh
+```
 
 安全边界：
 
@@ -133,11 +155,12 @@ sudo DOMAIN=stock.gookeryoung.cn ACME_EMAIL=you@example.com bash deploy/setup-tl
   任何 server；nginx 按 server_name 精确匹配，两者隔离。
 - 安装前会 `nginx -t`，不通过自动回滚，cndb 不会因此起不来。
 - 完全撤销：`rm /opt/cndb/deploy/nginx/extra/stockmaster.conf` 再
-  `docker exec cndb-nginx nginx -s reload`。
+  `docker exec cndb-nginx nginx -s reload`；续期任务删 `/etc/cron.d/stockmaster-tls`。
 - 反代上游取 `cndb-nginx` 所在网络的网关回连宿主 8770（脚本自动写入，不硬编码）；
   cndb 的 compose 项目若整体重建换了网段，重跑一次脚本即可。
+- 本块**故意不加 HSTS**：借道配置出问题时要保留浏览器回退 http 的余地。
 
-改成子域后，`.env` 里可设 `FORWARDED_ALLOW_IPS=*`，否则 uvicorn 只信 127.0.0.1
+`.env` 里已设 `FORWARDED_ALLOW_IPS=*`，否则 uvicorn 只信 127.0.0.1
 的 `X-Forwarded-*`，会把 nginx 容器的 IP 记成客户端 IP。
 
 > 子路径挂载（`https://gookeryoung.cn/stockmaster/`）不可行：`vite.config.ts`

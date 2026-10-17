@@ -5,7 +5,7 @@
 #   sudo DOMAIN=stock.gookeryoung.cn ACME_EMAIL=you@example.com \
 #        bash deploy/setup-tls.sh
 #
-# 做四件事：
+# 做五件事：
 #   1. DNS 预检（子域必须已解析到本机，否则 ACME 必然失败）
 #   2. certbot(HTTP-01) 签发证书 —— 复用 cndb nginx 已在 80 端口提供的
 #      /.well-known/acme-challenge/ webroot，因此不需要停 cndb 的服务
@@ -13,6 +13,7 @@
 #      （certbot 的 live/ 目录全是相对软链，跨容器挂载会断，必须拷实体）
 #   4. 把 nginx server 块装进 /opt/cndb/deploy/nginx/extra/ 并 reload，
 #      nginx -t 不通过则自动回滚，保证 cndb 不受影响
+#   5. 安装 /etc/cron.d/stockmaster-tls 自动续期（本脚本幂等，续期直接复用它）
 #
 # 幂等：证书还在有效期内时 certbot 不会重签；重复执行只会重装配置 + reload。
 # 撤销：rm /opt/cndb/deploy/nginx/extra/stockmaster.conf 后
@@ -145,11 +146,33 @@ fi
 log "reload nginx"
 docker exec "$NGINX_CONTAINER" nginx -s reload
 
-# ── 4. 自测 ─────────────────────────────────────────────────────────
+# ── 4. 安装续期 cron（幂等）─────────────────────────────────────────
+# 本脚本自身是幂等的（certbot --keep-until-expiring + 重装证书 + reload），
+# 所以续期直接复用本脚本，不必再写第二套逻辑。
+CRON_TARGET="/etc/cron.d/stockmaster-tls"
+CRON_TMP="$(mktemp)"
+printf '%s\n' \
+  '# StockMaster 子域证书续期（由 deploy/setup-tls.sh 幂等安装）' \
+  '# 仅临近到期时才真正续签，随后自动重装证书并 reload cndb-nginx；不动 cndb 的 server 块。' \
+  'SHELL=/bin/bash' \
+  "17 3 * * * root bash ${SCRIPT_DIR}/setup-tls.sh >> /var/log/stockmaster-tls.log 2>&1" \
+  > "$CRON_TMP"
+if [ -d /etc/cron.d ]; then
+  if [ -f "$CRON_TARGET" ] && ! cmp -s "$CRON_TMP" "$CRON_TARGET"; then
+    log "更新续期任务：$CRON_TARGET"
+  fi
+  install -m 644 "$CRON_TMP" "$CRON_TARGET"
+  log "续期任务已就绪：$CRON_TARGET（每天 03:17 检查）"
+else
+  warn "/etc/cron.d 不存在，跳过续期任务安装（可改用 systemd timer）"
+fi
+rm -f "$CRON_TMP"
+
+# ── 5. 自测 ─────────────────────────────────────────────────────────
 sleep 2
 CODE="$(curl -fsS -m 15 -o /dev/null -w '%{http_code}' "https://$DOMAIN/" 2>/dev/null || echo 000)"
 HEALTH="$(curl -fsS -m 15 "https://$DOMAIN/api/v1/health" 2>/dev/null || echo '(取不到)')"
 log "https://$DOMAIN/           → HTTP $CODE"
 log "https://$DOMAIN/api/v1/health → $HEALTH"
-log "证书路径 $LE_LIVE（续期：certbot renew，webroot 已是同一份）"
+log "证书路径 $LE_LIVE（手动续期：docker run --rm -v $WEBROOT:/var/www/certbot -v $LE_STATE:/etc/letsencrypt certbot/certbot renew --webroot -w /var/www/certbot）"
 log "完成。cndb 未受影响（本配置仅新增 server_name=$DOMAIN 的 server 块）。"
