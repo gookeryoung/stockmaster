@@ -2,20 +2,23 @@
 
 The default is database-only (triggers are always persisted). Outbound delivery
 is pluggable and explicitly opt-in: a generic JSON webhook suitable for
-Server酱/钉钉/企微 relays, and an optional direct Bark-style push. Network
-failures are logged and never propagated, because a failed notification must not
-roll back a trigger or break the scan loop.
+Server酱/钉钉/企微 relays, an optional direct Bark-style push, and SMTP email.
 
 With data isolation on, outbound delivery is routed **per workspace**: a trigger
 belongs to the workspace that owns its rule, so its notification must go to that
 workspace's own channels instead of one global webhook. With isolation off the
 old global behaviour is preserved byte for byte — that is what lets the switch be
 flipped on and rolled back without changing delivery semantics.
+
+The optional ``workspaces.message_template`` is applied per workspace (body only —
+the title stays the short trigger title used as email subject / push title; the
+template can embed ``{title}`` if it wants to). A broken template at runtime must
+never suppress an alert, so formatting failures fall back to the original text.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from stockmaster.config import settings
@@ -27,6 +30,7 @@ __all__ = [
     "BarkChannel",
     "Channel",
     "DatabaseChannel",
+    "EmailChannel",
     "Notification",
     "WebhookChannel",
     "build_channel",
@@ -135,6 +139,51 @@ class BarkChannel:
             return False
 
 
+class EmailChannel:
+    """SMTP 邮件通道：收件人串（逗号/分号分隔）存在通道的 ``url`` 列里。
+
+    SMTP 是部署级凭据（``SM_SMTP_*``），不像 webhook 那样属于某个工作区；工作区只
+    决定「发给谁」。没有配置 ``SM_SMTP_HOST`` 或没有收件人时直接返回 False —— 未配置
+    邮件外发不应该被当成错误（与未配置全局 webhook 时一致）。
+    """
+
+    name = "email"
+
+    def __init__(self, recipients: str, timeout: float | None = None) -> None:
+        self.recipients = _split_recipients(recipients)
+        self.timeout = settings.smtp_timeout if timeout is None else timeout
+
+    def send(self, notification: Notification) -> bool:
+        if not settings.smtp_host or not self.recipients:
+            return False
+        try:
+            import smtplib
+            from email.message import EmailMessage
+
+            message = EmailMessage()
+            message["Subject"] = notification.title
+            message["From"] = settings.smtp_from or settings.smtp_username or "stockmaster@localhost"
+            message["To"] = ", ".join(self.recipients)
+            message.set_content(notification.body)
+
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=self.timeout) as smtp:
+                if settings.smtp_tls:
+                    smtp.starttls()
+                if settings.smtp_username:
+                    smtp.login(settings.smtp_username, settings.smtp_password)
+                smtp.send_message(message)
+            return True
+        except Exception as exc:
+            # 邮件失败与 webhook 失败同一处理：只记日志，不中断扫描/回滚触发记录。
+            log.warning("email delivery failed: %s", exc)
+            return False
+
+
+def _split_recipients(value: str) -> list[str]:
+    """把 ``a@x.com, b@y.com`` / ``a@x.com;b@y.com`` 拆成地址列表。"""
+    return [item.strip() for item in (value or "").replace(";", ",").split(",") if item.strip()]
+
+
 def get_channels() -> list[Channel]:
     """Build the configured channel list.
 
@@ -160,6 +209,8 @@ def build_channel(row) -> Channel | None:
         return WebhookChannel(url)
     if kind == "bark":
         return BarkChannel(url)
+    if kind == "email":
+        return EmailChannel(url)
     return None
 
 
@@ -253,15 +304,51 @@ def _group_by_workspace(notifications: list[Notification]) -> dict[int, list[Not
     return groups
 
 
+def _workspace_templates(session, workspace_ids: list[int]) -> dict[int, str]:
+    """一次查询批量取非空消息模板；``workspace_id <= 0`` 永远不套模板。"""
+    from sqlalchemy import select
+
+    from stockmaster.db.models import Workspace
+
+    ids = [int(workspace_id) for workspace_id in dict.fromkeys(workspace_ids) if workspace_id > 0]
+    if not ids:
+        return {}
+    rows = session.execute(select(Workspace.id, Workspace.message_template).where(Workspace.id.in_(ids))).all()
+    return {int(workspace_id): (template or "") for workspace_id, template in rows if template}
+
+
+def _apply_template(template: str, notification: Notification) -> Notification:
+    """按工作区模板重写正文；标题保持原样（邮件主题 / Bark 推送需要短标题）。
+
+    模板写错（未知占位符、格式说明符不匹配等）时只 log warning 并回退原通知：
+    一条通知的样式问题不能变成「预警没发出去」。
+    """
+    try:
+        body = template.format(
+            title=notification.title,
+            body=notification.body,
+            code=notification.code,
+            rule_id=notification.rule_id,
+            level=notification.level,
+        )
+    except Exception as exc:
+        log.warning("workspace message template failed, falling back to original text: %s", exc)
+        return notification
+    return replace(notification, body=body)
+
+
 def notify(notifications: list[Notification]) -> dict[str, int]:
     """Deliver notifications through the channels their workspace routes to.
 
     Returns per-channel success counts for reporting. With isolation off the keys
     are plain channel names (``database``/``webhook``) and every notification goes
     through the global list — the original behaviour, with no DB session opened.
+
     With isolation on each ``workspace_id`` group is resolved separately and the
     keys carry a ``ws{id}:`` prefix (e.g. ``ws3:webhook``) so a report shows which
-    workspace delivered what.
+    workspace delivered what. The same session is reused to batch-load the
+    workspaces' message templates once, then each group's notifications are
+    rewritten before delivery (``workspace_id <= 0`` never uses a template).
     """
     if not settings.data_isolation:
         return _deliver(get_channels(), notifications)
@@ -270,7 +357,12 @@ def notify(notifications: list[Notification]) -> dict[str, int]:
 
     results: dict[str, int] = {}
     with session_scope() as session:
-        for workspace_id, batch in _group_by_workspace(notifications).items():
+        groups = _group_by_workspace(notifications)
+        templates = _workspace_templates(session, list(groups))
+        for workspace_id, batch in groups.items():
+            template = templates.get(workspace_id)
+            if template:
+                batch = [_apply_template(template, notification) for notification in batch]
             channels = channels_for_workspace(session, workspace_id)
             for key, delivered in _deliver(channels, batch, prefix=f"ws{workspace_id}:").items():
                 results[key] = results.get(key, 0) + delivered

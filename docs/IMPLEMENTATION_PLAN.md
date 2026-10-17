@@ -23,6 +23,8 @@
 | 用户页数据概览 + 管理员用户统计列 | ✅ 已完成 | `WorkspaceOut.data_total`、`AdminUserOut`、`GET /users` 统计字段、见 `WORKSPACE.md` §5.2 |
 | 管理员工作区总览页 UI | ✅ 已完成 | `/workspace` 页「全部工作区」卡片（`GET /workspaces?all=true`） |
 | 工作区级预警参数覆盖 | ✅ 已完成 | `0006_workspace_alert_policies`、`plugins/alerts/services/policy.py`；只收紧语义，见 `WORKSPACE.md` §5.3 |
+| P3 邮件通知通道 + 消息模板 | ✅ 已完成 | `SM_SMTP_*`、`EmailChannel`、`workspaces.message_template`（`0007`）、见 `WORKSPACE.md` §5.4 |
+| P3 用量快照趋势 + CSV 导出 | ✅ 已完成 | `workspace_usage_snapshots`（`0007`）、`workspace_usage` 每日任务、`/stats/history`、`/stats/export` |
 
 ### 关键设计决定（已落地，改动前先读）
 
@@ -61,7 +63,7 @@ P1 数据隔离（已完成）
  ├─ PR-5 工作区用量统计 + 可选配额：stats 端点 + SM_WORKSPACE_MAX_* + 写路径 409
  ├─ PR-6 用户页数据概览 + 管理员用户统计列：data_total + AdminUserOut
  ├─ PR-7 管理员工作区总览 + 工作区级预警参数覆盖：0006 迁移 + 只收紧策略
- └─ 待办：P3 可选（更多通知渠道、统计导出）
+ └─ PR-8/PR-9 P3 可选增强：邮件通道 + 消息模板 + 用量快照趋势/导出（0007）
         │
         ▼
 P2 备份自动化（1 个 PR）
@@ -69,7 +71,9 @@ P2 备份自动化（1 个 PR）
  └─ 季度恢复演练（手动 runbook）
         │
         ▼
-P3 按用户通知与配额（可选，按需）
+P3 可选增强（已完成）
+ ├─ PR-8 邮件通知通道 + 按工作区消息模板
+ └─ PR-9 用量快照趋势 + CSV 导出
 ```
 
 ---
@@ -275,6 +279,38 @@ editor 不可管成员、最后 owner 保护、跨工作区 404、转让）；`t
 > **已取消**：「回测结果分享链接」不实现（不引入 `visibility`/`share_token`），
 > 当前仓库没有相关代码需要移除；回测结果只在所属工作区内可见。
 
+### PR-8：P3 邮件通知通道 + 按工作区消息模板 —— ✅ 已完成
+
+> 设计细节见 `WORKSPACE.md` §5.4。目标：worker/团队常用邮件接收提醒，且同一工作区的
+> 消息格式可统一。SMTP 是部署级凭据（`SM_SMTP_*`），收件人按工作区通道配置。
+
+| 文件 | 改动 |
+|---|---|
+| `src/stockmaster/config.py` | `smtp_host/port/username/password/from/tls/timeout` |
+| `plugins/alerts/services/channels.py` | `EmailChannel`（stdlib smtplib，失败只 log）、`build_channel`/`send_test` 支持 email、`notify()` 套用工作区模板（格式化失败回退原文） |
+| `plugins/workspaces/{services,schemas,routers}` | `kind=email` 收件人校验与掩码（`a***@example.com`）、`Workspace.message_template` 保存/校验/输出 |
+| `0007` 迁移 | `workspaces.message_template` 列 |
+| frontend | 通道类型加「邮件」，工作区设置加消息模板编辑 |
+
+**验收**：`tests/test_notification_email.py`（EmailChannel 打桩、API/掩码/422、模板保存与套用）。
+
+### PR-9：P3 用量快照趋势 + CSV 导出 —— ✅ 已完成
+
+> 设计细节见 `WORKSPACE.md` §5.4。目标：用量不只当前值，还有每日趋势与可导出的 CSV。
+
+| 文件 | 改动 |
+|---|---|
+| `0007` 迁移 | `workspace_usage_snapshots` 表（唯一 `(workspace_id, captured_on)`） |
+| `plugins/workspaces/services/usage_history.py` | 快照 upsert、批量 capture、按天查询 |
+| `plugins/workspaces/routers/usage.py` + `plugin.py` | `GET /stats/history`、`GET /stats/export`（CSV/BOM/附件名） |
+| `jobs/tasks.py` + `jobs/scheduler.py` | `workspace_usage` 每日 17:30 快照任务；`/system/jobs/workspace_usage` 可手动触发 |
+| frontend | 用量卡片「导出 CSV」+ 30 天趋势折线 |
+
+**验收**：`tests/test_workspace_usage_history.py`（导出格式/权限、任务生成/同日 upsert/过滤/级联清理）。
+
+> P3 为可选增强，不改变隔离语义：不配置 SMTP 则邮件通道不外发；模板为空则用默认标题/正文；
+> 未开调度器时趋势数据不积累（可手动触发任务）。
+
 ---
 
 ## 4. P2 备份自动化
@@ -306,7 +342,7 @@ docker compose --env-file .env -f docker-compose.prod.yml exec app \
 
 # 4) 确认启动时已自动认领版本并执行增量
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m stockmaster.cli db current      # 应输出 当前=最新=0006_workspace_alert_policies
+  python -m stockmaster.cli db current      # 应输出 当前=最新=0007_workspace_email_and_usage_history
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
   python -m stockmaster.cli db check        # 应无「缺列」输出
 

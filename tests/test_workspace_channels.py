@@ -260,7 +260,7 @@ def test_channel_validation(channels_client):
     ws_id = _create_workspace(client, client.alice)
 
     invalid_payloads = [
-        {"name": "x", "kind": "email", "url": WEBHOOK_URL},  # 未知类型
+        {"name": "x", "kind": "carrier_pigeon", "url": WEBHOOK_URL},  # 未知类型
         {"name": "x", "kind": "webhook", "url": "ftp://example.com/hook"},  # 非 http(s)
         {"name": "x", "kind": "webhook", "url": "not-a-url"},
         {"name": "x", "kind": "webhook", "url": "https://example.com/a b"},  # 空白

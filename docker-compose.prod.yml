@@ -49,6 +49,14 @@ services:
       - SM_ALERT_WEBHOOK_URL=${SM_ALERT_WEBHOOK_URL:-}
       # 隔离开启时，没有配置通道的工作区是否回落到上面的全站 webhook（默认严格隔离）
       - SM_ALERT_GLOBAL_FALLBACK=${SM_ALERT_GLOBAL_FALLBACK:-false}
+      # ── 邮件通知（工作区通道 kind=email；SMTP 是部署级凭据）──────────
+      - SM_SMTP_HOST=${SM_SMTP_HOST:-}
+      - SM_SMTP_PORT=${SM_SMTP_PORT:-587}
+      - SM_SMTP_USERNAME=${SM_SMTP_USERNAME:-}
+      - SM_SMTP_PASSWORD=${SM_SMTP_PASSWORD:-}
+      - SM_SMTP_FROM=${SM_SMTP_FROM:-}
+      - SM_SMTP_TLS=${SM_SMTP_TLS:-true}
+      - SM_SMTP_TIMEOUT=${SM_SMTP_TIMEOUT:-10}
       # 容器内固定 UTF-8，避免中文日志乱码/报错
       - SM_CONSOLE_ENCODING=utf-8
       # ── 账号与登录 ────────────────────────────────────────────

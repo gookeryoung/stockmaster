@@ -134,8 +134,8 @@ def require_editor(...) -> WorkspaceCtx:
 |---|---|
 | `workspace_id` | FK → `workspaces.id`，`ON DELETE CASCADE`。通道**只属于真实工作区**：不存在 `workspace_id=0` 的「未归属通道」，隔离关闭时也不会写这张表 |
 | `name` | 成员识别「这条发到哪」的入口；`(workspace_id, name)` 唯一 |
-| `kind` | `webhook`（通用 JSON POST，适合钉钉/企微/Server酱中转）或 `bark`（iOS 推送） |
-| `url` | 含凭据（webhook token / Bark device key）；API **只返回掩码**，更新时省略 `url` 表示保持原值 |
+| `kind` | `webhook`（通用 JSON POST，适合钉钉/企微/Server酱中转）、`bark`（iOS 推送）或 `email`（SMTP 邮件） |
+| `url` | webhook token / Bark device key / 邮件收件人（email 时填地址，逗号分隔）；API **只返回掩码**，更新时省略 `url` 表示保持原值 |
 | `enabled` | 停用的通道留在列表里但不参与投递 |
 
 **投递路由**（`plugins/alerts/services/channels.py`）：
@@ -248,6 +248,38 @@ def require_editor(...) -> WorkspaceCtx:
 
 **回滚**：把 `workspace_alert_policies` 行删除（或 PUT 全 null）即恢复「全部跟随规则」，不影响既有触发记录；迁移表可安全保留。
 
+### 5.4 P3 可选增强：邮件通知、消息模板、用量趋势与导出
+
+隔离路线图收尾后的体验增强，全部为可选配置，默认不改变既有行为。
+
+**邮件通知通道**：通道 `kind=email`，`url` 列存**收件人**（逗号/分号分隔，最多 10 个，API 掩码展示如 `a***@example.com`）。SMTP 是部署级凭据，走环境变量 `SM_SMTP_*`：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SM_SMTP_HOST` | 空 | 留空 = 邮件通道不投递（创建/测试返回 `delivered=false`，不抛错） |
+| `SM_SMTP_PORT` | `587` | SMTP 端口 |
+| `SM_SMTP_USERNAME` / `SM_SMTP_PASSWORD` | 空 | 有用户名时登录 |
+| `SM_SMTP_FROM` | 空 | 发件人；留空用 `SM_SMTP_USERNAME` |
+| `SM_SMTP_TLS` | `true` | 是否 `STARTTLS` |
+| `SM_SMTP_TIMEOUT` | `10` | 连接/发送超时（秒） |
+
+投递实现用标准库 `smtplib`（无新增依赖）；网络失败只 log warning，与 webhook/Bark 一致。
+
+**按工作区消息模板**：`workspaces.message_template`（`0007` 新增列）。空 = 默认正文；非空时对**本工作区**的每条外发通知套用 `str.format` **重写正文**（标题保持原样，邮件 Subject / Bark 标题需要短标题），占位符只允许 `{title} {body} {code} {rule_id} {level}`。API 保存时校验非法花括号/未知字段（422 `invalid_template`），运行期格式化失败会 log 并回退原文；`workspace_id=0` 不套模板。owner 在「工作区设置」编辑。
+
+**用量趋势与导出**（`workspace_usage_snapshots`，`0007` 新增表）：
+
+| 项 | 说明 |
+|---|---|
+| 快照 | 一行/工作区/天，`(workspace_id, captured_on)` 唯一；`captured_on` 同日重复执行只更新（upsert），不产生重复点 |
+| 写入 | 调度任务 `workspace_usage`（交易日 17:30，`job_snapshot_workspace_usage`）；也可用 `POST /system/jobs/workspace_usage` 手动跑 |
+| 查询 | `GET /api/v1/workspaces/{id}/stats/history?days=30`（成员可读，1..365 天，按日期升序） |
+| 导出 | `GET /api/v1/workspaces/{id}/stats/export`（成员可读）→ `text/csv`，UTF-8 BOM + `Content-Disposition` 附件；包含 8 类资源用量与上限 |
+
+前端「用量与配额」卡片新增「导出 CSV」与 30 天趋势折线（数据量 / 成员数）；快照从任务首次运行开始积累，历史为空时显示提示。
+
+**迁移与回滚**：`0007_workspace_email_and_usage_history` 幂等加列/建表；回滚只需删除快照表与模板列（或保留两者，旧代码不读）。邮件通道不配置 `SM_SMTP_HOST` 时完全不外发。
+
 ## 6. 迁移：`0003_workspaces`
 
 幂等设计 —— 同一个迁移既要在**全新库**（列建出来就叫 `workspace_id`）跳过改名，
@@ -297,7 +329,10 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 - `/users` 页面（管理员）：用户列表新增「工作区」「个人数据量」两列；
 - `/workspace` 页面（管理员）：「全部工作区」总览卡片（名称/类型/成员/数据量）；
 - `/workspace` 页面「预警策略」卡片：成员只读展示有效值，owner 可配置
-  `exclude_st` / `min_amount` / `cooldown_seconds` / `once_per_day`（null = 跟随规则）。
+  `exclude_st` / `min_amount` / `cooldown_seconds` / `once_per_day`（null = 跟随规则）；
+- `/workspace` 页面「工作区设置」：owner 可编辑预警消息模板（占位符提示）；
+  通知通道类型支持 Webhook / Bark / 邮件，邮件时输入收件人；
+- 用量卡片支持「导出 CSV」与 30 天趋势折线（快照为空时显示积累提示）。
 
 ## 9. 测试矩阵
 
@@ -323,6 +358,11 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
   `effective_policy()` 对 NULL/脏数据的归一。
 - `tests/test_alert_policy_engine.py`：策略在扫描引擎生效 —— exclude_st/min_amount 过滤、
   cooldown/once_per_day 收紧 `dedup_key`、跨工作区互不影响、规则更严格时以规则为准。
+- `tests/test_notification_email.py`：邮件通道（smtplib 打桩：无配置/异常返回 False、
+  STARTTLS/登录/收件人正确）+ 通道 API（email 掩码、非法收件人 422、角色矩阵）+
+  消息模板（保存/校验 422/notify 套用/workspace 0 不套用）。
+- `tests/test_workspace_usage_history.py`：CSV 导出（BOM/表头/数量/附件名/权限）、
+  趋势历史（空列表、任务生成、同日 upsert、days 过滤、升序）、多工作区快照与级联清理。
 
 ## 10. 配置
 
@@ -331,6 +371,12 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 | `SM_DATA_ISOLATION` | `false` | `false` = 无工作区概念，全员共享（旧语义，单机推荐）；`true` = 启用工作区隔离与角色权限 |
 | `SM_ALERT_WEBHOOK_URL` | 空 | 全局外发 webhook。隔离关闭时是唯一外发通道；隔离开启时只服务 `workspace_id=0` 或 fallback |
 | `SM_ALERT_GLOBAL_FALLBACK` | `false` | 隔离开启时，没有配置任何启用通道的工作区是否回落到全局 webhook；默认 `false` = 严格隔离 |
+| `SM_SMTP_HOST` | 空 | 邮件通道 SMTP 主机；留空 = 邮件通道不投递 |
+| `SM_SMTP_PORT` | `587` | SMTP 端口 |
+| `SM_SMTP_USERNAME` / `SM_SMTP_PASSWORD` | 空 | SMTP 登录凭据 |
+| `SM_SMTP_FROM` | 空 | 发件人；留空用 `SM_SMTP_USERNAME` |
+| `SM_SMTP_TLS` | `true` | 是否 STARTTLS |
+| `SM_SMTP_TIMEOUT` | `10` | SMTP 超时（秒） |
 | `SM_WORKSPACE_MAX_MEMBERS` | `0` | 工作区成员上限；`0` = 不限 |
 | `SM_WORKSPACE_MAX_WATCHLIST_ITEMS` | `0` | 工作区自选股条数上限；`0` = 不限 |
 | `SM_WORKSPACE_MAX_ALERT_RULES` | `0` | 工作区预警规则上限；`0` = 不限 |
@@ -372,8 +418,12 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
   删除工作区时计入 `data_counts()` 与 `purge` 清理，`workspace claim` 也能认领
   `workspace_id = 0` 的未归属配置（同名冲突计入 `duplicates_skipped`）。
 
+### P3 可选增强（已实现，2026-10-17，见 §5.4）
+
+- 邮件通知通道（SMTP）与按工作区消息模板；
+- 工作区用量 CSV 导出与每日快照趋势图。
+
 ### 后续可选（非隔离核心，按需评估）
 
-- 更多通知渠道（邮件 / 短信）与按工作区的消息模板；
-- 工作区统计的导出与趋势图表；
+- 短信通知（依赖具体服务商 SDK，当前未实现）；
 - 备份异地留存（见 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §4）。

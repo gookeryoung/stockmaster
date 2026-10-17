@@ -404,6 +404,12 @@ uv run --with prek prek run --all-files   # 手动全量运行
 | `SM_SCHEDULER_ENABLED` | true | 是否启用定时任务 |
 | `SM_ALERT_WEBHOOK_URL` | 空 | 预警推送 Webhook（留空则不外部推送）；隔离关闭时是唯一外发通道 |
 | `SM_ALERT_GLOBAL_FALLBACK` | false | 隔离开启时，无通道的工作区是否回落到全局 webhook；false = 严格隔离 |
+| `SM_SMTP_HOST` | 空 | 邮件通知通道 SMTP 主机；留空 = 邮件通道不投递 |
+| `SM_SMTP_PORT` | 587 | SMTP 端口 |
+| `SM_SMTP_USERNAME` / `SM_SMTP_PASSWORD` | 空 | SMTP 登录凭据 |
+| `SM_SMTP_FROM` | 空 | 邮件发件人；留空用 `SM_SMTP_USERNAME` |
+| `SM_SMTP_TLS` | true | 邮件通道是否 STARTTLS |
+| `SM_SMTP_TIMEOUT` | 10 | SMTP 超时（秒） |
 | `SM_AUTH_ENABLED` | false | 是否强制登录（false 时接口开放，账号页仍可用） |
 | `SM_AUTH_SECRET_KEY` | 空 | JWT 签名密钥，留空自动生成到 `<数据目录>/.auth_secret` |
 | `SM_AUTH_ALLOW_REGISTER` | true | 是否允许自助注册（首个账号自动成为管理员） |
@@ -490,6 +496,11 @@ owner 可创建共享工作区并邀请成员。前端顶栏可随时切换工�
 工作区 owner 还可以在「工作区」页配置**预警策略**（排除 ST、最低成交额、冷却时间、
 每天最多一次）：策略只收紧不放宽，与单条规则取更严格者，扫描与去重时生效。管理员在
 同一页可看到「全部工作区」的成员数与数据量。详见 **[docs/WORKSPACE.md](docs/WORKSPACE.md)** §5.3。
+
+通知通道除 Webhook / Bark 外支持**邮件**（SMTP 走 `SM_SMTP_*` 部署配置，收件人按工作区
+配置）；「工作区设置」可编辑**预警消息模板**（`{title} {body} {code} {rule_id} {level}`）。
+用量卡片支持**导出 CSV** 与 30 天趋势折线（每日 17:30 快照，任务可手动触发）。见
+**[docs/WORKSPACE.md](docs/WORKSPACE.md)** §5.4。
 
 策略配置（选股 / 样本 / 算法）同样按工作区归属：editor 及以上可增删改与训练，viewer 只读但可运行
 选股、解析样本；回测请求可直接引用 `screening_id` 使用某套选股口径。字段、JSON 约定、API 与权限矩阵见

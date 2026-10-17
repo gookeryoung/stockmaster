@@ -279,6 +279,8 @@ export interface Workspace {
   member_count: number;
   /** 工作区数据量：自选 + 预警规则 + 回测 + 三类策略配置（不含成员/通知通道）。 */
   data_total: number;
+  /** 工作区级预警消息模板；空字符串 = 使用默认标题/正文。 */
+  message_template: string;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -292,11 +294,12 @@ export interface WorkspaceMember {
   joined_at: string | null;
 }
 
-/** 工作区通知通道：预警触发时把消息外发到 webhook / Bark。
+/** 工作区通知通道：预警触发时把消息外发到 webhook / Bark / 邮件。
  *
- * `url` 由后端返回时已经脱敏（只保留协议与尾部少量字符），编辑时省略 = 不修改。
+ * `url` 由后端返回时已经脱敏：webhook/Bark 是压缩后的地址，email 是掩码收件人
+ * （如 `a***@example.com`）。新建时 email 的 `url` 存放逗号分隔的收件人地址。
  */
-export type WorkspaceChannelKind = "webhook" | "bark";
+export type WorkspaceChannelKind = "webhook" | "bark" | "email";
 
 export interface WorkspaceChannel {
   id: number;
@@ -326,6 +329,18 @@ export interface WorkspaceUsage {
   limits: Record<string, number>;
   labels: Record<string, string>;
   total: number;
+}
+
+/** 用量每日快照（趋势图用），后端按日期升序返回。 */
+export interface WorkspaceUsagePoint {
+  /** `YYYY-MM-DD` */
+  captured_on: string;
+  data_total: number;
+  member_count: number;
+  watchlist_items: number;
+  alert_rules: number;
+  backtest_runs: number;
+  config_total: number;
 }
 
 /** 工作区预警策略的「生效值」：与规则自身设置取更严格者之后的结果。 */

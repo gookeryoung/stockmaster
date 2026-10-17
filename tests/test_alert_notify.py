@@ -23,6 +23,7 @@ from stockmaster.db import session_scope
 from stockmaster.db.models import Workspace, WorkspaceChannel
 from stockmaster.plugins.alerts.services.channels import (
     BarkChannel,
+    EmailChannel,
     Notification,
     WebhookChannel,
     build_channel,
@@ -298,18 +299,31 @@ class TestBuildChannelAndSendTest:
     def test_build_channel_maps_known_kinds(self):
         webhook = build_channel(SimpleNamespace(kind="webhook", url="https://hook.example/a"))
         bark = build_channel(SimpleNamespace(kind="bark", url="https://bark.example/b"))
+        email = build_channel(SimpleNamespace(kind="email", url="a@example.com, b@example.com"))
 
         assert isinstance(webhook, WebhookChannel)
         assert webhook.url == "https://hook.example/a"
         assert isinstance(bark, BarkChannel)
         assert bark.base_url == "https://bark.example/b"
+        # email 的「地址」是收件人串，不是 URL
+        assert isinstance(email, EmailChannel)
+        assert email.recipients == ["a@example.com", "b@example.com"]
 
     def test_build_channel_unknown_kind_returns_none(self):
-        assert build_channel(SimpleNamespace(kind="email", url="https://mail.example")) is None
+        assert build_channel(SimpleNamespace(kind="carrier_pigeon", url="https://mail.example")) is None
         assert build_channel(SimpleNamespace(kind="", url="https://hook.example")) is None
 
     def test_send_test_unknown_kind_returns_false(self):
-        row = SimpleNamespace(kind="email", url="https://mail.example", name="邮件", workspace_id=3)
+        row = SimpleNamespace(kind="carrier_pigeon", url="https://mail.example", name="信鸽", workspace_id=3)
+
+        assert send_test(row) is False
+
+    def test_send_test_email_without_smtp_config_returns_false(self, monkeypatch):
+        """email 已知，但部署没有配置 SM_SMTP_HOST：返回 False 而不是抛异常。"""
+        from stockmaster.config import settings
+
+        monkeypatch.setattr(settings, "smtp_host", "")
+        row = SimpleNamespace(kind="email", url="a@example.com", name="邮件", workspace_id=3)
 
         assert send_test(row) is False
 

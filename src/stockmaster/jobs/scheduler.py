@@ -50,6 +50,11 @@ JOB_META: dict[str, dict[str, str]] = {
         "description": "收盘后评估全部启用规则，按标的与当日去重",
         "schedule": "交易日 17:00",
     },
+    "workspace_usage": {
+        "label": "快照工作区用量",
+        "description": "记录每个工作区当天的数据量/成员数，供趋势图与 CSV 导出使用",
+        "schedule": "交易日 17:30",
+    },
     "snapshot": {
         "label": "拉取盘中快照",
         "description": "盘中定时拉取行情快照，供实时预警使用",
@@ -155,6 +160,14 @@ def build_scheduler():
         _guarded("alerts", tasks.job_scan_alerts),
         CronTrigger(hour=17, minute=0, day_of_week="mon-fri"),
         id="alerts",
+        replace_existing=True,
+    )
+    # Usage snapshot after the alert scan: the day's write activity is over, so the
+    # captured counts are final and stable for the trend chart.
+    scheduler.add_job(
+        _guarded("workspace_usage", tasks.job_snapshot_workspace_usage),
+        CronTrigger(hour=17, minute=30, day_of_week="mon-fri"),
+        id="workspace_usage",
         replace_existing=True,
     )
 

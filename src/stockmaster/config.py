@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     # 触发内容出现在全站群机器人里。``workspace_id=0``（未归属历史数据）始终走
     # 全局通道，因为它们本来就不属于任何工作区。
     alert_global_fallback: bool = False
+    # --- 邮件通知（工作区通道 kind=email）---
+    # 工作区 owner 可以把收件人配在通道里，但 SMTP 服务器是部署级凭据，统一走环境变量。
+    # host 留空 = 邮件通道不投递（创建/测试会返回 delivered=false，不抛错）。
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    # 发件人；留空则用 smtp_username（多数 SMTP 服务要求两者一致或同域）。
+    smtp_from: str = ""
+    smtp_tls: bool = True
+    smtp_timeout: float = 10.0
 
     # --- Scheduler ---
     scheduler_enabled: bool = True

@@ -64,6 +64,7 @@ def _out(session: Session, workspace, role: str, *, data_total: int | None = Non
         member_count=service.member_count(session, workspace.id),
         # 列表页会批量算好传进来；详情/创建等单条路径由这里兜底。
         data_total=quota.data_total(session, workspace.id) if data_total is None else data_total,
+        message_template=workspace.message_template or "",
         created_at=workspace.created_at,
         updated_at=workspace.updated_at,
     )
@@ -81,12 +82,12 @@ def _member_out(member, user: User | None) -> WorkspaceMemberOut:
 
 
 def _channel_out(channel) -> WorkspaceChannelOut:
-    """对外只给掩码 URL：明文 token 不离开服务端。"""
+    """对外只给掩码目标：email 掩码收件人，webhook/bark 掩码 URL，明文不离开服务端。"""
     return WorkspaceChannelOut(
         id=channel.id,
         name=channel.name,
         kind=channel.kind,
-        url=service.mask_url(channel.url),
+        url=service.mask_channel_target(channel.kind, channel.url),
         enabled=channel.enabled,
         created_at=channel.created_at,
         updated_at=channel.updated_at,
@@ -168,6 +169,7 @@ def update_workspace(
         ctx.workspace,
         name=payload.name,
         description=payload.description,
+        message_template=payload.message_template,
     )
     return _out(session, workspace, ctx.role)
 

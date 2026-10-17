@@ -15,6 +15,8 @@ class WorkspaceIn(BaseModel):
 class WorkspaceUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=64)
     description: str | None = Field(default=None, max_length=256)
+    # 预警消息模板：空串 = 清除；占位符合法性由服务层校验（422 invalid_template）。
+    message_template: str | None = Field(default=None, max_length=2000)
 
 
 class WorkspaceOut(BaseModel):
@@ -31,6 +33,8 @@ class WorkspaceOut(BaseModel):
     member_count: int = 0
     # 「数据量」口径：自选/规则/回测/三类策略配置，不含成员与通道（见 core.quota）。
     data_total: int = 0
+    # 预警外发消息模板；空 = 使用默认标题/正文。
+    message_template: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

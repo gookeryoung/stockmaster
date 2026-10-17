@@ -8,10 +8,12 @@
  * 界面按角色隐藏按钮，但**权限判断在服务端**：隐藏只是减少误点，不是安全边界。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { EChartsOption } from "echarts";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import EChart from "../components/EChart";
 import { formatDateTime } from "../format";
 import {
   ROLE_LABEL,
@@ -26,6 +28,12 @@ const ROLE_HINT: Record<WorkspaceRole, string> = {
   owner: "可改工作区信息、管理成员、转让所有权",
   editor: "可增删自选、预警规则与回测",
   viewer: "只读，不能修改任何数据",
+};
+
+const CHANNEL_KIND_LABEL: Record<WorkspaceChannelKind, string> = {
+  webhook: "Webhook",
+  bark: "Bark",
+  email: "邮件",
 };
 
 /** 用量与配额表：只读，所有成员可见。
@@ -306,12 +314,18 @@ export default function WorkspacePage() {
   const [channelKind, setChannelKind] = useState<WorkspaceChannelKind>("webhook");
   const [channelUrl, setChannelUrl] = useState("");
   const [channelEnabled, setChannelEnabled] = useState(true);
+  const [messageTemplate, setMessageTemplate] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
   const canManage = canManageWorkspace(current);
   const canWrite = canWriteWorkspace(current);
   const isAdmin = user?.role === "admin";
   const workspaceId = current?.id ?? null;
+
+  // 消息模板编辑态跟随当前工作区：切区、或服务端模板变化（保存后 refresh）时回填。
+  useEffect(() => {
+    setMessageTemplate(current?.message_template ?? "");
+  }, [current?.id, current?.message_template]);
 
   const members = useQuery({
     queryKey: ["workspace-members", workspaceId],
@@ -340,6 +354,56 @@ export default function WorkspacePage() {
     enabled: isAdmin && Boolean(config?.workspace_enabled),
     retry: false,
   });
+
+  // 用量趋势：每日快照；少于 2 个点时降级为提示文案，不画空图。
+  const usageHistory = useQuery({
+    queryKey: ["workspace-usage-history", workspaceId],
+    queryFn: () => api.workspaceUsageHistory(workspaceId as number),
+    enabled: workspaceId !== null,
+    retry: false,
+  });
+
+  const historyOption = useMemo<EChartsOption | null>(() => {
+    const points = usageHistory.data ?? [];
+    if (points.length < 2) return null;
+    return {
+      backgroundColor: "transparent",
+      tooltip: { trigger: "axis" },
+      legend: { data: ["数据量", "成员数"], textStyle: { color: "#94a3b8" } },
+      grid: { left: 48, right: 20, top: 32, bottom: 28 },
+      xAxis: {
+        type: "category",
+        data: points.map((point) => point.captured_on),
+        axisLabel: { color: "#94a3b8" },
+        axisLine: { lineStyle: { color: "#334155" } },
+      },
+      yAxis: {
+        type: "value",
+        minInterval: 1,
+        splitLine: { lineStyle: { color: "#1e293b" } },
+        axisLabel: { color: "#94a3b8" },
+      },
+      series: [
+        {
+          name: "数据量",
+          type: "line",
+          data: points.map((point) => point.data_total),
+          showSymbol: false,
+          smooth: true,
+          lineStyle: { color: "#38bdf8", width: 1.6 },
+          areaStyle: { color: "rgba(56,189,248,0.12)" },
+        },
+        {
+          name: "成员数",
+          type: "line",
+          data: points.map((point) => point.member_count),
+          showSymbol: false,
+          smooth: true,
+          lineStyle: { color: "#f59e0b", width: 1.4 },
+        },
+      ],
+    };
+  }, [usageHistory.data]);
 
   const flash = (text: string) => setMessage(text);
 
@@ -454,6 +518,24 @@ export default function WorkspacePage() {
       queryClient.invalidateQueries({ queryKey: ["workspaces-all"] });
     },
     onError: (error) => flash(`改名失败：${(error as Error).message}`),
+  });
+
+  // 预警消息模板：独立保存，避免和改名共用同一个 PATCH。
+  const saveTemplate = useMutation({
+    mutationFn: () =>
+      api.updateWorkspace(workspaceId as number, { message_template: messageTemplate }),
+    onSuccess: async (updated) => {
+      flash("已保存预警消息模板");
+      setMessageTemplate(updated.message_template ?? "");
+      await refresh();
+    },
+    onError: (error) => flash(`保存消息模板失败：${(error as Error).message}`),
+  });
+
+  // 用量 CSV 导出：后端返回附件，requestRaw 取 blob 后触发下载（同 downloadBackup）。
+  const exportUsage = useMutation({
+    mutationFn: () => api.downloadWorkspaceUsage(workspaceId as number),
+    onError: (error) => flash(`导出用量失败：${(error as Error).message}`),
   });
 
   const deleteWorkspace = useMutation({
@@ -650,17 +732,44 @@ export default function WorkspacePage() {
 
       {/* 用量与配额（只读，所有成员可见） */}
       <section className="card">
-        <div className="mb-2 flex items-baseline justify-between">
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold text-slate-100">
             用量与配额 · {current?.name ?? "未选择"}
           </h2>
-          <span className="text-xs text-slate-500">只读 · 达到上限时相关写入会被服务端拒绝</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500">只读 · 达到上限时相关写入会被服务端拒绝</span>
+            <button
+              className="btn px-2 py-1 text-xs"
+              disabled={workspaceId === null || exportUsage.isPending}
+              onClick={() => exportUsage.mutate()}
+              title="导出当前工作区的用量明细 CSV"
+            >
+              {exportUsage.isPending ? "导出中…" : "导出 CSV"}
+            </button>
+          </div>
         </div>
         {usage.isLoading && <p className="text-xs text-slate-500">用量加载中…</p>}
         {usage.isError && (
           <p className="text-xs text-slate-500">用量信息暂不可用，不影响页面其他操作。</p>
         )}
         {usage.data && <UsageTable data={usage.data} />}
+
+        <div className="mt-3 border-t border-slate-800 pt-3">
+          <div className="mb-1 flex items-baseline justify-between">
+            <span className="text-xs font-medium text-slate-300">近 30 天趋势</span>
+            <span className="text-[11px] text-slate-500">数据量 / 成员数</span>
+          </div>
+          {usageHistory.isLoading && <p className="text-xs text-slate-500">趋势加载中…</p>}
+          {usageHistory.isError && (
+            <p className="text-xs text-slate-500">趋势数据暂不可用。</p>
+          )}
+          {usageHistory.data && historyOption && (
+            <EChart option={historyOption} height={180} />
+          )}
+          {usageHistory.data && !historyOption && (
+            <p className="text-xs text-slate-500">趋势数据从每日快照开始积累（每日 17:30）。</p>
+          )}
+        </div>
       </section>
 
       {/* 当前工作区成员 */}
@@ -804,7 +913,7 @@ export default function WorkspacePage() {
               {(channels.data ?? []).map((row) => (
                 <tr key={row.id} className="border-b border-slate-800/50 last:border-0">
                   <td className="td font-medium text-slate-100">{row.name}</td>
-                  <td className="td text-slate-400">{row.kind === "bark" ? "Bark" : "Webhook"}</td>
+                  <td className="td text-slate-400">{CHANNEL_KIND_LABEL[row.kind] ?? row.kind}</td>
                   <td className="td font-mono text-xs text-slate-500">{row.url || "—"}</td>
                   <td className="td">
                     <span
@@ -896,16 +1005,21 @@ export default function WorkspacePage() {
               >
                 <option value="webhook">Webhook</option>
                 <option value="bark">Bark</option>
+                <option value="email">邮件（SMTP）</option>
               </select>
             </div>
             <div>
-              <label className="label">URL</label>
+              <label className="label">
+                {channelKind === "email" ? "收件人（逗号分隔）" : "URL"}
+              </label>
               <input
                 className="input w-96"
                 placeholder={
-                  channelKind === "bark"
-                    ? "https://api.day.app/你的Key"
-                    : "https://oapi.dingtalk.com/robot/send?access_token=..."
+                  channelKind === "email"
+                    ? "ops@example.com,team@example.com"
+                    : channelKind === "bark"
+                      ? "https://api.day.app/你的Key"
+                      : "https://oapi.dingtalk.com/robot/send?access_token=..."
                 }
                 value={channelUrl}
                 onChange={(event) => setChannelUrl(event.target.value)}
@@ -960,6 +1074,29 @@ export default function WorkspacePage() {
               保存
             </button>
           </form>
+
+          <div className="border-t border-slate-800 pt-3">
+            <label className="label">预警消息模板</label>
+            <textarea
+              className="input min-h-[76px] w-full font-mono text-xs"
+              value={messageTemplate}
+              onChange={(event) => setMessageTemplate(event.target.value)}
+              maxLength={1024}
+              placeholder="留空使用默认标题/正文，例如：【{level}】{title} - {code}"
+            />
+            <p className="mt-1 text-[11px] text-slate-500">
+              占位符：{"{title} {body} {code} {rule_id} {level}"}；模板作用于正文，标题保持原样；
+              留空 = 默认正文。
+            </p>
+            <button
+              className="btn mt-2"
+              type="button"
+              disabled={saveTemplate.isPending}
+              onClick={() => saveTemplate.mutate()}
+            >
+              {saveTemplate.isPending ? "保存中…" : "保存模板"}
+            </button>
+          </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t border-slate-800 pt-3">
             <span className="text-xs text-slate-500">

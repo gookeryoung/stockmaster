@@ -47,6 +47,7 @@ import type {
   WorkspaceMember,
   WorkspaceRole,
   WorkspaceUsage,
+  WorkspaceUsagePoint,
 } from "./types";
 
 export class ApiError extends Error {
@@ -254,13 +255,26 @@ export const api = {
   workspaces: (all = false) => request<Workspace[]>(`/workspaces${all ? "?all=true" : ""}`),
   createWorkspace: (payload: { name: string; description?: string }) =>
     request<Workspace>("/workspaces", { method: "POST", body: JSON.stringify(payload) }),
-  updateWorkspace: (id: number, payload: { name?: string; description?: string }) =>
+  updateWorkspace: (id: number, payload: { name?: string; description?: string; message_template?: string }) =>
     request<Workspace>(`/workspaces/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteWorkspace: (id: number, purge = false) =>
     request<{ status: string; purged: Record<string, number> }>(`/workspaces/${id}?purge=${purge}`, {
       method: "DELETE",
     }),
   workspaceStats: (id: number) => request<WorkspaceUsage>(`/workspaces/${id}/stats`),
+  workspaceUsageHistory: (id: number, days = 30) =>
+    request<WorkspaceUsagePoint[]>(`/workspaces/${id}/stats/history?days=${days}`),
+  downloadWorkspaceUsage: async (id: number) => {
+    const response = await requestRaw(`/workspaces/${id}/stats/export`);
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `workspace-${id}-usage.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
   workspaceMembers: (id: number) => request<WorkspaceMember[]>(`/workspaces/${id}/members`),
   workspaceCandidates: (id: number, search = "") =>
     request<WorkspaceMember[]>(`/workspaces/${id}/members/candidates?search=${encodeURIComponent(search)}`),

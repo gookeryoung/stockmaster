@@ -267,6 +267,7 @@ def run_job(
         "train": partial(tasks.job_train_models, horizon=horizon),
         "predict": partial(tasks.job_predict, horizon=horizon),
         "alerts": tasks.job_scan_alerts,
+        "workspace_usage": tasks.job_snapshot_workspace_usage,
         "snapshot": tasks.job_snapshot_poll,
         "pipeline": tasks.run_pipeline,
     }

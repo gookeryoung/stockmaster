@@ -520,6 +520,9 @@ class Workspace(Base):
     name: Mapped[str] = mapped_column(String(64))
     description: Mapped[str] = mapped_column(String(256), default="")
     kind: Mapped[str] = mapped_column(String(16), default="shared")  # personal | shared
+    # 预警外发消息模板（可选，工作区级）。空 = 使用默认 title/body；
+    # 支持 {title} {body} {code} {rule_id} {level} 占位符，见 alerts/services/channels.py。
+    message_template: Mapped[str] = mapped_column(Text, default="")
     # No FK cascade: the ``users`` table is created after this one and accounts are
     # never hard-deleted in practice. Orphaned owners are handled by the service.
     owner_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -631,6 +634,42 @@ class WorkspaceAlertPolicy(Base):
     once_per_day: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+# --------------------------------------------------------------------------- #
+# Workspace usage snapshots — daily history for the trend chart
+# --------------------------------------------------------------------------- #
+
+
+class WorkspaceUsageSnapshot(Base):
+    """工作区用量的每日快照（一行/工作区/天）。
+
+    为什么需要落到表里
+    -----------------
+    用量是实时计算出来的，没有历史就画不出趋势。每日调度任务在收盘后写一行，
+    ``(workspace_id, captured_on)`` 唯一，重复执行只更新当天那一行，不产生重复点。
+
+    只存展示需要的聚合值，不存明细：``data_total`` 与 ``quota.DATA_COUNTERS`` 同口径，
+    ``member_count`` 是成员数；分项（自选/规则/回测/配置）供 tooltip 或后续钻取。
+    工作区删除时级联清理。
+    """
+
+    __tablename__ = "workspace_usage_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    captured_on: Mapped[date] = mapped_column(Date, nullable=False)
+    data_total: Mapped[int] = mapped_column(Integer, default=0)
+    member_count: Mapped[int] = mapped_column(Integer, default=0)
+    watchlist_items: Mapped[int] = mapped_column(Integer, default=0)
+    alert_rules: Mapped[int] = mapped_column(Integer, default=0)
+    backtest_runs: Mapped[int] = mapped_column(Integer, default=0)
+    config_total: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "captured_on", name="uq_workspace_usage_snapshot_day"),
+        Index("ix_workspace_usage_snapshots_workspace", "workspace_id", "captured_on"),
+    )
 
 
 # --------------------------------------------------------------------------- #

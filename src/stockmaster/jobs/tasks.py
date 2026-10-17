@@ -28,6 +28,7 @@ __all__ = [
     "job_predict",
     "job_scan_alerts",
     "job_snapshot_poll",
+    "job_snapshot_workspace_usage",
     "job_sync_calendar",
     "job_sync_daily",
     "job_sync_instruments",
@@ -439,6 +440,23 @@ def job_snapshot_poll() -> dict:
     except Exception as exc:
         return {"job": "snapshot", "error": str(exc)[:200]}
     return {"job": "snapshot", "updated": len(snapshots)}
+
+
+# --------------------------------------------------------------------------- #
+# Workspace stats jobs
+# --------------------------------------------------------------------------- #
+
+
+def job_snapshot_workspace_usage() -> dict:
+    """Capture today's usage snapshot for every real workspace.
+
+    Feeds the workspace usage trend chart and CSV export. Idempotent per day:
+    re-running overwrites the same ``(workspace_id, captured_on)`` row rather than
+    adding a duplicate point.
+    """
+    from stockmaster.plugins.workspaces.services.usage_history import capture_all
+
+    return capture_all()
 
 
 # --------------------------------------------------------------------------- #

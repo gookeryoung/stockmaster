@@ -15,6 +15,8 @@ HTTPException」而写两遍。
 
 from __future__ import annotations
 
+import re
+from string import Formatter
 from urllib.parse import urlsplit
 
 from sqlalchemy import func, select, update
@@ -70,13 +72,20 @@ MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 256
 
 #: 工作区级通知通道支持的投递类型。webhook 是通用 JSON POST（钉钉/企微/Server酱
-#: 中转），bark 走 iOS 推送；新增类型时 ``alerts.services.channels.build_channel``
-#: 必须同步支持，否则通道能建出来却发不出去。
-CHANNEL_KINDS = ("webhook", "bark")
+#: 中转），bark 走 iOS 推送，email 走部署级 SMTP；新增类型时
+#: ``alerts.services.channels.build_channel`` 必须同步支持，否则通道能建出来却发不出去。
+CHANNEL_KINDS = ("webhook", "bark", "email")
 MAX_CHANNEL_NAME_LENGTH = 64
 MAX_CHANNEL_URL_LENGTH = 512
+MAX_EMAIL_RECIPIENTS = 10
+#: 简单邮箱校验：只排除明显非法的输入（无 @、空白、缺域名点），不做 RFC 5322 全集。
+_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 #: 短于这个长度的 URL 去掉主机名后没有可展示的信息，掩码直接整体打码。
 _CHANNEL_MASK_MIN_LENGTH = 16
+
+MAX_MESSAGE_TEMPLATE_LENGTH = 2000
+#: 消息模板允许的占位符（与 ``alerts.services.channels`` 的 format 调用一致）。
+_TEMPLATE_FIELDS = frozenset({"title", "body", "code", "rule_id", "level"})
 
 
 class WorkspaceError(Exception):
@@ -247,6 +256,46 @@ def _clean_name(name: str) -> str:
     return value
 
 
+def _clean_message_template(template: str) -> str:
+    """校验工作区预警消息模板；空串 = 清除（跟随默认标题/正文）。
+
+    用 ``string.Formatter().parse`` 静态校验占位符：只允许 ``{title}`` 等五个字段，
+    但允许格式说明符（``{title:>10}``）和转换符（``{body!r}``）。非法花括号与未知
+    字段写库前就 422，避免运行期才发现模板永远发不出去。
+    """
+    value = (template or "").strip()
+    if not value:
+        return ""
+    if len(value) > MAX_MESSAGE_TEMPLATE_LENGTH:
+        raise WorkspaceError(
+            f"消息模板最多 {MAX_MESSAGE_TEMPLATE_LENGTH} 个字符", status_code=422, code="invalid_template"
+        )
+    try:
+        parsed = list(Formatter().parse(value))
+    except ValueError as exc:  # 单个 { 或 } → ValueError
+        raise WorkspaceError(
+            "消息模板的占位符不合法（花括号未闭合）", status_code=422, code="invalid_template"
+        ) from exc
+
+    for _literal, field_name, _format_spec, conversion in parsed:
+        if field_name is None:
+            continue
+        if field_name not in _TEMPLATE_FIELDS:
+            options = " ".join(f"{{{field}}}" for field in sorted(_TEMPLATE_FIELDS))
+            raise WorkspaceError(
+                f"消息模板只支持 {options}，不支持：{{{field_name}}}",
+                status_code=422,
+                code="invalid_template",
+            )
+        if conversion not in (None, "r", "s", "a"):
+            raise WorkspaceError(
+                f"消息模板的转换符不支持：!{conversion}（只允许 !r / !s / !a）",
+                status_code=422,
+                code="invalid_template",
+            )
+    return value
+
+
 def create_workspace(
     session: Session,
     user: User,
@@ -276,12 +325,15 @@ def update_workspace(
     *,
     name: str | None = None,
     description: str | None = None,
+    message_template: str | None = None,
     commit: bool = True,
 ) -> Workspace:
     if name is not None:
         workspace.name = _clean_name(name)
     if description is not None:
         workspace.description = description.strip()[:MAX_DESCRIPTION_LENGTH]
+    if message_template is not None:
+        workspace.message_template = _clean_message_template(message_template)
     if commit:
         session.commit()
     return workspace
@@ -401,6 +453,38 @@ def _clean_channel_url(url: str) -> str:
     return value
 
 
+def _clean_channel_target(kind: str, target: str) -> str:
+    """按通道类型校验「目标」：webhook/bark 是 URL，email 是收件人串。"""
+    if kind == "email":
+        return _clean_email_recipients(target)
+    return _clean_channel_url(target)
+
+
+def _clean_email_recipients(target: str) -> str:
+    """校验并规范化邮件收件人：逗号/分号分隔、最多 10 个、总长 ≤512。
+
+    返回 ``"a@x.com, b@y.com"`` 形式的规范串——分号统一成逗号、去掉多余空白，
+    入库后投递端（``EmailChannel``）直接按逗号拆分即可。
+    """
+    value = (target or "").strip()
+    if not value:
+        raise WorkspaceError("邮件收件人不能为空", status_code=422, code="invalid_channel")
+    if len(value) > MAX_CHANNEL_URL_LENGTH:
+        raise WorkspaceError(f"邮件收件人最多 {MAX_CHANNEL_URL_LENGTH} 个字符", status_code=422, code="invalid_channel")
+    recipients = [item.strip() for item in value.replace(";", ",").split(",") if item.strip()]
+    if not recipients:
+        raise WorkspaceError("邮件收件人不能为空", status_code=422, code="invalid_channel")
+    if len(recipients) > MAX_EMAIL_RECIPIENTS:
+        raise WorkspaceError(f"邮件收件人最多 {MAX_EMAIL_RECIPIENTS} 个", status_code=422, code="invalid_channel")
+    for recipient in recipients:
+        if not _EMAIL_PATTERN.match(recipient):
+            raise WorkspaceError(f"邮件地址不合法：{recipient}", status_code=422, code="invalid_channel")
+    normalized = ", ".join(recipients)
+    if len(normalized) > MAX_CHANNEL_URL_LENGTH:
+        raise WorkspaceError(f"邮件收件人最多 {MAX_CHANNEL_URL_LENGTH} 个字符", status_code=422, code="invalid_channel")
+    return normalized
+
+
 def mask_url(url: str) -> str:
     """把含凭据的 URL 变成可展示的掩码：``scheme://主机/****最后4位``。
 
@@ -419,6 +503,22 @@ def mask_url(url: str) -> str:
     if scheme not in ("http", "https") or not parts.netloc or len(value) <= _CHANNEL_MASK_MIN_LENGTH:
         return "****"
     return f"{scheme}://{parts.netloc}/****{value[-4:]}"
+
+
+def mask_channel_target(kind: str, target: str) -> str:
+    """按通道类型掩码外发目标（email 逐个掩码，webhook/bark 复用 ``mask_url``）。"""
+    if kind != "email":
+        return mask_url(target)
+    masked = [_mask_email(item) for item in (target or "").replace(";", ",").split(",") if item.strip()]
+    return ", ".join(masked) if masked else "****"
+
+
+def _mask_email(address: str) -> str:
+    """``alice@example.com`` → ``a***@example.com``：保留首字母与域名，够区分即可。"""
+    local, sep, domain = address.strip().partition("@")
+    if not sep or not domain:
+        return "****"
+    return f"{local[:1]}***@{domain}"
 
 
 def _channel_name_taken(session: Session, workspace_id: int, name: str, *, exclude_id: int | None = None) -> bool:
@@ -449,14 +549,14 @@ def create_channel(
     """新建通道。重名返回 409（预检查 + 唯一约束兜并发）。"""
     cleaned_name = _clean_channel_name(name)
     channel_kind = _clean_channel_kind(kind)
-    channel_url = _clean_channel_url(url)
+    channel_target = _clean_channel_target(channel_kind, url)
     if _channel_name_taken(session, workspace.id, cleaned_name):
         raise _duplicate_channel(cleaned_name)
     channel = WorkspaceChannel(
         workspace_id=workspace.id,
         name=cleaned_name,
         kind=channel_kind,
-        url=channel_url,
+        url=channel_target,
         enabled=bool(enabled),
         created_by=created_by,
     )
@@ -482,7 +582,11 @@ def update_channel(
     enabled: bool | None = None,
     commit: bool = True,
 ) -> WorkspaceChannel:
-    """改通道。``url=None`` 表示保持原值——API 只返回掩码，前端回传不了明文地址。"""
+    """改通道。``url=None`` 表示保持原值——API 只返回掩码，前端回传不了明文地址。
+
+    ``kind`` 变更时即使没给新地址，也会用**现有**地址按新 kind 重新校验：email 的
+    收件人串与 webhook 的 URL 不通用，静默接受会让通道「建得出来但发不出去」。
+    """
     if channel.workspace_id != workspace.id:
         raise not_found("通知通道不存在")
     if name is not None:
@@ -493,9 +597,11 @@ def update_channel(
             raise _duplicate_channel(cleaned_name)
         channel.name = cleaned_name
     if kind is not None:
-        channel.kind = _clean_channel_kind(kind)
-    if url is not None:
-        channel.url = _clean_channel_url(url)
+        new_kind = _clean_channel_kind(kind)
+        channel.url = _clean_channel_target(new_kind, url if url is not None else channel.url)
+        channel.kind = new_kind
+    elif url is not None:
+        channel.url = _clean_channel_target(channel.kind, url)
     if enabled is not None:
         channel.enabled = bool(enabled)
     if commit:
@@ -743,6 +849,7 @@ __all__ = [
     "delete_workspace",
     "ensure_personal_workspace",
     "forbidden",
+    "mask_channel_target",
     "mask_url",
     "member_count",
     "member_of",
