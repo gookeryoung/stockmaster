@@ -1,6 +1,11 @@
 # 用户数据隔离设计
 
-> 状态：**已实施**（`0002_owner_columns` + 读写路径改造 + 交叉访问测试）。
+> **已被取代**：本文的 owner_id 用户级隔离已升级为 cndb 式工作区隔离
+> （Workspace + owner/editor/viewer 角色），现行设计见 **`docs/WORKSPACE.md`**。
+> 本文保留作为设计取舍的历史记录；`owner_id` 一律按现在的 `workspace_id` 理解。
+
+> 状态：**已实施**（`0002_owner_columns` + 读写路径改造 + 交叉访问测试）；
+> 其中归属列已在 `0003_workspaces` 改名并重新解释为 `workspace_id`。
 > 开关：`SM_DATA_ISOLATION`，默认 `false`（= 隔离前的共享语义），可随时回退。
 > 前置：账号体系（`backend/app/auth/`）已落地，`SM_AUTH_ENABLED` 控制是否强制登录。
 > 本文记录设计取舍；实际落地位置见 §9。

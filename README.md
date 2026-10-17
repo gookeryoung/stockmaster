@@ -399,7 +399,7 @@ uv run --with prek prek run --all-files   # 手动全量运行
 | `SM_DB_AUTO_MIGRATE` | true | 启动时自动迁移；设 false 则要求先 `db upgrade`（版本落后会告警） |
 | `SM_BACKUP_KEEP` | 7 | 本地备份保留份数，0 表示不清理 |
 | `SM_BACKUP_INCLUDE_SECRET` | true | 备份是否包含 `.auth_secret`（含则归档等同凭据） |
-| `SM_DATA_ISOLATION` | false | 自选股/预警/回测按账号隔离；false = 所有人共享一份（旧语义） |
+| `SM_DATA_ISOLATION` | false | 工作区隔离（owner/editor/viewer 角色，见 `docs/WORKSPACE.md`）；false = 所有人共享一份（旧语义） |
 
 ### 账号与微信登录
 
@@ -426,18 +426,35 @@ uv run stockmaster user add --username boss --role admin   # 打印随机初始�
 uv run stockmaster user list
 uv run stockmaster user passwd --username boss
 uv run stockmaster user role --username boss --status disabled
-uv run stockmaster user claim --username boss --dry-run   # 把未归属的历史数据交给某账号
+uv run stockmaster user claim --username boss --dry-run   # 把未归属的历史数据交给某账号（个人工作区）
+
+# 工作区（多人协作，见 docs/WORKSPACE.md）
+uv run stockmaster workspace list
+uv run stockmaster workspace create --name 团队池
+uv run stockmaster workspace add --id 2 --user bob --role editor
+uv run stockmaster workspace role --id 2 --user bob --role viewer
+uv run stockmaster workspace transfer --id 2 --user bob
+uv run stockmaster workspace claim --id 2 --dry-run       # 把未归属数据移交到共享工作区
 ```
 
-### 用户数据隔离
+### 工作区与数据隔离
 
 默认 `SM_DATA_ISOLATION=false`，所有人共享同一份自选股、预警规则与回测历史 —— 与引入账号体系
 之前的行为完全一致，单机升级后感受不到任何变化。
 
-多人使用时置 `true`：每个账号只看得到自己写的数据，别人的资源返回 404（不是 403，避免泄露
-id 是否存在）。隔离前写入的数据全部落在 `owner_id = 0`（「未归属」桶），开启隔离前用
-`stockmaster user claim --username <账号>` 移交；两边都有同名清单同一只股票时，只删除旧的无主
-副本、保留账号自己的备注。列与迁移始终存在，改回 `false` 即恢复共享语义，不需要回滚数据库。
+团队协作时置 `true`：数据按**工作区**归属（参考 cndb 设计），成员角色三级：
+
+- **owner**：读写 + 管理成员 + 改名/删除工作区 + 转让所有权；
+- **editor**：读写（自选、预警规则、回测、扫描），不能管理成员；
+- **viewer**：只读，写操作返回 403（响应头 `X-Auth-Error: read_only`），
+  页面上写按钮自动禁用并显示只读提示。
+
+每个账号升级后自动拥有一个「个人工作区」（存量数据按用户回填进去，无感迁移）；
+owner 可创建共享工作区并邀请成员。前端顶栏可随时切换工作区，请求自动携带
+`X-Workspace-Id`。跨工作区访问资源一律 404（不是 403，避免泄露 id 是否存在）。
+迁移前的历史数据落在 `workspace_id = 0`（「未归属」桶），用
+`stockmaster workspace claim --id <工作区>` 移交。列与迁移始终存在，改回 `false`
+即恢复共享语义，不需要回滚数据库。
 
 实现要点：密码用 PBKDF2-HMAC-SHA256（60 万轮，参数写在哈希内可平滑升级）；令牌为自签 HS256 JWT，
 `token_version` 随改密/禁用/退出登录递增，因此旧令牌立即失效；微信回调只把**一次性 ticket**

@@ -66,7 +66,7 @@ services:
       - SM_WECHAT_REDIRECT_URI=${SM_WECHAT_REDIRECT_URI:-}
       # SPA 对外地址（扫码回调后跳回），留空=同源自动推导
       - SM_AUTH_FRONTEND_BASE=${SM_AUTH_FRONTEND_BASE:-}
-      # 用户数据隔离；false = 所有人共享一份自选/预警/回测（旧语义）
+      # 工作区隔离（owner/editor/viewer，见 docs/WORKSPACE.md）；false = 共享一份（旧语义）
       - SM_DATA_ISOLATION=${SM_DATA_ISOLATION:-false}
       # ── 数据库迁移与备份 ──────────────────────────────────────
       # 启动自动迁移；设 false 则要求先执行 `python -m app.cli db upgrade`

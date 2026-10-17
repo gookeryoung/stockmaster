@@ -1,6 +1,6 @@
-# 实施计划：Alembic 迁移 · 用户隔离 · 备份恢复
+# 实施计划：Alembic 迁移 · 工作区隔离 · 备份恢复
 
-> 关联文档：`docs/USER_ISOLATION.md`（隔离的设计取舍）
+> 关联文档：`docs/WORKSPACE.md`（工作区隔离现行设计）、`docs/USER_ISOLATION.md`（历史设计取舍）
 > 本文只回答三件事：**现在做到哪、下一步做什么、每一步怎么验收和回滚**。
 
 ---
@@ -16,8 +16,9 @@
 | 备份体检（dry-run） | ✅ | `app/maintenance/inspect.py`、`--dry-run`、`POST /admin/restore/inspect` |
 | 恢复（含预备份 / 恢复后迁移） | ✅ | `app/maintenance/restore.py`、`stockmaster restore` |
 | 备份管理 API + 设置页入口 | ✅ | `api/v1/admin.py`、`components/BackupPanel.tsx` |
-| 用户数据隔离（PR-1 / PR-2） | ✅ 已完成，默认关闭 | `0002_owner_columns`、`app/db/scoped.py`、`tests/test_isolation.py` |
-| 按用户通知投递 / 配额 | ❌ 未开始 | `USER_ISOLATION.md` §8 |
+| 用户隔离 PR-1 / PR-2（owner_id，已被 0003 取代） | ✅ 已完成 | `0002_owner_columns`、`tests/test_isolation.py` |
+| 工作区隔离（Workspace + owner/editor/viewer） | ✅ 已完成，默认关闭 | `0003_workspaces`、`app/workspace/`、`tests/test_workspace.py`、见 `WORKSPACE.md` |
+| 按工作区通知投递 / 配额 | ❌ 未开始 | `WORKSPACE.md` §11 |
 
 ### 关键设计决定（已落地，改动前先读）
 
@@ -48,10 +49,11 @@ P0 基础设施（已完成）
  └─ 备份 / 恢复 / 体检 / 审计 / 保留策略
         │
         ▼
-P1 用户隔离（已完成）
+P1 数据隔离（已完成）
  ├─ PR-1 加归属列 + 0002 迁移 + 写入记录（行为不变，可灰度）
- ├─ PR-2 读路径隔离 + 预警引擎按 owner 解析 + 测试矩阵
- └─ 待办：按用户通知通道、管理员统计列、配额
+ ├─ PR-2 读路径隔离 + 预警引擎按归属解析 + 测试矩阵
+ ├─ PR-3 升级为工作区隔离：0003 迁移 + owner/editor/viewer 角色 + 成员管理
+ └─ 待办：按工作区通知通道、管理员统计列、配额
         │
         ▼
 P2 备份自动化（1 个 PR）
@@ -148,6 +150,30 @@ B 的 `scope=watchlist` 规则只命中 B 的自选；匿名（`SM_AUTH_ENABLED=
 
 **回滚**：`SM_DATA_ISOLATION=false` 立即回到共享语义（列还在，无害）。
 
+### PR-3：升级为工作区隔离（owner/editor/viewer）—— ✅ 已完成
+
+> 设计细节见 `WORKSPACE.md`。核心变化：归属列 `owner_id` 改名并重新解释为
+> `workspace_id`，账号模型换成 cndb 式 `Workspace` + `WorkspaceMember(role)`。
+
+| 文件 | 改动 |
+|---|---|
+| `backend/migrations/versions/0003_workspaces.py` | 幂等迁移：`owner_id` 改名 `workspace_id`、建 `workspaces`/`workspace_members`、按用户回填个人工作区、重建索引与 `uq_watchlist_item` |
+| `backend/app/db/models.py` | `WORKSPACE_UNASSIGNED = 0`；Workspace / WorkspaceMember 模型 |
+| `backend/app/workspace/`（新增） | `roles.py`（ROLE_RANK / at_least，未知角色拒绝）、`service.py`（成员管理、最后 owner 保护、所有权转让、认领）、`deps.py`（`current_workspace` / `require_editor`，解析 `X-Workspace-Id`） |
+| `backend/app/db/scoped.py` | `owned_*` 重写为 `in_workspace()` / `get_in_workspace_or_404()` |
+| `api/v1/{system,alerts,backtest}.py` | 读端点 `current_workspace`、写端点 `require_editor`；`/alerts/preview` 保持只读可用 |
+| `alert/engine.py` / `jobs/tasks.py` | watchlist 按 `(rule.workspace_id, list_name)` 解析；调度器取全站并集 |
+| `api/v1/workspaces.py`（新增） | 工作区与成员 CRUD、候选列表、所有权转让 |
+| `backend/app/cli.py` | `stockmaster workspace list/create/add/role/remove/transfer/claim`；`user claim` 委托为个人工作区认领 |
+| frontend | zustand workspace store + `X-Workspace-Id` 头 + 切换器 + `/workspace` 成员管理页 + viewer 只读态 |
+
+**验收**：`tests/test_workspace.py`（角色矩阵：viewer 403 + `X-Auth-Error: read_only`、
+editor 不可管成员、最后 owner 保护、跨工作区 404、转让）；`tests/test_isolation.py`
+重写为两个工作区交叉访问；存量库模拟验证 0003 回填正确、`schema_drift()` 为空。
+
+**回滚**：`SM_DATA_ISOLATION=false`（迁移不回滚 —— 列名变化无害，旧代码读不到
+`owner_id` 才是问题，因此代码回滚需连 `git revert` 一起做）。
+
 ---
 
 ## 4. P2 备份自动化
@@ -202,7 +228,7 @@ SM_DATA_DIR=/tmp/drill python -m app.cli restore ~/backups/xxx.tar.gz --force
 | `SM_DB_AUTO_MIGRATE` | `true` | 启动自动迁移；设 false 则要求先 `db upgrade`（版本落后会告警） |
 | `SM_BACKUP_KEEP` | `7` | 本地备份保留份数，`0` 不清理 |
 | `SM_BACKUP_INCLUDE_SECRET` | `true` | 归档是否含 `.auth_secret` |
-| `SM_DATA_ISOLATION` | `false` | 自选/预警/回测是否按账号隔离；`false` = 共享语义 |
+| `SM_DATA_ISOLATION` | `false` | 工作区隔离（owner/editor/viewer）；`false` = 共享语义 |
 
 > `docker-compose.prod.yml` 逐项列出 environment，新增变量**必须**同步进去，否则传不进容器。
 > 以上（含 `SM_DATA_ISOLATION`）已逐项写进 `docker-compose.prod.yml` 的 environment。
@@ -226,6 +252,6 @@ SM_DATA_DIR=/tmp/drill python -m app.cli restore ~/backups/xxx.tar.gz --force
 
 ## 7. 未决项
 
-1. 隔离是否需要「共享清单」（团队公用一份 `default`）：默认按纯私有实施，`owner_id=0` 可复用为全员可见。
-2. 回测结果是否支持发链接共享：需要 `visibility` + `share_token`，而不是放宽 owner 过滤。
+1. 工作区是否需要「共享清单」可见性细分（当前：同工作区成员全量共享，角色只分读写）。
+2. 回测结果是否支持发链接共享：需要 `visibility` + `share_token`，而不是放宽工作区过滤。
 3. 备份是否异地留存（COS）：等本地轮转稳定运行一段时间再评估。

@@ -63,6 +63,16 @@ API 参考
    :members:
    :undoc-members:
 
+工作区与隔离
+~~~~~~~~~~~~
+
+cndb 式工作区（owner/editor/viewer 角色），``SM_DATA_ISOLATION=true`` 时启用；
+设计见 ``docs/WORKSPACE.md``。
+
+.. automodule:: app.workspace
+   :members:
+   :undoc-members:
+
 .. automodule:: app.api
    :members:
    :undoc-members:
