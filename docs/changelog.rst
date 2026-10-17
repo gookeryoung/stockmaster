@@ -4,6 +4,21 @@
 完整版本历史与分发包见 GitHub Releases：
 https://github.com/gookeryoung/stockmaster/releases
 
+v0.3.0
+------
+
+- 工作区级通知通道：Webhook / Bark / 邮件（SMTP）按工作区路由投递，owner 管理、
+  成员只读（地址脱敏）；全局 webhook 只服务未归属数据或显式 fallback。
+- 按工作区消息模板：``workspaces.message_template``，支持
+  ``{title} {body} {code} {rule_id} {level}``，非法模板 422 拒绝。
+- 工作区用量统计与可选配额：``GET /workspaces/{id}/stats``、``SM_WORKSPACE_MAX_*``
+  写路径超限 409；用户页数据概览、管理员用户统计列与「全部工作区」总览。
+- 工作区级预警参数覆盖（只收紧：排除 ST / 最低成交额 / 冷却 / 每日一次），
+  owner 配置、扫描与去重生效。
+- 用量趋势：每日 ``workspace_usage`` 快照、``/stats/history`` 与 CSV ``/stats/export``。
+- 明确取消「共享清单可见性细分」与「回测分享链接」两个方向。
+- 版本号与 ``uv.lock`` 保持同步。
+
 v0.2.0
 ------
 
