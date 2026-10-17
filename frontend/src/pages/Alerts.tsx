@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
 import type { RuleTypeInfo } from "../types";
 
 export default function Alerts() {
   const queryClient = useQueryClient();
+  const workspace = useCurrentWorkspace();
+  const readOnly = !canWriteWorkspace(workspace);
   const [statusFilter, setStatusFilter] = useState("");
   const [form, setForm] = useState({
     name: "新预警规则",
@@ -108,7 +111,16 @@ export default function Alerts() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <button className="btn btn-primary" onClick={() => scan.mutate()} disabled={scan.isPending}>
+        {readOnly && (
+          <span className="text-xs text-amber-300">
+            当前工作区为只读角色（viewer），规则与触发记录不可修改，仅可预览。
+          </span>
+        )}
+        <button
+          className="btn btn-primary"
+          onClick={() => scan.mutate()}
+          disabled={scan.isPending || readOnly}
+        >
           {scan.isPending ? "扫描中…" : "立即扫描"}
         </button>
         <button className="btn" onClick={() => preview.mutate()} disabled={preview.isPending}>
@@ -245,7 +257,7 @@ export default function Alerts() {
         <button
           className="btn btn-primary"
           onClick={() => createRule.mutate()}
-          disabled={createRule.isPending}
+          disabled={createRule.isPending || readOnly}
         >
           {createRule.isPending ? "创建中…" : "创建规则"}
         </button>
@@ -297,13 +309,15 @@ export default function Alerts() {
                     </td>
                     <td className="td text-right">
                       <button
-                        className="mr-2 text-xs text-sky-400 hover:underline"
+                        className="mr-2 text-xs text-sky-400 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={readOnly}
                         onClick={() => toggleRule.mutate({ id: rule.id, enabled: !rule.enabled })}
                       >
                         {rule.enabled ? "停用" : "启用"}
                       </button>
                       <button
-                        className="text-xs text-red-400 hover:underline"
+                        className="text-xs text-red-400 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={readOnly}
                         onClick={() => deleteRule.mutate(rule.id)}
                       >
                         删除
@@ -370,13 +384,15 @@ export default function Alerts() {
                     </td>
                     <td className="td text-right">
                       <button
-                        className="mr-2 text-xs text-sky-400 hover:underline"
+                        className="mr-2 text-xs text-sky-400 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={readOnly}
                         onClick={() => updateTrigger.mutate({ id: trigger.id, status: "read" })}
                       >
                         已读
                       </button>
                       <button
-                        className="text-xs text-slate-400 hover:underline"
+                        className="text-xs text-slate-400 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={readOnly}
                         onClick={() => updateTrigger.mutate({ id: trigger.id, status: "muted" })}
                       >
                         静音

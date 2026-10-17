@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import StatusBar from "./StatusBar";
 import { canManageUsers, requiresLogin, useAuth } from "./auth";
+import { ROLE_LABEL, useWorkspace } from "./workspace";
 import Dashboard from "./pages/Dashboard";
 import Market from "./pages/Market";
 import Analyze from "./pages/Analyze";
@@ -13,6 +14,7 @@ import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
 import Account from "./pages/Account";
 import Users from "./pages/Users";
+import WorkspacePage from "./pages/Workspace";
 
 export default function App() {
   const ready = useAuth((state) => state.ready);
@@ -59,6 +61,21 @@ function Layout() {
   const config = useAuth((state) => state.config);
   const user = useAuth((state) => state.user);
   const showUsers = canManageUsers(config, user);
+  const workspacesEnabled = Boolean(config?.workspace_enabled && user);
+  const currentId = useWorkspace((state) => state.currentId);
+  const refreshWorkspaces = useWorkspace((state) => state.refresh);
+  const resetWorkspaces = useWorkspace((state) => state.reset);
+
+  // 登录态变化时重新拉取「我的工作区」。换账号必须重置，否则会带着上一个人的
+  // 工作区 id 发请求（后端只会 404，但界面会一直在报错）。
+  const userId = user?.id ?? null;
+  useEffect(() => {
+    if (!workspacesEnabled || userId === null) {
+      resetWorkspaces();
+      return;
+    }
+    void refreshWorkspaces();
+  }, [workspacesEnabled, userId, refreshWorkspaces, resetWorkspaces]);
 
   const nav = [
     { to: "/", label: "总览" },
@@ -68,6 +85,7 @@ function Layout() {
     { to: "/backtest", label: "回测" },
     { to: "/alerts", label: "预警" },
     { to: "/settings", label: "设置" },
+    ...(workspacesEnabled ? [{ to: "/workspace", label: "工作区" }] : []),
     ...(showUsers ? [{ to: "/users", label: "用户" }] : []),
   ];
 
@@ -108,11 +126,13 @@ function Layout() {
             <UserMenu />
           </div>
         </div>
+        <WorkspaceBar />
         <StatusBar />
       </header>
 
       <main className="flex-1 overflow-auto p-3 sm:p-4">
-        <Routes>
+        {/* 换工作区 = 换数据源：用 key 强制整棵路由子树重挂载，所有 useQuery 自动重取。 */}
+        <Routes key={currentId ?? "local"}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/market" element={<Market />} />
           <Route path="/analyze" element={<Analyze />} />
@@ -120,6 +140,7 @@ function Layout() {
           <Route path="/backtest" element={<Backtest />} />
           <Route path="/alerts" element={<Alerts />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/workspace" element={<WorkspacePage />} />
           <Route path="/account" element={<Account />} />
           {showUsers && <Route path="/users" element={<Users />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -129,6 +150,51 @@ function Layout() {
       <footer className="border-t border-slate-800 px-3 py-2 text-[11px] text-slate-500 sm:px-4 sm:text-xs">
         本工作台为量化研究工具，不构成投资建议。历史回测与模型预测均不代表未来收益。
       </footer>
+    </div>
+  );
+}
+
+/** 工作区切换器：只在数据按工作区隔离、且已登录时出现。 */
+function WorkspaceBar() {
+  const config = useAuth((state) => state.config);
+  const user = useAuth((state) => state.user);
+  const list = useWorkspace((state) => state.list);
+  const currentId = useWorkspace((state) => state.currentId);
+  const select = useWorkspace((state) => state.select);
+  const loading = useWorkspace((state) => state.loading);
+
+  if (!config?.workspace_enabled || !user) return null;
+
+  const current = list.find((row) => row.id === currentId) ?? null;
+  const tone =
+    current?.role === "viewer"
+      ? "bg-amber-900/50 text-amber-300"
+      : current?.role === "owner"
+        ? "bg-emerald-900/50 text-emerald-300"
+        : "bg-sky-900/50 text-sky-300";
+
+  return (
+    <div className="flex items-center gap-2 border-t border-slate-800/60 px-3 py-1.5 text-xs sm:px-4">
+      <span className="shrink-0 text-slate-500">工作区</span>
+      <select
+        className="input max-w-[12rem] py-1 text-xs"
+        value={currentId ?? ""}
+        onChange={(event) => select(Number(event.target.value))}
+        disabled={loading || list.length === 0}
+      >
+        {list.length === 0 && <option value="">（加载中）</option>}
+        {list.map((row) => (
+          <option key={row.id} value={row.id}>
+            {row.name}
+            {row.kind === "personal" ? "（个人）" : ""}
+          </option>
+        ))}
+      </select>
+      {current && <span className={`badge shrink-0 ${tone}`}>{ROLE_LABEL[current.role] ?? current.role}</span>}
+      {current?.role === "viewer" && <span className="shrink-0 text-amber-400/90">只读</span>}
+      <Link to="/workspace" className="ml-auto shrink-0 text-sky-400 hover:text-sky-300">
+        成员与设置
+      </Link>
     </div>
   );
 }

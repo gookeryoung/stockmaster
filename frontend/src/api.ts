@@ -30,6 +30,9 @@ import type {
   TradeOut,
   UserPage,
   WatchlistItem,
+  Workspace,
+  WorkspaceMember,
+  WorkspaceRole,
 } from "./types";
 
 export class ApiError extends Error {
@@ -49,6 +52,40 @@ const BASE = "/api/v1";
 /** Where the access token lives. localStorage (not a cookie) keeps the API
  * CSRF-free: a cross-site form cannot set an Authorization header. */
 const TOKEN_KEY = "sm.auth.token";
+
+/** Which workspace the data endpoints operate on.
+ *
+ * Sent as a header rather than baked into every URL: switching workspaces is then a
+ * single state change instead of a site-wide link rewrite. The backend resolves the
+ * caller's personal workspace when the header is absent.
+ */
+const WORKSPACE_KEY = "sm.workspace.id";
+
+let workspaceId: string | null = null;
+try {
+  workspaceId = localStorage.getItem(WORKSPACE_KEY);
+} catch {
+  workspaceId = null;
+}
+
+export function getWorkspaceId(): number | null {
+  const parsed = Number(workspaceId);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function setWorkspaceId(id: number | null): void {
+  workspaceId = id && id > 0 ? String(id) : null;
+  try {
+    if (workspaceId) localStorage.setItem(WORKSPACE_KEY, workspaceId);
+    else localStorage.removeItem(WORKSPACE_KEY);
+  } catch {
+    // ignore storage failures; the in-memory copy still works for this tab
+  }
+}
+
+function workspaceHeader(): Record<string, string> {
+  return workspaceId ? { "X-Workspace-Id": workspaceId } : {};
+}
 
 let token: string | null = null;
 try {
@@ -76,7 +113,7 @@ export function setAuthToken(next: string | null): void {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...workspaceHeader() };
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const response = await fetch(`${BASE}${path}`, {
@@ -123,7 +160,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * still drops the session instead of leaving the UI "logged in".
  */
 async function requestRaw(path: string, init?: RequestInit): Promise<Response> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...workspaceHeader() };
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const response = await fetch(`${BASE}${path}`, {
@@ -198,6 +235,37 @@ export const api = {
     }),
   deleteUser: (id: number) => request<void>(`/users/${id}`, { method: "DELETE" }),
   auditLogs: (limit = 100) => request<AuditLog[]>(`/users/audit-logs?limit=${limit}`),
+
+  // --- workspaces (isolation boundary + roles) ---
+  workspaces: (all = false) => request<Workspace[]>(`/workspaces${all ? "?all=true" : ""}`),
+  createWorkspace: (payload: { name: string; description?: string }) =>
+    request<Workspace>("/workspaces", { method: "POST", body: JSON.stringify(payload) }),
+  updateWorkspace: (id: number, payload: { name?: string; description?: string }) =>
+    request<Workspace>(`/workspaces/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteWorkspace: (id: number, purge = false) =>
+    request<{ status: string; purged: Record<string, number> }>(`/workspaces/${id}?purge=${purge}`, {
+      method: "DELETE",
+    }),
+  workspaceMembers: (id: number) => request<WorkspaceMember[]>(`/workspaces/${id}/members`),
+  workspaceCandidates: (id: number, search = "") =>
+    request<WorkspaceMember[]>(`/workspaces/${id}/members/candidates?search=${encodeURIComponent(search)}`),
+  addWorkspaceMember: (id: number, username: string, role: WorkspaceRole) =>
+    request<WorkspaceMember>(`/workspaces/${id}/members`, {
+      method: "POST",
+      body: JSON.stringify({ username, role }),
+    }),
+  updateWorkspaceMember: (id: number, userId: number, role: WorkspaceRole) =>
+    request<WorkspaceMember>(`/workspaces/${id}/members/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+  removeWorkspaceMember: (id: number, userId: number) =>
+    request<void>(`/workspaces/${id}/members/${userId}`, { method: "DELETE" }),
+  transferWorkspace: (id: number, userId: number) =>
+    request<WorkspaceMember>(`/workspaces/${id}/transfer`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    }),
 
   // --- admin: system backup / restore ---
   backups: () => request<BackupList>("/admin/backups"),

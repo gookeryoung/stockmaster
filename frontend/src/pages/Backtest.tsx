@@ -4,6 +4,7 @@ import type { EChartsOption } from "echarts";
 import { api } from "../api";
 import EChart from "../components/EChart";
 import { formatNumber, formatPct, sideColor, todayISO, yearsAgoISO } from "../format";
+import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
 import type { BacktestResponse } from "../types";
 
 const STRATEGIES = [
@@ -14,6 +15,8 @@ const STRATEGIES = [
 ];
 
 export default function Backtest() {
+  const workspace = useCurrentWorkspace();
+  const readOnly = !canWriteWorkspace(workspace);
   const [strategy, setStrategy] = useState("buy_hold");
   const [codes, setCodes] = useState("600519.SH");
   const [start, setStart] = useState(yearsAgoISO(2));
@@ -199,7 +202,16 @@ export default function Backtest() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button className="btn btn-primary" onClick={() => run.mutate()} disabled={run.isPending}>
+          {readOnly && (
+            <span className="text-xs text-amber-300">
+              当前工作区为只读角色（viewer），仅可查看历史回测，不能发起回测。
+            </span>
+          )}
+          <button
+            className="btn btn-primary"
+            onClick={() => run.mutate()}
+            disabled={run.isPending || readOnly}
+          >
             {run.isPending ? "回测中…" : "开始回测"}
           </button>
           <span className="text-xs text-slate-500">

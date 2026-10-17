@@ -247,7 +247,33 @@ export interface AuthConfig {
   wechat_enabled: boolean;
   wechat_mode: string;
   has_users: boolean;
+  /** 数据是否按工作区隔离；关闭时所有人共享一份数据，不显示工作区入口。 */
+  workspace_enabled: boolean;
   version: string;
+}
+
+export type WorkspaceRole = "owner" | "editor" | "viewer";
+
+export interface Workspace {
+  id: number;
+  name: string;
+  description: string;
+  kind: "personal" | "shared";
+  owner_id: number | null;
+  /** 当前账号在该工作区的角色（不是工作区的「主所有者」）。 */
+  role: WorkspaceRole;
+  member_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface WorkspaceMember {
+  user_id: number;
+  username: string;
+  nickname: string;
+  avatar_url: string;
+  role: WorkspaceRole;
+  joined_at: string | null;
 }
 
 export interface TokenResponse {
