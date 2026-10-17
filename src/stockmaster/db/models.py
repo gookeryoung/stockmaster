@@ -594,6 +594,46 @@ class WorkspaceChannel(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Workspace alert policy — workspace-level overrides for alert evaluation
+# --------------------------------------------------------------------------- #
+
+
+class WorkspaceAlertPolicy(Base):
+    """工作区级预警参数覆盖（可选，一行/工作区）。
+
+    为什么是「只收紧」的覆盖
+    ----------------------
+    单条规则自己已经能设 ``exclude_st`` / ``min_amount`` / ``cooldown_seconds`` /
+    ``once_per_day``。工作区策略是团队层面的安全阀：owner 可以要求「本工作区所有提醒
+    都排除 ST」「成交额低于 X 不提醒」「冷却至少 N 秒」，但**不能**把某条规则显式
+    设置的严格值放宽 —— 否则工作区策略会变成绕过规则设置的后门。
+
+    因此有效值统一按「规则与策略取更严格者」计算（见
+    ``plugins/alerts/services/policy.py``）：
+
+    * ``exclude_st``：任一为 True 即排除；
+    * ``min_amount``：取较大值；
+    * ``cooldown_seconds``：取较大值；
+    * ``once_per_day``：任一为 True 即启用。
+
+    字段为 ``NULL`` = 该维度不覆盖（跟随规则）；无行 = 全部跟随规则。
+    ``workspace_id`` 既是主键也是外键：一个工作区最多一行，删除工作区时级联清理。
+    """
+
+    __tablename__ = "workspace_alert_policies"
+
+    workspace_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    exclude_st: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    min_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cooldown_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    once_per_day: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+# --------------------------------------------------------------------------- #
 # Strategy configuration — workspace-scoped presets (选股 / 样本 / 算法)
 # --------------------------------------------------------------------------- #
 

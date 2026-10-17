@@ -120,7 +120,44 @@ class WorkspaceUsageOut(BaseModel):
     total: int
 
 
+class AlertPolicyEffectiveOut(BaseModel):
+    """工作区策略与规则合并后的有效值（NULL 已归一）。"""
+
+    exclude_st: bool
+    min_amount: float
+    cooldown_seconds: int
+    once_per_day: bool
+
+
+class AlertPolicyIn(BaseModel):
+    """PUT 工作区预警策略：字段全为 None / 未提供 = 重置（删除策略行）。
+
+    非 None 的维度写入覆盖；单个字段为 None 表示「该维度跟随规则」。策略只能收紧
+    不能放宽，合并规则见 ``plugins/alerts/services/policy.py``。
+    """
+
+    exclude_st: bool | None = None
+    min_amount: float | None = Field(default=None, ge=0, le=1_000_000_000)
+    cooldown_seconds: int | None = Field(default=None, ge=0, le=30 * 24 * 3600)
+    once_per_day: bool | None = None
+
+
+class AlertPolicyOut(BaseModel):
+    """策略行原值（未设置 = null）与当前有效值。"""
+
+    workspace_id: int
+    exclude_st: bool | None = None
+    min_amount: float | None = None
+    cooldown_seconds: int | None = None
+    once_per_day: bool | None = None
+    updated_at: datetime | None = None
+    effective: AlertPolicyEffectiveOut
+
+
 __all__ = [
+    "AlertPolicyEffectiveOut",
+    "AlertPolicyIn",
+    "AlertPolicyOut",
     "ChannelIn",
     "ChannelUpdate",
     "MemberIn",

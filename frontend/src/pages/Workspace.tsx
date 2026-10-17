@@ -8,10 +8,11 @@
  * 界面按角色隐藏按钮，但**权限判断在服务端**：隐藏只是减少误点，不是安全边界。
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { formatDateTime } from "../format";
 import {
   ROLE_LABEL,
   canManageWorkspace,
@@ -81,6 +82,212 @@ function UsageTable({ data }: { data: WorkspaceUsage }) {
   );
 }
 
+/** 工作区级预警策略：成员只读「生效值」，owner 可覆盖。
+ *
+ * 四个字段为 null 表示「跟随规则」；策略只收紧、不放宽，所以两个布尔项只有
+ * 「跟随规则 / 强制开启」两种选择。空数字输入同样表示跟随规则。
+ */
+function AlertPolicySection({
+  workspaceId,
+  canManage,
+  onFlash,
+}: {
+  workspaceId: number;
+  canManage: boolean;
+  onFlash: (text: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const policy = useQuery({
+    queryKey: ["alert-policy", workspaceId],
+    queryFn: () => api.alertPolicy(workspaceId),
+    // 表单会用返回数据回填；避免窗口重新聚焦时的静默重取覆盖正在编辑的内容。
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+
+  const [excludeSt, setExcludeSt] = useState<"follow" | "force">("follow");
+  const [oncePerDay, setOncePerDay] = useState<"follow" | "force">("follow");
+  const [minAmount, setMinAmount] = useState("");
+  const [cooldownSeconds, setCooldownSeconds] = useState("");
+
+  useEffect(() => {
+    const data = policy.data;
+    if (!data) return;
+    setExcludeSt(data.exclude_st ? "force" : "follow");
+    setOncePerDay(data.once_per_day ? "force" : "follow");
+    setMinAmount(data.min_amount === null ? "" : String(data.min_amount));
+    setCooldownSeconds(data.cooldown_seconds === null ? "" : String(data.cooldown_seconds));
+  }, [policy.data]);
+
+  const parseOptionalNumber = (value: string): number | null => {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.updateAlertPolicy(workspaceId, {
+        exclude_st: excludeSt === "force" ? true : null,
+        once_per_day: oncePerDay === "force" ? true : null,
+        min_amount: parseOptionalNumber(minAmount),
+        cooldown_seconds: parseOptionalNumber(cooldownSeconds),
+      }),
+    onSuccess: () => {
+      onFlash("预警策略已保存");
+      queryClient.invalidateQueries({ queryKey: ["alert-policy", workspaceId] });
+    },
+    onError: (error) => onFlash(`保存预警策略失败：${(error as Error).message}`),
+  });
+
+  const reset = useMutation({
+    mutationFn: () =>
+      api.updateAlertPolicy(workspaceId, {
+        exclude_st: null,
+        once_per_day: null,
+        min_amount: null,
+        cooldown_seconds: null,
+      }),
+    onSuccess: () => {
+      onFlash("预警策略已重置为跟随规则");
+      queryClient.invalidateQueries({ queryKey: ["alert-policy", workspaceId] });
+    },
+    onError: (error) => onFlash(`重置预警策略失败：${(error as Error).message}`),
+  });
+
+  return (
+    <section className="card">
+      <div className="mb-2">
+        <h2 className="text-sm font-semibold text-slate-100">预警策略</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          策略只收紧、不放宽：与规则自身设置取更严格者。未覆盖的项跟随规则自身设置。
+        </p>
+      </div>
+
+      {policy.isLoading && <p className="text-xs text-slate-500">预警策略加载中…</p>}
+      {policy.isError && (
+        <p className="text-xs text-slate-500">预警策略暂不可用，不影响其他功能。</p>
+      )}
+
+      {policy.data && (
+        <div className="table-wrap">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-slate-800">
+                <th className="th">生效参数</th>
+                <th className="th">生效值</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-slate-800/50">
+                <td className="td text-slate-300">排除 ST</td>
+                <td className="td text-slate-300">
+                  {policy.data.effective.exclude_st ? "排除" : "不排除"}
+                </td>
+              </tr>
+              <tr className="border-b border-slate-800/50">
+                <td className="td text-slate-300">单笔最低成交额</td>
+                <td className="td text-slate-300">
+                  {policy.data.effective.min_amount > 0
+                    ? `${policy.data.effective.min_amount.toLocaleString()} 元`
+                    : "不限"}
+                </td>
+              </tr>
+              <tr className="border-b border-slate-800/50">
+                <td className="td text-slate-300">冷却时间</td>
+                <td className="td text-slate-300">
+                  {policy.data.effective.cooldown_seconds > 0
+                    ? `${policy.data.effective.cooldown_seconds} 秒`
+                    : "不限制"}
+                </td>
+              </tr>
+              <tr className="last:border-0">
+                <td className="td text-slate-300">每日最多一次</td>
+                <td className="td text-slate-300">
+                  {policy.data.effective.once_per_day ? "是" : "否"}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {canManage && (
+        <form
+          className="mt-3 flex flex-wrap items-end gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            save.mutate();
+          }}
+        >
+          <div>
+            <label className="label">排除 ST</label>
+            <select
+              className="input"
+              value={excludeSt}
+              onChange={(event) => setExcludeSt(event.target.value as "follow" | "force")}
+            >
+              <option value="follow">跟随规则</option>
+              <option value="force">强制排除 ST</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">每日最多一次</label>
+            <select
+              className="input"
+              value={oncePerDay}
+              onChange={(event) => setOncePerDay(event.target.value as "follow" | "force")}
+            >
+              <option value="follow">跟随规则</option>
+              <option value="force">每天最多一次</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">最低成交额（元）</label>
+            <input
+              className="input w-36"
+              type="number"
+              min={0}
+              placeholder="留空=跟随规则"
+              value={minAmount}
+              onChange={(event) => setMinAmount(event.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label">冷却时间（秒）</label>
+            <input
+              className="input w-36"
+              type="number"
+              min={0}
+              placeholder="留空=跟随规则"
+              value={cooldownSeconds}
+              onChange={(event) => setCooldownSeconds(event.target.value)}
+            />
+          </div>
+          <button className="btn btn-primary" disabled={save.isPending}>
+            保存
+          </button>
+          <button
+            className="btn"
+            type="button"
+            disabled={reset.isPending}
+            onClick={() => {
+              if (window.confirm("重置为跟随规则？")) reset.mutate();
+            }}
+          >
+            重置
+          </button>
+        </form>
+      )}
+
+      {!canManage && (
+        <p className="mt-3 text-xs text-slate-500">只有所有者可以修改预警策略。</p>
+      )}
+    </section>
+  );
+}
+
 export default function WorkspacePage() {
   const queryClient = useQueryClient();
   const user = useAuth((state) => state.user);
@@ -103,6 +310,7 @@ export default function WorkspacePage() {
 
   const canManage = canManageWorkspace(current);
   const canWrite = canWriteWorkspace(current);
+  const isAdmin = user?.role === "admin";
   const workspaceId = current?.id ?? null;
 
   const members = useQuery({
@@ -125,6 +333,14 @@ export default function WorkspacePage() {
     retry: false,
   });
 
+  // 管理员总览：后端对非管理员会退回「自己的列表」，这里只在管理员界面查询。
+  const allWorkspaces = useQuery({
+    queryKey: ["workspaces-all"],
+    queryFn: () => api.workspaces(true),
+    enabled: isAdmin && Boolean(config?.workspace_enabled),
+    retry: false,
+  });
+
   const flash = (text: string) => setMessage(text);
 
   const createWorkspace = useMutation({
@@ -134,6 +350,7 @@ export default function WorkspacePage() {
       setNewDesc("");
       await refresh();
       select(created.id);
+      queryClient.invalidateQueries({ queryKey: ["workspaces-all"] });
       flash(`已创建「${created.name}」`);
     },
     onError: (error) => flash(`创建失败：${(error as Error).message}`),
@@ -234,6 +451,7 @@ export default function WorkspacePage() {
       flash("已更新工作区名称");
       setRename("");
       await refresh();
+      queryClient.invalidateQueries({ queryKey: ["workspaces-all"] });
     },
     onError: (error) => flash(`改名失败：${(error as Error).message}`),
   });
@@ -243,6 +461,7 @@ export default function WorkspacePage() {
     onSuccess: async () => {
       flash("工作区已删除");
       await refresh();
+      queryClient.invalidateQueries({ queryKey: ["workspaces-all"] });
     },
     onError: (error) => flash(`删除失败：${(error as Error).message}（清空数据需确认 purge）`),
   });
@@ -370,6 +589,64 @@ export default function WorkspacePage() {
           </button>
         </form>
       </section>
+
+      {/* 管理员：全部工作区总览（只读） */}
+      {isAdmin && (
+        <section className="card">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h2 className="text-sm font-semibold text-slate-100">全部工作区（管理员）</h2>
+            <span className="text-xs text-slate-500">只读 · 含个人与共享工作区</span>
+          </div>
+          {allWorkspaces.isLoading && <p className="text-xs text-slate-500">加载中…</p>}
+          {allWorkspaces.isError && (
+            <p className="text-xs text-slate-500">全部工作区暂不可用。</p>
+          )}
+          {allWorkspaces.data && (
+            <div className="table-wrap">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-800">
+                    <th className="th">名称</th>
+                    <th className="th">类型</th>
+                    <th className="th">所有者 ID</th>
+                    <th className="th">成员</th>
+                    <th className="th">数据量</th>
+                    <th className="th">创建时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allWorkspaces.data.map((row) => (
+                    <tr key={row.id} className="border-b border-slate-800/50 last:border-0">
+                      <td className="td">
+                        <span className="font-medium text-slate-100">{row.name}</span>
+                        {row.description && (
+                          <span className="ml-2 text-xs text-slate-500">{row.description}</span>
+                        )}
+                      </td>
+                      <td className="td text-slate-400">
+                        {row.kind === "personal" ? "个人" : "共享"}
+                      </td>
+                      <td className="td text-slate-500">{row.owner_id ?? "—"}</td>
+                      <td className="td text-slate-400">{row.member_count}</td>
+                      <td className="td text-slate-300">{row.data_total} 条</td>
+                      <td className="td text-xs text-slate-400">
+                        {formatDateTime(row.created_at)}
+                      </td>
+                    </tr>
+                  ))}
+                  {allWorkspaces.data.length === 0 && (
+                    <tr>
+                      <td className="td text-slate-500" colSpan={6}>
+                        还没有任何工作区。
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* 用量与配额（只读，所有成员可见） */}
       <section className="card">
@@ -652,6 +929,11 @@ export default function WorkspacePage() {
           </form>
         )}
       </section>
+
+      {/* 预警策略（成员只读生效值，owner 可覆盖） */}
+      {current && (
+        <AlertPolicySection workspaceId={current.id} canManage={canManage} onFlash={flash} />
+      )}
 
       {/* 工作区设置（仅 owner） */}
       {canManage && current && (

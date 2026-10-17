@@ -21,7 +21,8 @@
 | 工作区级通知通道（webhook / Bark） | ✅ 已完成 | `0005_workspace_channels`、`plugins/workspaces/routers/workspaces.py`、`plugins/alerts/services/channels.py`、见 `WORKSPACE.md` §5.1 |
 | 工作区用量统计 + 可选配额 | ✅ 已完成（配额默认关闭） | `core/quota.py`、`GET /workspaces/{id}/stats`、`SM_WORKSPACE_MAX_*`、见 `WORKSPACE.md` §5.2 |
 | 用户页数据概览 + 管理员用户统计列 | ✅ 已完成 | `WorkspaceOut.data_total`、`AdminUserOut`、`GET /users` 统计字段、见 `WORKSPACE.md` §5.2 |
-| 管理员工作区总览页 UI | ❌ 未开始（数据已就绪） | `GET /workspaces?all=true` 已含 `data_total`，仅缺前端页面 |
+| 管理员工作区总览页 UI | ✅ 已完成 | `/workspace` 页「全部工作区」卡片（`GET /workspaces?all=true`） |
+| 工作区级预警参数覆盖 | ✅ 已完成 | `0006_workspace_alert_policies`、`plugins/alerts/services/policy.py`；只收紧语义，见 `WORKSPACE.md` §5.3 |
 
 ### 关键设计决定（已落地，改动前先读）
 
@@ -59,7 +60,8 @@ P1 数据隔离（已完成）
  ├─ PR-4 工作区级通知通道：0005 迁移 + owner 管理通道 + 按工作区投递
  ├─ PR-5 工作区用量统计 + 可选配额：stats 端点 + SM_WORKSPACE_MAX_* + 写路径 409
  ├─ PR-6 用户页数据概览 + 管理员用户统计列：data_total + AdminUserOut
- └─ 待办：管理员工作区总览页 UI
+ ├─ PR-7 管理员工作区总览 + 工作区级预警参数覆盖：0006 迁移 + 只收紧策略
+ └─ 待办：P3 可选（更多通知渠道、统计导出）
         │
         ▼
 P2 备份自动化（1 个 PR）
@@ -248,6 +250,31 @@ editor 不可管成员、最后 owner 保护、跨工作区 404、转让）；`t
 
 **回滚**：纯读路径增强，回退代码即可；统计字段有默认值 0，旧前端/旧调用方无需改动。
 
+### PR-7：管理员工作区总览 + 工作区级预警参数覆盖 —— ✅ 已完成
+
+> 设计细节见 `WORKSPACE.md` §5.2（总览）与 §5.3（预警策略）。核心变化：
+> owner 可以给整个工作区设「只收紧」的提醒底线（排除 ST / 成交额门槛 / 冷却 / 每日一次），
+> 由扫描引擎在过滤与去重时取「规则与策略更严格者」；管理员在「工作区」页可看到全部工作区
+> 及其成员/数据量。新增一张表（`0006`），回测分享链接方向同步取消（无相关代码）。
+
+| 文件 | 改动 |
+|---|---|
+| `src/stockmaster/alembic/versions/0006_workspace_alert_policies.py` | 幂等建表：`workspace_id` PK+FK（CASCADE）、四个可空覆盖字段、审计列 |
+| `src/stockmaster/db/models.py` | `WorkspaceAlertPolicy` 模型 |
+| `src/stockmaster/plugins/alerts/services/policy.py` | `policy_for` / `policies_for` / `effective_policy` / `effective_policies`（NULL→默认，负值防御） |
+| `src/stockmaster/plugins/alerts/services/engine.py` | `evaluate_all` 批量取策略，过滤与 `_dedup_key` 使用有效值 |
+| `plugins/workspaces/{schemas,router}` + `services/service.py` | `GET/PUT /workspaces/{id}/alert-policy`（成员读、owner 写、全 null 重置）；删工作区清理策略行 |
+| frontend | `/workspace` 页：管理员「全部工作区」总览；成员只读 / owner 可编辑的「预警策略」卡片 |
+| docs | `WORKSPACE.md` §5.3/§8/§9/§11；`IMPLEMENTATION_PLAN.md` §7 记录回测分享取消；README 说明 |
+
+**验收**：`tests/test_workspace_alert_policy.py`（API/权限/校验/清理/归一）；
+`tests/test_alert_policy_engine.py`（过滤与去重使用有效值、跨工作区互不影响、规则更严格时以规则为准）。
+
+**回滚**：删除策略行（或 PUT 全 null）即恢复跟随规则；`0006` 表可保留不影响旧代码。
+
+> **已取消**：「回测结果分享链接」不实现（不引入 `visibility`/`share_token`），
+> 当前仓库没有相关代码需要移除；回测结果只在所属工作区内可见。
+
 ---
 
 ## 4. P2 备份自动化
@@ -279,7 +306,7 @@ docker compose --env-file .env -f docker-compose.prod.yml exec app \
 
 # 4) 确认启动时已自动认领版本并执行增量
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m stockmaster.cli db current      # 应输出 当前=最新=0005_workspace_channels
+  python -m stockmaster.cli db current      # 应输出 当前=最新=0006_workspace_alert_policies
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
   python -m stockmaster.cli db check        # 应无「缺列」输出
 
@@ -326,8 +353,10 @@ SM_DATA_DIR=/tmp/drill python -m stockmaster.cli restore ~/backups/xxx.tar.gz --
 
 ## 7. 未决项
 
-> **已取消（2026-10-17）**：不再评估「共享清单」可见性细分 —— 同一工作区成员全量共享、
-> 角色只分读写（决策见 `WORKSPACE.md` §11）。`USER_ISOLATION.md` 中的对应条目仅为历史记录。
+> **已取消（2026-10-17）**：
+> 1. 不再评估「共享清单」可见性细分 —— 同一工作区成员全量共享、角色只分读写
+>    （决策见 `WORKSPACE.md` §11）。`USER_ISOLATION.md` 中的对应条目仅为历史记录。
+> 2. 不再评估「回测结果分享链接」—— 不引入 `visibility`/`share_token`；回测结果只在
+>    所属工作区内可见（跨工作区一律 404 的隔离语义不放宽）。当前仓库没有相关代码需要移除。
 
-1. 回测结果是否支持发链接共享：需要 `visibility` + `share_token`，而不是放宽工作区过滤。
-2. 备份是否异地留存（COS）：等本地轮转稳定运行一段时间再评估。
+1. 备份是否异地留存（COS）：等本地轮转稳定运行一段时间再评估。

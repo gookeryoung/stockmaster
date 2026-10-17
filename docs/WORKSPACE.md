@@ -210,6 +210,44 @@ def require_editor(...) -> WorkspaceCtx:
 - 共享工作区的数据计入「可访问数据合计」，但不计入任何用户的 `personal_data_total` —— 它属于工作区，不属于某个账号。
 - 隔离关闭时 `/workspaces` 为空、用户页不展示概览；管理员列退化为 0。
 
+### 5.3 工作区级预警参数覆盖（`0006_workspace_alert_policies`）
+
+**问题**：单条规则自己可以设排除 ST、成交额门槛、冷却与每日一次，但「团队层面的提醒底线」没有位置放。owner 想让本工作区所有提醒都排除 ST、成交额低于 X 不提醒，只能逐条改规则 —— 既容易漏，又会被后来新增的规则绕过。
+
+**语义：只收紧、不放宽**。策略与规则的有效值按「取更严格者」计算：
+
+| 维度 | 有效值 | 说明 |
+|---|---|---|
+| `exclude_st` | `rule.exclude_st OR policy.exclude_st` | 任一为 True 即排除 ST |
+| `min_amount` | `max(rule.min_amount, policy.min_amount)` | 策略只能抬高成交额门槛 |
+| `cooldown_seconds` | `max(rule.cooldown_seconds, policy.cooldown_seconds)` | 策略只能延长冷却 |
+| `once_per_day` | `rule.once_per_day OR policy.once_per_day` | 任一为 True 即每天最多一次 |
+
+因此策略不会成为绕过规则设置的后门：规则自己更严格时以规则为准。
+
+**数据模型**：`workspace_alert_policies`（一个工作区最多一行）
+
+| 列 | 语义 |
+|---|---|
+| `workspace_id` | 主键 + FK → `workspaces.id`（`ON DELETE CASCADE`）；不存在 `workspace_id=0` 的策略行 |
+| `exclude_st` / `min_amount` / `cooldown_seconds` / `once_per_day` | 可空；`NULL` = 该维度跟随规则；无行 = 全部跟随规则 |
+| `updated_by` / `updated_at` | 审计用 |
+
+**API**（`plugins/workspaces/routers/workspaces.py`）：
+
+| 方法 | 路径 | 依赖 | 说明 |
+|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{id}/alert-policy` | `path_workspace`（成员可读） | 返回四个覆盖值（null=跟随规则）+ `effective` 只读有效值 |
+| `PUT` | `/api/v1/workspaces/{id}/alert-policy` | `require_workspace_owner` | upsert；字段传 null = 清除该维度；四个都 null = 删除行恢复默认 |
+
+写权限只给 owner：策略会影响整个工作区的提醒，属于团队治理而不是「可写数据」。校验：`min_amount >= 0`、`cooldown_seconds` 在 `0..30 天` 内。
+
+**生效点**：`AlertEngine.evaluate_all()` 在扫描开始时按工作区批量取策略（`plugins/alerts/services/policy.py::effective_policies`），过滤与 `dedup_key` 都用有效值。调度器扫描与手动 `/alerts/scan` 自动生效；`/alerts/preview` **不套用**策略 —— 它只按用户输入的规则预演匹配。策略变更从下一次扫描起生效，历史触发记录的 `dedup_key` 不重写。
+
+**迁移与清理**：`0006_workspace_alert_policies` 幂等建表；删除工作区时显式清理策略行（不计入 `data_counts`，与通道一致）。`workspace claim` 不涉及策略（策略只属于真实工作区）。
+
+**回滚**：把 `workspace_alert_policies` 行删除（或 PUT 全 null）即恢复「全部跟随规则」，不影响既有触发记录；迁移表可安全保留。
+
 ## 6. 迁移：`0003_workspaces`
 
 幂等设计 —— 同一个迁移既要在**全新库**（列建出来就叫 `workspace_id`）跳过改名，
@@ -256,7 +294,10 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
   隔离关闭时该页显示「未启用数据隔离」说明，切换器不出现。
 - `/account` 页面：「我的数据概览」展示参与工作区数、个人工作区数据量、可访问数据合计，
   以及每个工作区的角色/成员数/数据量（只读）；
-- `/users` 页面（管理员）：用户列表新增「工作区」「个人数据量」两列。
+- `/users` 页面（管理员）：用户列表新增「工作区」「个人数据量」两列；
+- `/workspace` 页面（管理员）：「全部工作区」总览卡片（名称/类型/成员/数据量）；
+- `/workspace` 页面「预警策略」卡片：成员只读展示有效值，owner 可配置
+  `exclude_st` / `min_amount` / `cooldown_seconds` / `once_per_day`（null = 跟随规则）。
 
 ## 9. 测试矩阵
 
@@ -277,6 +318,11 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 - `tests/test_user_stats.py`：用户页/管理员统计 —— `GET /workspaces` 的 data_total 口径
   （不含成员/通道）、`GET /users` 三个统计字段、权限（非管理员 403）、`q` 过滤后统计正确、
   `quota.data_totals` 批量计算与未知 id 补 0。
+- `tests/test_workspace_alert_policy.py`：预警策略 API —— 默认值/持久化/全 null 重置、
+  仅 owner 可写（editor/viewer 403）、参数校验 422、删除工作区清理策略行、
+  `effective_policy()` 对 NULL/脏数据的归一。
+- `tests/test_alert_policy_engine.py`：策略在扫描引擎生效 —— exclude_st/min_amount 过滤、
+  cooldown/once_per_day 收紧 `dedup_key`、跨工作区互不影响、规则更严格时以规则为准。
 
 ## 10. 配置
 
@@ -304,21 +350,30 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 3. 置 `SM_DATA_ISOLATION=true` 重启；
 4. 页面右上角出现工作区切换器，owner 在「工作区」页邀请成员。
 
-## 11. 未做的（后续 PR）
+## 11. 已完成索引与已取消项
+
+> 隔离相关的路线图项已全部落地；下面保留索引与「明确不做」的决策记录，避免后续重复讨论。
 
 - ~~按工作区通知通道~~：**已实现** —— 见 §5.1（`0005_workspace_channels`、owner 管理
   webhook/Bark 通道、按工作区路由投递、`SM_ALERT_GLOBAL_FALLBACK` 兜底开关）；
-- **配额与统计**：~~工作区级用量统计与可选配额、用户页数据概览、管理员用户统计列~~
-  **已实现** —— 见 §5.2（`GET /workspaces/{id}/stats`、6 个 `SM_WORKSPACE_MAX_*`、
-  `WorkspaceOut.data_total`、管理员 `GET /users` 的 3 个统计字段）。
-  仍未做：管理员「工作区总览」列表页（数据已由 `GET /workspaces?all=true` 的
-  `data_total` 提供，只缺 UI）；
-- 工作区级预警参数覆盖；
-- ~~共享清单可见性细分~~：**已取消（2026-10-17）** —— 维持「同一工作区成员全量共享、
-  角色只分读写」的语义，不引入清单级 private/shared 可见性；
-  `USER_ISOLATION.md` 中的对应待确认项仅保留为历史记录。
+- **配额与统计**：~~工作区级用量统计与可选配额、用户页数据概览、管理员用户统计列、
+  管理员工作区总览页~~ **已实现** —— 见 §5.2（`GET /workspaces/{id}/stats`、
+  6 个 `SM_WORKSPACE_MAX_*`、`WorkspaceOut.data_total`、管理员 `GET /users` 的 3 个
+  统计字段、`/workspace` 页的「全部工作区」总览）；
+- ~~工作区级预警参数覆盖~~：**已实现** —— 见 §5.3（`0006_workspace_alert_policies`、
+  只收紧语义、owner 配置、引擎扫描与去重生效）；
+- ~~共享清单可见性细分、回测结果分享链接~~：**已取消（2026-10-17）** —— 维持
+  「同一工作区成员全量共享、角色只分读写」的语义，不引入清单级 private/shared 可见性；
+  也不引入回测 `visibility`/`share_token`，回测结果只在所属工作区内可见（跨工作区 404
+  的隔离语义不放宽）。`USER_ISOLATION.md` 中的对应待确认项仅保留为历史记录。
 - ~~工作区级策略配置~~：**已实现** —— 选股 / 样本 / 算法三类命名配置随工作区隔离与角色权限，
   支持 `viewer` 只读运行；详见 [`docs/STRATEGY_CONFIGS.md`](STRATEGY_CONFIGS.md)。三张新表
   （`screening_configs` / `sample_configs` / `algorithm_configs`）已加入 `DATA_MODELS`：
   删除工作区时计入 `data_counts()` 与 `purge` 清理，`workspace claim` 也能认领
   `workspace_id = 0` 的未归属配置（同名冲突计入 `duplicates_skipped`）。
+
+### 后续可选（非隔离核心，按需评估）
+
+- 更多通知渠道（邮件 / 短信）与按工作区的消息模板；
+- 工作区统计的导出与趋势图表；
+- 备份异地留存（见 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §4）。

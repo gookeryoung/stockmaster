@@ -27,8 +27,12 @@ from stockmaster.core.auth_deps import require_user
 from stockmaster.core.deps import db_session
 from stockmaster.core.logging import get_logger
 from stockmaster.core.workspace_deps import WorkspaceCtx, path_workspace, require_workspace_owner
-from stockmaster.db.models import User
+from stockmaster.db.models import User, WorkspaceAlertPolicy
+from stockmaster.plugins.alerts.services import policy as alert_policy
 from stockmaster.plugins.workspaces.schemas.workspace import (
+    AlertPolicyEffectiveOut,
+    AlertPolicyIn,
+    AlertPolicyOut,
     ChannelIn,
     ChannelUpdate,
     MemberIn,
@@ -86,6 +90,26 @@ def _channel_out(channel) -> WorkspaceChannelOut:
         enabled=channel.enabled,
         created_at=channel.created_at,
         updated_at=channel.updated_at,
+    )
+
+
+def _alert_policy_out(session: Session, workspace_id: int) -> AlertPolicyOut:
+    """策略行原值 + 归一后的有效值；无行时原值全 null、有效值为默认。"""
+    row = alert_policy.policy_for(session, workspace_id)
+    effective = alert_policy.effective_policy(row)
+    return AlertPolicyOut(
+        workspace_id=workspace_id,
+        exclude_st=row.exclude_st if row is not None else None,
+        min_amount=row.min_amount if row is not None else None,
+        cooldown_seconds=row.cooldown_seconds if row is not None else None,
+        once_per_day=row.once_per_day if row is not None else None,
+        updated_at=row.updated_at if row is not None else None,
+        effective=AlertPolicyEffectiveOut(
+            exclude_st=effective.exclude_st,
+            min_amount=effective.min_amount,
+            cooldown_seconds=effective.cooldown_seconds,
+            once_per_day=effective.once_per_day,
+        ),
     )
 
 
@@ -182,6 +206,52 @@ def workspace_stats(
         labels=quota.USAGE_LABELS,
         total=sum(current.values()),
     )
+
+
+# --------------------------------------------------------------------------- #
+# 预警参数策略
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/{workspace_id}/alert-policy", response_model=AlertPolicyOut)
+def get_alert_policy(
+    ctx: Annotated[WorkspaceCtx, Depends(path_workspace)],
+    session: Annotated[Session, Depends(db_session)],
+):
+    """工作区预警参数策略（成员可读）：未配置时原值全 null、effective 为默认值。"""
+    return _alert_policy_out(session, ctx.id)
+
+
+@router.put("/{workspace_id}/alert-policy", response_model=AlertPolicyOut)
+def update_alert_policy(
+    payload: AlertPolicyIn,
+    ctx: Annotated[WorkspaceCtx, Depends(require_workspace_owner)],
+    session: Annotated[Session, Depends(db_session)],
+):
+    """设置/重置工作区预警参数（仅 owner —— 团队级安全阀）。
+
+    PUT 是整体替换：字段全为 None（含空 body ``{}``）→ 删除策略行、恢复默认；
+    否则用本次提供的值写行，未提供的维度按 None 处理（即清除该维度覆盖）。
+    """
+    values = payload.model_dump()
+    row = alert_policy.policy_for(session, ctx.id)
+    if all(value is None for value in values.values()):
+        if row is not None:
+            session.delete(row)
+            session.commit()
+        return _alert_policy_out(session, ctx.id)
+
+    if row is None:
+        row = WorkspaceAlertPolicy(workspace_id=ctx.id)
+        session.add(row)
+    row.exclude_st = values["exclude_st"]
+    row.min_amount = values["min_amount"]
+    row.cooldown_seconds = values["cooldown_seconds"]
+    row.once_per_day = values["once_per_day"]
+    row.updated_by = ctx.user.id if ctx.user is not None else None
+    session.commit()
+    session.refresh(row)
+    return _alert_policy_out(session, ctx.id)
 
 
 # --------------------------------------------------------------------------- #

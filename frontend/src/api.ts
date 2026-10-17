@@ -10,6 +10,7 @@ import type {
   AlgorithmConfig,
   AlgorithmConfigInput,
   AlgorithmTrainResult,
+  AlertPolicy,
   AlertRule,
   AlertTrigger,
   AuditLog,
@@ -305,6 +306,22 @@ export const api = {
   testWorkspaceChannel: (id: number, channelId: number) =>
     request<WorkspaceChannelTestResult>(`/workspaces/${id}/channels/${channelId}/test`, {
       method: "POST",
+    }),
+
+  // --- workspaces: 预警策略（成员只读生效值；PUT 仅 owner，null=跟随规则） ---
+  alertPolicy: (id: number) => request<AlertPolicy>(`/workspaces/${id}/alert-policy`),
+  updateAlertPolicy: (
+    id: number,
+    payload: {
+      exclude_st: boolean | null;
+      min_amount: number | null;
+      cooldown_seconds: number | null;
+      once_per_day: boolean | null;
+    },
+  ) =>
+    request<AlertPolicy>(`/workspaces/${id}/alert-policy`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
     }),
 
   // --- admin: system backup / restore ---

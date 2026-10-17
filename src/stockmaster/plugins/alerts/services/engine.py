@@ -25,6 +25,7 @@ from stockmaster.core.logging import get_logger
 from stockmaster.core.market import is_call_auction, is_trading_time
 from stockmaster.db.models import AlertRule, AlertTrigger, Instrument, WatchlistItem
 from stockmaster.db.session import session_scope
+from stockmaster.plugins.alerts.services.policy import DEFAULT_POLICY, effective_policies
 from stockmaster.plugins.alerts.services.rules import RULE_TYPES, RuleContext, describe_rule, normalize_params
 
 log = get_logger(__name__)
@@ -255,18 +256,31 @@ def evaluate_rule(ctx: RuleContext, rule_type: str, params: dict) -> tuple[bool,
     raise DataError(f"rule_type {rule_type!r} has no evaluator")
 
 
-def _dedup_key(rule: AlertRule, ctx: RuleContext, trigger_at: datetime) -> str:
+def _dedup_key(
+    rule: AlertRule,
+    ctx: RuleContext,
+    trigger_at: datetime,
+    *,
+    cooldown_seconds: int | None = None,
+    once_per_day: bool | None = None,
+) -> str:
     """Stable identity for a triggering event.
 
     ``once_per_day`` collapses the whole session to a single alert per symbol,
     which is what a user almost always wants. Otherwise a cooldown bucket is
     used so a sustained condition cannot alert on every scan.
+
+    ``cooldown_seconds`` / ``once_per_day`` allow the caller to pass **effective**
+    values after a workspace-level policy has tightened the rule (see
+    ``services/policy.py``); ``None`` means "use the rule's own value".
     """
     day = ctx.trade_date or trigger_at.date()
-    if rule.once_per_day:
+    effective_once = rule.once_per_day if once_per_day is None else once_per_day
+    effective_cooldown = rule.cooldown_seconds if cooldown_seconds is None else cooldown_seconds
+    if effective_once:
         return f"{rule.id}:{ctx.code}:{day.isoformat()}"
-    if rule.cooldown_seconds and rule.cooldown_seconds > 0:
-        bucket = int(trigger_at.timestamp()) // int(rule.cooldown_seconds)
+    if effective_cooldown and effective_cooldown > 0:
+        bucket = int(trigger_at.timestamp()) // int(effective_cooldown)
         return f"{rule.id}:{ctx.code}:{day.isoformat()}:b{bucket}"
     # No dedup window configured: fall back to minute granularity to avoid
     # creating one row per scan.
@@ -440,12 +454,21 @@ class AlertEngine:
             if not rules:
                 return []
 
+            # 一次扫描内按工作区批量取策略：策略只收紧，逐条规则与自己的设置取更严格者。
+            policies = effective_policies(session, (rule.workspace_id for rule in rules))
+
             for rule in rules:
                 try:
                     params = normalize_params(rule.rule_type, rule.params_json)
                 except DataError as exc:
                     log.warning("skipping malformed rule %s: %s", rule.id, exc)
                     continue
+
+                workspace_policy = policies.get(rule.workspace_id, DEFAULT_POLICY)
+                effective_exclude_st = bool(rule.exclude_st) or workspace_policy.exclude_st
+                effective_min_amount = max(float(rule.min_amount or 0.0), workspace_policy.min_amount)
+                effective_cooldown = max(int(rule.cooldown_seconds or 0), workspace_policy.cooldown_seconds)
+                effective_once_per_day = bool(rule.once_per_day) or workspace_policy.once_per_day
 
                 codes = self._resolve_scope(session, rule)
                 if not codes:
@@ -455,10 +478,10 @@ class AlertEngine:
                     ctx = self._build_context(session, code)
                     if ctx is None:
                         continue
-                    # Scope-level filters that apply before rule logic.
-                    if rule.exclude_st and ctx.is_st:
+                    # Scope-level filters that apply before rule logic (rule + policy).
+                    if effective_exclude_st and ctx.is_st:
                         continue
-                    if rule.min_amount and (ctx.amount or 0) < rule.min_amount:
+                    if effective_min_amount and (ctx.amount or 0) < effective_min_amount:
                         continue
 
                     try:
@@ -478,7 +501,13 @@ class AlertEngine:
                             rule_type=rule.rule_type,
                             message=message,
                             snapshot={**snapshot, "rule": describe_rule(rule.rule_type, params)},
-                            dedup_key=_dedup_key(rule, ctx, now),
+                            dedup_key=_dedup_key(
+                                rule,
+                                ctx,
+                                now,
+                                cooldown_seconds=effective_cooldown,
+                                once_per_day=effective_once_per_day,
+                            ),
                             workspace_id=rule.workspace_id,
                             trigger_at=now,
                         )

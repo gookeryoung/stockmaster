@@ -280,7 +280,9 @@ PRIVATE_CASES = [
 > private/shared 可见性。下文第 1 条仅保留为历史记录。
 
 1. ~~**是否要"共享清单"概念**？~~（已取消，见上方说明）
-2. **是否需要跨用户共享回测结果**（发链接给别人看）？若需要，`backtest_runs` 加
-   `visibility`（private/link）+ `share_token`，而不是放宽 owner 过滤。
+2. ~~**是否需要跨用户共享回测结果**（发链接给别人看）？~~**已取消（2026-10-17）**：
+   不引入 `visibility`/`share_token`，回测结果仅在所属工作区内可见。原文保留为历史记录：
+   若将来重新评估，需 `backtest_runs` 加 `visibility`（private/link）+ `share_token`，
+   而不是放宽 owner/工作区过滤。
 3. **迁移期存量数据归属**：默认保持 owner 0（匿名可见），开鉴权前用 `user claim` 交给管理员。
    若你希望自动认领给首个管理员，我可以在迁移里加这一步（有副作用，倾向显式命令）。

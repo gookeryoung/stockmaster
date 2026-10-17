@@ -32,6 +32,7 @@ from stockmaster.db.models import (
     User,
     WatchlistItem,
     Workspace,
+    WorkspaceAlertPolicy,
     WorkspaceChannel,
     WorkspaceMember,
 )
@@ -312,6 +313,9 @@ def delete_workspace(session: Session, workspace: Workspace, *, purge: bool = Fa
     # 破坏既有 purge 语义与计数测试），但它必须随工作区一起消失。FK 上虽然写了
     # ON DELETE CASCADE，SQLite 默认并不开启外键约束，所以这里显式删除。
     session.execute(WorkspaceChannel.__table__.delete().where(WorkspaceChannel.workspace_id == workspace.id))
+    # 预警参数策略同理：它是工作区配置而不是业务数据，不该触发 purge 确认，但也不能
+    # 留成指向已删工作区的孤儿行。
+    session.execute(WorkspaceAlertPolicy.__table__.delete().where(WorkspaceAlertPolicy.workspace_id == workspace.id))
     session.execute(WorkspaceMember.__table__.delete().where(WorkspaceMember.workspace_id == workspace.id))
     session.delete(workspace)
     session.commit()

@@ -328,6 +328,29 @@ export interface WorkspaceUsage {
   total: number;
 }
 
+/** 工作区预警策略的「生效值」：与规则自身设置取更严格者之后的结果。 */
+export interface AlertPolicyEffective {
+  exclude_st: boolean;
+  min_amount: number;
+  cooldown_seconds: number;
+  once_per_day: boolean;
+}
+
+/** 工作区级预警策略。
+ *
+ * 四个可覆盖字段为 `null` 时表示「跟随规则自身设置」；`effective` 是只读的合并结果，
+ * 界面展示以后者为准。策略只收紧、不放宽。
+ */
+export interface AlertPolicy {
+  workspace_id: number;
+  exclude_st: boolean | null;
+  min_amount: number | null;
+  cooldown_seconds: number | null;
+  once_per_day: boolean | null;
+  updated_at: string | null;
+  effective: AlertPolicyEffective;
+}
+
 export interface TokenResponse {
   token: string;
   token_type: string;
