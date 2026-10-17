@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { useAuth } from "../auth";
 import { formatCompact } from "../format";
 
 interface JobDef {
@@ -28,6 +29,11 @@ const AI_JOBS: JobDef[] = [
 
 export default function Settings() {
   const queryClient = useQueryClient();
+  const authUser = useAuth((state) => state.user);
+  const authConfig = useAuth((state) => state.config);
+  // Job execution mutates shared data, so it is administrator-only server-side;
+  // hide the buttons instead of letting people click into a 403.
+  const isAdmin = authUser?.role === "admin" || Boolean(authConfig && !authConfig.auth_enabled);
   const [lastResult, setLastResult] = useState<string | null>(null);
   const [newWatchCode, setNewWatchCode] = useState("");
 
@@ -63,7 +69,16 @@ export default function Settings() {
     <div className="space-y-4">
       {/* Jobs */}
       <div className="card space-y-3">
-        <div className="text-sm font-medium text-slate-300">数据与计算任务</div>
+        <div className="flex items-center gap-2">
+          <div className="text-sm font-medium text-slate-300">数据与计算任务</div>
+          {!isAdmin && <span className="badge bg-slate-800 text-slate-400">仅管理员</span>}
+        </div>
+        {!isAdmin ? (
+          <p className="text-xs text-slate-500">
+            数据同步、指标计算与模型训练会改动全站共享数据，仅管理员可执行。
+          </p>
+        ) : (
+          <>
         <p className="text-xs text-slate-500">
           任务为同步执行，完成后会返回结果。首次使用建议按顺序：交易日历 →
           证券主数据 → 日线 → 指标与因子。
@@ -91,6 +106,8 @@ export default function Settings() {
             />
           ))}
         </div>
+          </>
+        )}
 
         {lastResult && (
           <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-slate-800 bg-slate-950 p-2 text-xs text-slate-300">
@@ -102,9 +119,9 @@ export default function Settings() {
       {/* Watchlist management */}
       <div className="card space-y-3">
         <div className="text-sm font-medium text-slate-300">自选股</div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
-            className="input w-40"
+            className="input w-full sm:w-40"
             placeholder="如 600519.SH"
             value={newWatchCode}
             onChange={(event) => setNewWatchCode(event.target.value)}
@@ -121,31 +138,33 @@ export default function Settings() {
           )}
         </div>
         {watchlist.data?.length ? (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-800">
-                <th className="th">代码</th>
-                <th className="th">名称</th>
-                <th className="th text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {watchlist.data.map((item) => (
-                <tr key={item.id} className="border-t border-slate-800/60">
-                  <td className="td">{item.code}</td>
-                  <td className="td text-slate-400">{item.name}</td>
-                  <td className="td text-right">
-                    <button
-                      className="text-xs text-red-400 hover:underline"
-                      onClick={() => removeWatch.mutate(item.id)}
-                    >
-                      移除
-                    </button>
-                  </td>
+          <div className="table-wrap">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-800">
+                  <th className="th">代码</th>
+                  <th className="th">名称</th>
+                  <th className="th text-right">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {watchlist.data.map((item) => (
+                  <tr key={item.id} className="border-t border-slate-800/60">
+                    <td className="td">{item.code}</td>
+                    <td className="td text-slate-400">{item.name}</td>
+                    <td className="td text-right">
+                      <button
+                        className="text-xs text-red-400 hover:underline"
+                        onClick={() => removeWatch.mutate(item.id)}
+                      >
+                        移除
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <p className="text-xs text-slate-500">暂无自选股。</p>
         )}
@@ -178,38 +197,40 @@ export default function Settings() {
         <div className="card space-y-2">
           <div className="text-sm font-medium text-slate-300">数据源状态</div>
           {data?.providers?.length ? (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-800">
-                  <th className="th">数据源</th>
-                  <th className="th text-right">成功</th>
-                  <th className="th text-right">失败</th>
-                  <th className="th text-right">服务次数</th>
-                  <th className="th">状态</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.providers.map((provider) => (
-                  <tr key={provider.name} className="border-t border-slate-800/60">
-                    <td className="td">{provider.name}</td>
-                    <td className="td text-right">{provider.successes}</td>
-                    <td className="td text-right">{provider.failures}</td>
-                    <td className="td text-right">{provider.served}</td>
-                    <td className="td">
-                      <span
-                        className={`badge ${
-                          provider.circuit_open
-                            ? "bg-red-900/60 text-red-300"
-                            : "bg-emerald-900/55 text-emerald-300"
-                        }`}
-                      >
-                        {provider.circuit_open ? "熔断" : "正常"}
-                      </span>
-                    </td>
+            <div className="table-wrap">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-800">
+                    <th className="th">数据源</th>
+                    <th className="th text-right">成功</th>
+                    <th className="th text-right">失败</th>
+                    <th className="th text-right">服务次数</th>
+                    <th className="th">状态</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {data.providers.map((provider) => (
+                    <tr key={provider.name} className="border-t border-slate-800/60">
+                      <td className="td">{provider.name}</td>
+                      <td className="td text-right">{provider.successes}</td>
+                      <td className="td text-right">{provider.failures}</td>
+                      <td className="td text-right">{provider.served}</td>
+                      <td className="td">
+                        <span
+                          className={`badge ${
+                            provider.circuit_open
+                              ? "bg-red-900/60 text-red-300"
+                              : "bg-emerald-900/55 text-emerald-300"
+                          }`}
+                        >
+                          {provider.circuit_open ? "熔断" : "正常"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p className="text-xs text-slate-500">无数据源信息。</p>
           )}
@@ -221,23 +242,43 @@ export default function Settings() {
 
       {data?.scheduler?.jobs?.length ? (
         <div className="card">
-          <div className="mb-2 text-sm font-medium text-slate-300">定时任务</div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-800">
-                <th className="th">任务</th>
-                <th className="th">下次运行</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.scheduler.jobs.map((job) => (
-                <tr key={job.id} className="border-t border-slate-800/60">
-                  <td className="td">{job.id}</td>
-                  <td className="td text-slate-400">{job.next_run ?? "--"}</td>
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <div className="text-sm font-medium text-slate-300">定时任务</div>
+            <div className="text-xs text-slate-500">
+              时区 {data.scheduler.timezone ?? data.timezone} · 非交易日自动跳过
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-800">
+                  <th className="th">任务</th>
+                  <th className="th hidden md:table-cell">说明</th>
+                  <th className="th">执行计划</th>
+                  <th className="th">下次运行</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.scheduler.jobs.map((job) => (
+                  <tr key={job.id} className="border-t border-slate-800/60">
+                    <td className="td">
+                      <div className="text-slate-100">{job.label || job.id}</div>
+                      <div className="text-xs text-slate-500">{job.id}</div>
+                    </td>
+                    <td className="td hidden whitespace-normal text-xs text-slate-400 md:table-cell">
+                      {job.description || "--"}
+                    </td>
+                    <td className="td whitespace-normal text-slate-300">
+                      {job.schedule || "--"}
+                    </td>
+                    <td className="td align-top">
+                      <NextRun value={job.next_run} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
 
@@ -267,6 +308,19 @@ function JobButton({
       <div className="text-sm text-slate-100">{job.label}</div>
       <div className="text-xs text-slate-500">{job.hint}</div>
     </button>
+  );
+}
+
+/** "2026-10-19 15:20:00+08:00" → 日期与时分分行显示，手机窄屏也不截断。 */
+function NextRun({ value }: { value: string | null | undefined }) {
+  if (!value) return <span className="text-slate-500">--</span>;
+  const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(value);
+  if (!match) return <span className="text-slate-400">{value}</span>;
+  return (
+    <span className="block leading-tight">
+      <span className="block text-slate-300">{match[1]}</span>
+      <span className="block text-xs text-slate-500">{match[2]}</span>
+    </span>
   );
 }
 

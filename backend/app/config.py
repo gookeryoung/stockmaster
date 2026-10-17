@@ -59,6 +59,37 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     timezone: str = "Asia/Shanghai"
 
+    # --- Auth ---
+    # When false the API stays open (single-machine mode) but the account pages
+    # still work, so accounts can be provisioned before the switch is flipped.
+    auth_enabled: bool = False
+    # HS256 signing key. Left empty it is generated once and persisted under the
+    # data directory, so tokens survive restarts without mandatory configuration.
+    auth_secret_key: str = ""
+    auth_token_ttl_minutes: int = 60 * 24 * 7
+    auth_allow_register: bool = True
+    auth_first_user_admin: bool = True
+    auth_oauth_state_ttl_seconds: int = 600
+    auth_ticket_ttl_seconds: int = 120
+    # Public origin of the SPA (used for post-login redirects). Empty = derive from
+    # the request, which is correct when the API and UI share an origin; set it to
+    # the Vite dev server origin during local development.
+    auth_frontend_base: str = ""
+    auth_max_failed_logins: int = 8
+    auth_failed_login_window: int = 900
+    # Bootstrap administrator, created on startup when it does not exist yet.
+    auth_admin_username: str = ""
+    auth_admin_password: str = ""
+    # --- WeChat login ---
+    # open = 网站应用扫码 (open.weixin.qq.com), mp = 公众号网页授权,
+    # mock = 本地模拟（无凭据时演练流程）, off = 关闭。
+    wechat_login_mode: str = "open"
+    wechat_app_id: str = ""
+    wechat_app_secret: str = ""
+    # Must match the callback configured on the WeChat platform exactly.
+    wechat_redirect_uri: str = ""
+    wechat_timeout: float = 10.0
+
     # ------------------------------------------------------------------ helpers
     @field_validator("test_fraction")
     @classmethod
@@ -73,6 +104,14 @@ class Settings(BaseSettings):
         if v < 1:
             raise ValueError("sync_workers must be >= 1")
         return v
+
+    @field_validator("wechat_login_mode")
+    @classmethod
+    def _validate_wechat_mode(cls, v: str) -> str:
+        mode = v.strip().lower()
+        if mode not in {"open", "mp", "mock", "off"}:
+            raise ValueError("wechat_login_mode must be one of: open, mp, mock, off")
+        return mode
 
     @property
     def data_path(self) -> Path:
@@ -106,6 +145,30 @@ class Settings(BaseSettings):
     @property
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
+
+    @property
+    def auth_secret_path(self) -> Path:
+        """Where the auto-generated signing key lives (git-ignored, 0600)."""
+        return self.data_path / ".auth_secret"
+
+    @property
+    def wechat_mode(self) -> str:
+        """Effective WeChat login mode after credential checks.
+
+        ``open``/``mp`` need both an AppID and a secret; without them the flow is
+        reported as ``off`` instead of failing at redirect time. ``mock`` never
+        needs credentials because it never calls WeChat.
+        """
+        mode = self.wechat_login_mode
+        if mode == "mock":
+            return "mock"
+        if mode in {"open", "mp"} and self.wechat_app_id and self.wechat_app_secret:
+            return mode
+        return "off"
+
+    @property
+    def wechat_enabled(self) -> bool:
+        return self.wechat_mode != "off"
 
     @property
     def console_encoding_override(self) -> str:

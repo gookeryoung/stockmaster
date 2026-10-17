@@ -9,6 +9,9 @@
 import type {
   AlertRule,
   AlertTrigger,
+  AuditLog,
+  AuthConfig,
+  AuthUser,
   BacktestResponse,
   BarsResponse,
   FactorSnapshot,
@@ -20,7 +23,9 @@ import type {
   RuleTypeInfo,
   ScreenRow,
   SystemStatus,
+  TokenResponse,
   TradeOut,
+  UserPage,
   WatchlistItem,
 } from "./types";
 
@@ -38,11 +43,49 @@ export class ApiError extends Error {
 
 const BASE = "/api/v1";
 
+/** Where the access token lives. localStorage (not a cookie) keeps the API
+ * CSRF-free: a cross-site form cannot set an Authorization header. */
+const TOKEN_KEY = "sm.auth.token";
+
+let token: string | null = null;
+try {
+  token = localStorage.getItem(TOKEN_KEY);
+} catch {
+  // Private mode / disabled storage: stay anonymous instead of crashing.
+  token = null;
+}
+
+/** Fired when the server rejects the stored token, so the UI can drop the session. */
+export const authEvents = new EventTarget();
+
+export function getAuthToken(): string | null {
+  return token;
+}
+
+export function setAuthToken(next: string | null): void {
+  token = next;
+  try {
+    if (next) localStorage.setItem(TOKEN_KEY, next);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // ignore storage failures; the in-memory copy still works for this tab
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
   const response = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
   });
+
+  if (response.status === 401 && token) {
+    // Expired / revoked: clear locally rather than looping on 401s.
+    setAuthToken(null);
+    authEvents.dispatchEvent(new Event("unauthorized"));
+  }
 
   if (!response.ok) {
     let detail = `请求失败 (HTTP ${response.status})`;
@@ -71,6 +114,55 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // --- auth ---
+  authConfig: () => request<AuthConfig>("/auth/config"),
+  login: (username: string, password: string) =>
+    request<TokenResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  register: (payload: { username: string; password: string; email?: string; nickname?: string }) =>
+    request<TokenResponse>("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
+  logout: () => request<void>("/auth/logout", { method: "POST" }),
+  me: () => request<AuthUser>("/auth/me"),
+  updateMe: (payload: { nickname?: string; email?: string; avatar_url?: string }) =>
+    request<AuthUser>("/auth/me", { method: "PATCH", body: JSON.stringify(payload) }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<TokenResponse>("/auth/me/password", {
+      method: "POST",
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    }),
+  identities: () => request<AuthUser["identities"]>("/auth/me/identities"),
+  unbindIdentity: (id: number) => request<void>(`/auth/me/identities/${id}`, { method: "DELETE" }),
+  wechatUrl: (redirect = "/", bind = false) =>
+    request<{ url: string; state: string; mode: string }>(
+      `/auth/wechat/url?redirect=${encodeURIComponent(redirect)}&bind=${bind}`,
+    ),
+  exchangeTicket: (ticket: string) =>
+    request<TokenResponse>("/auth/ticket", { method: "POST", body: JSON.stringify({ ticket }) }),
+
+  // --- users (admin) ---
+  users: (params: { q?: string; page?: number; page_size?: number; role?: string; status?: string } = {}) => {
+    const search = new URLSearchParams();
+    if (params.q) search.set("q", params.q);
+    if (params.role) search.set("role", params.role);
+    if (params.status) search.set("status", params.status);
+    search.set("page", String(params.page ?? 1));
+    search.set("page_size", String(params.page_size ?? 50));
+    return request<UserPage>(`/users?${search}`);
+  },
+  createUser: (payload: Record<string, unknown>) =>
+    request<AuthUser>("/users", { method: "POST", body: JSON.stringify(payload) }),
+  updateUser: (id: number, payload: Record<string, unknown>) =>
+    request<AuthUser>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  resetUserPassword: (id: number, newPassword: string) =>
+    request<void>(`/users/${id}/password`, {
+      method: "POST",
+      body: JSON.stringify({ new_password: newPassword }),
+    }),
+  deleteUser: (id: number) => request<void>(`/users/${id}`, { method: "DELETE" }),
+  auditLogs: (limit = 100) => request<AuditLog[]>(`/users/audit-logs?limit=${limit}`),
+
   // --- market ---
   health: () => request<{ status: string; version: string }>("/health"),
   listStocks: (params: { q?: string; limit?: number; include_indices?: boolean } = {}) => {

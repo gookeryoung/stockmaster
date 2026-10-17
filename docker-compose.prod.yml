@@ -49,6 +49,23 @@ services:
       - SM_ALERT_WEBHOOK_URL=${SM_ALERT_WEBHOOK_URL:-}
       # 容器内固定 UTF-8，避免中文日志乱码/报错
       - SM_CONSOLE_ENCODING=utf-8
+      # ── 账号与登录 ────────────────────────────────────────────
+      # 关闭时接口开放（单机直连），账号页仍可用；改为 true 即强制登录。
+      - SM_AUTH_ENABLED=${SM_AUTH_ENABLED:-false}
+      # 留空则自动生成并持久化到 /data/.auth_secret（多实例部署必须显式同值）
+      - SM_AUTH_SECRET_KEY=${SM_AUTH_SECRET_KEY:-}
+      - SM_AUTH_ALLOW_REGISTER=${SM_AUTH_ALLOW_REGISTER:-true}
+      # 启动时创建/修复的管理员（密码只在账号不存在时生效）
+      - SM_ADMIN_USERNAME=${SM_ADMIN_USERNAME:-}
+      - SM_ADMIN_PASSWORD=${SM_ADMIN_PASSWORD:-}
+      # 微信登录：open=网站应用扫码 mp=公众号 mock=本地模拟 off=关闭
+      - SM_WECHAT_LOGIN_MODE=${SM_WECHAT_LOGIN_MODE:-open}
+      - SM_WECHAT_APP_ID=${SM_WECHAT_APP_ID:-}
+      - SM_WECHAT_APP_SECRET=${SM_WECHAT_APP_SECRET:-}
+      # 必须与微信平台登记的授权回调域名完全一致；留空则由请求 Host 推导
+      - SM_WECHAT_REDIRECT_URI=${SM_WECHAT_REDIRECT_URI:-}
+      # SPA 对外地址（扫码回调后跳回），留空=同源自动推导
+      - SM_AUTH_FRONTEND_BASE=${SM_AUTH_FRONTEND_BASE:-}
       # 反向代理（deploy/setup-tls.sh 接入的 stock.gookeryoung.cn）不在 127.0.0.1，
       # uvicorn 默认只信 127.0.0.1 的 X-Forwarded-*，不放开会把 nginx 容器的 IP
       # 记成客户端 IP，也认不出 X-Forwarded-Proto=https。

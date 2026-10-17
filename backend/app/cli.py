@@ -94,6 +94,37 @@ def build_parser() -> argparse.ArgumentParser:
     quality.add_argument(
         "--min-usable-share", type=float, default=0.0, help="可用标的占比低于该值时以非零码退出（可用于门禁，如 0.5）"
     )
+
+    # --- 账号管理 ---
+    account = sub.add_parser("user", help="账号管理（创建、列表、重置密码、改角色）")
+    _add_common(account)
+    account_sub = account.add_subparsers(dest="user_command", required=True)
+
+    user_add = account_sub.add_parser("add", help="创建账号（第二个及以后的账号默认 user 角色）")
+    user_add.add_argument("--username", required=True)
+    user_add.add_argument("--password", default="", help="留空则随机生成并打印")
+    user_add.add_argument("--email", default="")
+    user_add.add_argument("--nickname", default="")
+    user_add.add_argument("--role", default="user", choices=["admin", "user"])
+    user_add.add_argument("--status", default="active", choices=["active", "disabled"])
+
+    account_sub.add_parser("list", help="列出账号")
+
+    user_passwd = account_sub.add_parser("passwd", help="重置密码（留空则随机生成并打印）")
+    user_passwd.add_argument("--username", required=True)
+    user_passwd.add_argument("--password", default="")
+
+    user_role = account_sub.add_parser("role", help="修改角色或启用状态")
+    user_role.add_argument("--username", required=True)
+    user_role.add_argument("--role", default=None, choices=["admin", "user"])
+    user_role.add_argument("--status", default=None, choices=["active", "disabled"])
+
+    user_delete = account_sub.add_parser("delete", help="删除账号")
+    user_delete.add_argument("--username", required=True)
+
+    user_unbind = account_sub.add_parser("unbind-wechat", help="解绑账号下的全部微信")
+    user_unbind.add_argument("--username", required=True)
+
     return parser
 
 
@@ -125,6 +156,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "data-quality":
         return _data_quality(args)
+
+    if command == "user":
+        return _user_command(args)
 
     if command == "sync-calendar":
         from app.jobs.tasks import job_sync_calendar
@@ -439,6 +473,114 @@ def _serve(args) -> int:
         log_level=settings.log_level.lower(),
     )
     return 0
+
+
+def _generate_password() -> str:
+    """Random password that satisfies the policy (letters + digits, >= 12)."""
+    import secrets
+    import string
+
+    alphabet = string.ascii_letters + string.digits
+    while True:
+        candidate = "".join(secrets.choice(alphabet) for _ in range(14))
+        if any(c.isalpha() for c in candidate) and any(c.isdigit() for c in candidate):
+            return candidate
+
+
+def _user_command(args) -> int:
+    """Account operations for operators without UI access (break-glass path)."""
+    from sqlalchemy import select
+
+    from app.auth import service
+    from app.db import session_scope
+    from app.db.models import User, UserIdentity
+
+    def fail(message: str) -> int:
+        print(f"错误：{message}", file=sys.stderr)
+        return 1
+
+    with session_scope() as session:
+        if args.user_command == "list":
+            users = session.execute(select(User).order_by(User.id)).scalars().all()
+            if not users:
+                print("暂无账号。用 `stockmaster user add --username <名字>` 创建，首个账号将自动成为管理员。")
+                return 0
+            print(f"{'ID':<5}{'用户名':<20}{'角色':<8}{'状态':<10}{'微信':<6}最近登录")
+            for user in users:
+                bound = session.execute(select(UserIdentity).where(UserIdentity.user_id == user.id)).scalars().all()
+                last = user.last_login_at.strftime("%Y-%m-%d %H:%M") if user.last_login_at else "从未"
+                print(f"{user.id:<5}{user.username:<20}{user.role:<8}{user.status:<10}{len(bound):<6}{last}")
+            return 0
+
+        username = getattr(args, "username", "")
+
+        if args.user_command == "add":
+            password = args.password or _generate_password()
+            try:
+                user = service.create_user(
+                    session,
+                    username=username,
+                    password=password,
+                    email=args.email,
+                    nickname=args.nickname,
+                    role=args.role,
+                    status=args.status,
+                )
+            except (service.AuthError, ValueError) as exc:
+                return fail(getattr(exc, "message", str(exc)))
+            print(f"已创建账号 {user.username}（角色 {user.role}）")
+            if not args.password:
+                print(f"初始密码：{password}")
+            return 0
+
+        user = service.get_user_by_username(session, username)
+        if user is None:
+            return fail(f"账号 {username} 不存在")
+
+        if args.user_command == "passwd":
+            password = args.password or _generate_password()
+            try:
+                service.set_password(session, user, password)
+            except ValueError as exc:
+                return fail(str(exc))
+            print(f"已重置 {user.username} 的密码，旧令牌全部失效")
+            if not args.password:
+                print(f"新密码：{password}")
+            return 0
+
+        if args.user_command == "role":
+            if args.role is None and args.status is None:
+                return fail("请至少指定 --role 或 --status")
+            if args.role is not None:
+                user.role = args.role
+            if args.status is not None:
+                user.status = args.status
+                if args.status == "disabled":
+                    user.token_version += 1
+            session.commit()
+            print(f"{user.username} 当前：角色 {user.role}，状态 {user.status}")
+            return 0
+
+        if args.user_command == "delete":
+            if service.count_admins(session, exclude_id=user.id) == 0 and user.role == "admin":
+                return fail("至少需要保留一名启用的管理员")
+            session.delete(user)
+            session.commit()
+            print(f"已删除 {username}")
+            return 0
+
+        if args.user_command == "unbind-wechat":
+            identities = list(session.execute(select(UserIdentity).where(UserIdentity.user_id == user.id)).scalars())
+            if not identities:
+                print(f"{username} 未绑定微信")
+                return 0
+            for identity in identities:
+                session.delete(identity)
+            session.commit()
+            print(f"已解绑 {username} 的 {len(identities)} 个微信绑定")
+            return 0
+
+    return fail(f"未知的 user 子命令：{args.user_command}")
 
 
 if __name__ == "__main__":

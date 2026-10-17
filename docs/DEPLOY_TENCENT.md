@@ -92,6 +92,9 @@ vim .env
 | `SM_IMAGE` | 镜像地址，`deploy.sh` 每次按版本号自动覆写，手工改无意义 |
 | `SM_SCHEDULER_ENABLED` | 内置 APScheduler（收盘后同步 + 预警巡检）。**同一份数据只允许一个实例开着** |
 | `SM_SYNC_WORKERS` | baostock 并发敏感，建议 ≤ 4 |
+| `SM_AUTH_ENABLED` | 是否强制登录。**端口对外可达时必须设为 true** |
+| `SM_ADMIN_USERNAME` / `SM_ADMIN_PASSWORD` | 启动时确保存在的管理员，首次部署建议填 |
+| `SM_WECHAT_APP_ID` / `SM_WECHAT_APP_SECRET` | 微信登录凭据，不填则登录页不显示微信按钮 |
 
 > `.env` 不在 git 追踪中，`.dockerignore` 也已排除 —— 不会被提交，也不会被打进镜像。
 > 容器内的运行期配置全部由 `docker-compose.prod.yml` 的 `environment` 段注入。
@@ -168,6 +171,37 @@ sudo bash /opt/stockmaster/deploy/setup-tls.sh
 > 会与 cndb 自己的 `/api/v1` 撞车。
 
 ---
+
+### 6. 开启登录与微信登录
+
+1. 在 `.env` 里设 `SM_AUTH_ENABLED=true`，并填 `SM_ADMIN_USERNAME` / `SM_ADMIN_PASSWORD`：
+
+   ```bash
+   cd /opt/stockmaster
+   printf '\nSM_AUTH_ENABLED=true\nSM_ADMIN_USERNAME=boss\nSM_ADMIN_PASSWORD=<强密码>\n' >> .env
+   SKIP_BUILD=1 ./deploy/deploy.sh      # 只改环境变量，不重建镜像
+   ```
+
+2. 微信扫码登录（网站应用）：
+
+   - 在 open.weixin.qq.com 创建「网站应用」并通过审核，拿到 AppID / AppSecret；
+   - 授权回调域填 `stock.gookeryoung.cn`（只填域名，不带协议与路径）；
+   - `.env` 追加：
+
+     ```
+     SM_WECHAT_LOGIN_MODE=open
+     SM_WECHAT_APP_ID=wx****************
+     SM_WECHAT_APP_SECRET=****************
+     SM_WECHAT_REDIRECT_URI=https://stock.gookeryoung.cn/api/v1/auth/wechat/callback
+     ```
+
+   - 再次 `SKIP_BUILD=1 ./deploy/deploy.sh`，登录页会出现绿色「微信扫码登录」。
+
+3. 没有微信凭据时可用 `SM_WECHAT_LOGIN_MODE=mock` 演练完整链路（**仅限本地/临时验证**，
+   mock 模式下任何人输入任意昵称都能拿到账号，生产必须保持 `open`）。
+
+> 令牌签名密钥留空会自动生成到数据卷 `/data/.auth_secret`，随卷一起备份即可；
+> 显式配置 `SM_AUTH_SECRET_KEY` 时，更换它等于让全部已登录会话立即失效。
 
 ## 三、日常发布
 
@@ -272,5 +306,6 @@ curl -v http://127.0.0.1:8770/api/v1/health    # 服务器本机探测，绕过�
 - [ ] 预警 webhook（若填写）指向可信地址
 - [ ] 已确认 `deploy.sh` 生成的预备份能实际恢复
 
-> StockMaster 是**无用户体系的研究工具**：只要端口可达，任何能访问该地址的人都可读写数据。
-> 若需要对外公开，建议在域名前加一层鉴权（或只在内网/白名单 IP 内开放该端口）。
+> StockMaster 的登录默认**关闭**：只要端口可达，任何能访问该地址的人都可读写数据。
+> 对外公开前务必设 `SM_AUTH_ENABLED=true`（并配置管理员），或只在内网/白名单 IP 内开放该端口。
+> 微信登录的 `mock` 模式会跳过真实身份校验，生产环境必须使用 `open`/`mp`。

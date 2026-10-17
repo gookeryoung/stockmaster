@@ -10,6 +10,8 @@ Design notes
   and ST status are point-in-time facts.
 * Alert delivery is deduplicated by a unique ``(rule_id, dedup_key)`` constraint,
   which makes evaluation idempotent no matter how often the scanner runs.
+* Authentication tables are deliberately standalone (no FKs from market data), so
+  the quant pipeline keeps working unchanged when accounts are switched off.
 """
 
 from __future__ import annotations
@@ -467,3 +469,121 @@ class DataSyncError(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (Index("ix_syncerr_job", "job", "code"),)
+
+
+# --------------------------------------------------------------------------- #
+# Accounts and authentication
+# --------------------------------------------------------------------------- #
+
+
+class User(Base):
+    """A local account.
+
+    ``token_version`` is embedded in every issued JWT and compared on each
+    request: bumping it invalidates all outstanding tokens for that user, which
+    gives stateless tokens a working "log out everywhere" / "password changed"
+    semantic without a session table.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    # Empty for accounts created purely through WeChat; they can set one later.
+    password_hash: Mapped[str] = mapped_column(String(255), default="")
+    nickname: Mapped[str] = mapped_column(String(64), default="")
+    avatar_url: Mapped[str] = mapped_column(String(512), default="")
+    role: Mapped[str] = mapped_column(String(16), default="user")  # admin | user
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active | disabled
+    token_version: Mapped[int] = mapped_column(Integer, default=1)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_login_ip: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (Index("ix_users_role_status", "role", "status"),)
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == "admin"
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == "active"
+
+    @property
+    def display_name(self) -> str:
+        return self.nickname or self.username
+
+
+class UserIdentity(Base):
+    """A third-party login binding (currently WeChat).
+
+    ``unionid`` is preserved when WeChat supplies it so one person is not split
+    into two accounts after the same 开放平台 account authorises both a
+    website app and a public account.
+    """
+
+    __tablename__ = "user_identities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(16), default="wechat")
+    openid: Mapped[str] = mapped_column(String(128))
+    unionid: Mapped[str] = mapped_column(String(128), default="")
+    nickname: Mapped[str] = mapped_column(String(64), default="")
+    avatar_url: Mapped[str] = mapped_column(String(512), default="")
+    raw_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("provider", "openid", name="uq_identity_provider_openid"),
+        Index("ix_identity_unionid", "provider", "unionid"),
+    )
+
+
+class AuthFlowState(Base):
+    """Single-use state for OAuth round-trips and login tickets.
+
+    ``kind='oauth'`` protects the redirect (CSRF/replay) and carries where the
+    browser should land afterwards. ``kind='ticket'`` is the short-lived,
+    one-time credential handed to the SPA in the URL instead of a real token, so
+    access tokens never appear in browser history or referrer headers.
+    """
+
+    __tablename__ = "auth_flow_states"
+
+    state: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), default="oauth")  # oauth | ticket
+    provider: Mapped[str] = mapped_column(String(16), default="")
+    redirect_to: Mapped[str] = mapped_column(String(512), default="/")
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (Index("ix_auth_flow_expires", "expires_at"),)
+
+
+class AuthAuditLog(Base):
+    """Login / account-management trail.
+
+    Kept intentionally small (no request bodies) and prunable by age; it exists so
+    that "who changed this account" is answerable without external logging.
+    """
+
+    __tablename__ = "auth_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    action: Mapped[str] = mapped_column(String(64))
+    detail: Mapped[str] = mapped_column(String(512), default="")
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    user_agent: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (Index("ix_auth_audit_created", "created_at"),)

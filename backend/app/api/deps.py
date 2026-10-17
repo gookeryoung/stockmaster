@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -11,10 +9,10 @@ from app.core.errors import DataError, SymbolNotFound
 from app.core.symbols import normalize
 from app.db.session import get_db
 
-
-def db_session() -> Iterator[Session]:
-    """Database session dependency."""
-    yield from get_db()
+# Aliased rather than wrapped: FastAPI caches a dependency per request *by
+# callable*, so a wrapper would create a second session and any ORM instance
+# loaded by one (e.g. the authenticated user) would be detached in the other.
+db_session = get_db
 
 
 def canonical_code(code: str) -> str:

@@ -39,3 +39,15 @@ export function yearsAgoISO(years: number): string {
   d.setFullYear(d.getFullYear() - years);
   return d.toISOString().slice(0, 10);
 }
+
+/** Local datetime for account tables; ISO strings arrive as naive UTC. */
+export function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const iso = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+}

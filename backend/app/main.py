@@ -37,6 +37,8 @@ async def lifespan(
 
     init_db()
 
+    _bootstrap_accounts()
+
     from app.jobs.scheduler import start_scheduler, stop_scheduler
 
     start_scheduler()
@@ -54,6 +56,43 @@ async def lifespan(
             log.debug("provider shutdown raised: %s", exc)
 
 
+def _bootstrap_accounts() -> None:
+    """Create the configured administrator and log the effective auth posture."""
+    from app.auth import service
+    from app.db import session_scope
+
+    try:
+        with session_scope() as session:
+            service.bootstrap_admin(session)
+            service.purge_flow_states(session)
+    except Exception as exc:  # pragma: no cover - never block startup on this
+        log.warning("account bootstrap failed: %s", exc)
+
+    mode = "已开启（需登录）" if settings.auth_enabled else "未开启（本机直连）"
+    log.info("鉴权：%s；微信登录：%s", mode, settings.wechat_mode)
+    if settings.wechat_mode == "mock":
+        log.warning("微信登录处于 mock 模式，任何人都能伪造身份；生产环境请配置真实 AppID/AppSecret")
+    if settings.auth_enabled and not (settings.auth_admin_username or _has_admin()):
+        log.warning("已开启鉴权但没有任何管理员：请设置 SM_ADMIN_USERNAME/SM_ADMIN_PASSWORD 或先用 CLI 创建")
+
+
+def _has_admin() -> bool:
+    from sqlalchemy import func, select
+
+    from app.db import session_scope
+    from app.db.models import User
+
+    try:
+        with session_scope() as session:
+            return bool(
+                session.execute(
+                    select(func.count()).select_from(User).where(User.role == "admin", User.status == "active")
+                ).scalar()
+            )
+    except Exception:  # pragma: no cover - defensive
+        return True
+
+
 def create_app() -> FastAPI:
     """Build the application."""
     app = FastAPI(
@@ -65,6 +104,13 @@ def create_app() -> FastAPI:
         version=__version__,
         lifespan=lifespan,
     )
+
+    # Registered *before* CORS so that CORS ends up outermost: a 401 emitted by
+    # the gate must still carry CORS headers, otherwise the Vite dev server sees
+    # an opaque network error instead of "please log in".
+    from app.auth.gate import AuthGateMiddleware
+
+    app.add_middleware(AuthGateMiddleware)
 
     # The frontend is served from the same origin in production; CORS exists only
     # so the Vite dev server (different port) can talk to the API during development.
@@ -80,7 +126,7 @@ def create_app() -> FastAPI:
     )
 
     # --- API routers ---
-    from app.api.v1 import alerts, analysis, backtest, market, predict, system
+    from app.api.v1 import alerts, analysis, auth, backtest, market, predict, system, users
 
     api_prefix = "/api/v1"
     app.include_router(market.router, prefix=api_prefix)
@@ -89,6 +135,8 @@ def create_app() -> FastAPI:
     app.include_router(backtest.router, prefix=api_prefix)
     app.include_router(alerts.router, prefix=api_prefix)
     app.include_router(system.router, prefix=api_prefix)
+    app.include_router(auth.router, prefix=api_prefix)
+    app.include_router(users.router, prefix=api_prefix)
 
     # --- error handling: convert domain errors into meaningful HTTP responses ---
     @app.exception_handler(ProviderUnavailable)

@@ -17,7 +17,8 @@
 | **预测** | 梯度提升 / 随机森林 / 逻辑回归；严格时序切分（含标签净化 purge）与滚动走查；输出上涨概率、AUC/IC 及**随机基线对照** |
 | **回测** | 自研日线撮合引擎：T+1、涨跌停不可成交、停牌、佣金（含最低 5 元）、印花税、过户费、滑点 |
 | **预警** | 13 类规则（价格/涨跌幅/量比/换手/均线/MACD/RSI/KDJ/BOLL/新高/回撤/预测/因子分）；**去重幂等**；WebSocket/Webhook 推送 |
-| **工作台** | 7 个页面：总览、行情（K线+指标）、分析、预测、回测、预警、设置 |
+| **工作台** | 8 个页面：总览、行情（K线+指标）、分析、预测、回测、预警、设置、用户 |
+| **账号** | 用户名/邮箱 + 密码、微信扫码登录（开放平台/公众号）、账号绑定与解绑、角色（管理员/普通用户）、启用/禁用、审计留痕；可选强制登录 |
 
 ---
 
@@ -388,6 +389,44 @@ uv run --with prek prek run --all-files   # 手动全量运行
 | `SM_PREDICT_HORIZONS` | 1,5,20 | 预测周期 |
 | `SM_SCHEDULER_ENABLED` | true | 是否启用定时任务 |
 | `SM_ALERT_WEBHOOK_URL` | 空 | 预警推送 Webhook（留空则不外部推送） |
+| `SM_AUTH_ENABLED` | false | 是否强制登录（false 时接口开放，账号页仍可用） |
+| `SM_AUTH_SECRET_KEY` | 空 | JWT 签名密钥，留空自动生成到 `<数据目录>/.auth_secret` |
+| `SM_AUTH_ALLOW_REGISTER` | true | 是否允许自助注册（首个账号自动成为管理员） |
+| `SM_ADMIN_USERNAME` / `SM_ADMIN_PASSWORD` | 空 | 启动时确保存在的管理员（幂等，不覆盖已有密码） |
+| `SM_WECHAT_LOGIN_MODE` | open | `open` 网站应用扫码 / `mp` 公众号网页授权 / `mock` 本地模拟 / `off` 关闭 |
+| `SM_WECHAT_APP_ID` / `SM_WECHAT_APP_SECRET` | 空 | 微信开放平台（或公众号）凭据 |
+| `SM_WECHAT_REDIRECT_URI` | 空 | 授权回调，须与微信平台登记完全一致 |
+
+### 账号与微信登录
+
+三种用法，按需选择：
+
+| 场景 | 配置 | 行为 |
+|---|---|---|
+| 单机自用（默认） | `SM_AUTH_ENABLED=false` | 接口全开放，页面右上角保留「账号入口」，可先建账号再开闸 |
+| 多人使用 | `SM_AUTH_ENABLED=true` | 除 `/api/v1/health` 与登录接口外一律要求登录；首个注册账号即管理员 |
+| 无凭据想先看流程 | `SM_WECHAT_LOGIN_MODE=mock` | 微信按钮走本地模拟授权页，账号创建/绑定/票据交换全部真跑 |
+
+微信登录两种接入方式：
+
+- **网站应用扫码（推荐，PC 端）**：open.weixin.qq.com 创建「网站应用」→ 拿到 AppID/AppSecret
+  → 授权回调域填 `stock.gookeryoung.cn` → `.env` 设
+  `SM_WECHAT_LOGIN_MODE=open`，`SM_WECHAT_REDIRECT_URI=https://stock.gookeryoung.cn/api/v1/auth/wechat/callback`。
+- **公众号网页授权（微信内打开）**：需已认证服务号，`SM_WECHAT_LOGIN_MODE=mp`，回调域名同样要在
+  公众号后台配置为网页授权域名。
+
+首次开启建议用 CLI 建管理员（也可由 `SM_ADMIN_USERNAME/SM_ADMIN_PASSWORD` 自动创建）：
+
+```bash
+uv run stockmaster user add --username boss --role admin   # 打印随机初始密码
+uv run stockmaster user list
+uv run stockmaster user passwd --username boss
+uv run stockmaster user role --username boss --status disabled
+```
+
+实现要点：密码用 PBKDF2-HMAC-SHA256（60 万轮，参数写在哈希内可平滑升级）；令牌为自签 HS256 JWT，
+`token_version` 随改密/禁用/退出登录递增，因此旧令牌立即失效；微信回调只把**一次性 ticket**
+带给前端，真正的令牌通过 `POST /auth/ticket` 换取，避免令牌出现在浏览器历史与 Referer 里。
 
 ### 定时任务（Asia/Shanghai，仅交易日）
 `15:20` 日历 → `15:35` 日线 → `16:05` 指数 → `16:30` 指标因子 → `16:45` 预测 → `17:00` 预警 → 盘中每 60s 快照 → 周六 `02:00` 重训。
@@ -396,7 +435,10 @@ uv run --with prek prek run --all-files   # 手动全量运行
 
 ## 8. 已知限制
 
-- **单机单用户**，默认仅监听 `127.0.0.1`，无登录与权限体系。
+- **数据不按用户隔离**：自选股、预警规则是全局共享的（账号体系只做访问控制与操作留痕），
+  多租户隔离未实现。
+- **无邮件/短信找回**：忘记密码需管理员在「用户」页或 CLI 重置；微信登录可作为免密入口。
+- 默认仅监听 `127.0.0.1`；对外暴露时**务必**开启 `SM_AUTH_ENABLED=true` 或加一层前置鉴权。
 - 仅日线级；不含分钟级、Level-2、实盘下单、融资融券/做空。
 - 后复权（hfq）为**按需派生**，不落库（API 会明确返回 501 而非静默降级）。
 - 全市场指标/因子历史未落库（只存最新一行）；回测时按需从日线即时重算，以换取更小的库体积。

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import __version__
 from app.api.deps import db_session
+from app.auth.deps import require_admin
 from app.config import settings
 from app.core.logging import get_logger
 from app.core.symbols import normalize
@@ -212,7 +213,11 @@ def data_quality(
     return report.as_dict(only_problems=only_problems)
 
 
-@router.post("/system/jobs/{job_name}", response_model=JobResult)
+@router.post(
+    "/system/jobs/{job_name}",
+    response_model=JobResult,
+    dependencies=[Depends(require_admin)],
+)
 def run_job(
     job_name: str,
     full: bool = False,

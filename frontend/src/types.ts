@@ -175,6 +175,18 @@ export interface RuleTypeInfo {
   params: Record<string, { type: string; default?: unknown; choices?: unknown[]; required?: boolean }>;
 }
 
+export interface SchedulerJob {
+  id: string;
+  /** 中文任务名（后端 JOB_META 提供） */
+  label: string;
+  /** 中文说明 */
+  description: string;
+  /** 人类可读的执行计划，如「交易日 15:20」 */
+  schedule: string;
+  next_run: string | null;
+  trigger?: string;
+}
+
 export interface SystemStatus {
   version: string;
   timezone: string;
@@ -187,7 +199,7 @@ export interface SystemStatus {
     served: number;
     last_error: string;
   }>;
-  scheduler: { running: boolean; jobs?: Array<{ id: string; next_run: string | null }> };
+  scheduler: { running: boolean; timezone?: string; jobs?: SchedulerJob[] };
   data: Record<string, unknown>;
   disclaimer: string;
 }
@@ -198,4 +210,64 @@ export interface WatchlistItem {
   code: string;
   name: string;
   note: string;
+}
+
+// ---------------------------------------------------------------------------
+// Accounts / authentication
+// ---------------------------------------------------------------------------
+
+export type UserRole = "admin" | "user";
+export type UserStatus = "active" | "disabled";
+
+export interface Identity {
+  id: number;
+  provider: string;
+  nickname: string;
+  avatar_url: string;
+  created_at: string | null;
+}
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  email: string | null;
+  nickname: string;
+  avatar_url: string;
+  role: UserRole;
+  status: UserStatus;
+  last_login_at: string | null;
+  created_at: string | null;
+  has_password: boolean;
+  identities: Identity[];
+}
+
+export interface AuthConfig {
+  auth_enabled: boolean;
+  allow_register: boolean;
+  wechat_enabled: boolean;
+  wechat_mode: string;
+  has_users: boolean;
+  version: string;
+}
+
+export interface TokenResponse {
+  token: string;
+  token_type: string;
+  expires_at: string;
+  user: AuthUser;
+}
+
+export interface UserPage {
+  total: number;
+  items: AuthUser[];
+}
+
+export interface AuditLog {
+  id: number;
+  user_id: number | null;
+  username: string;
+  action: string;
+  detail: string;
+  ip: string;
+  created_at: string | null;
 }
