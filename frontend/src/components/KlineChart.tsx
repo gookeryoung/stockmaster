@@ -13,7 +13,8 @@ import type { Bar, IndicatorSnapshot } from "../types";
 interface Props {
   bars: Bar[];
   indicators?: IndicatorSnapshot | null;
-  height?: number;
+  /** 数字按 px 处理；也接受 clamp()/vh 等 CSS 长度，便于手机端自适应。 */
+  height?: number | string;
   showMacd?: boolean;
 }
 

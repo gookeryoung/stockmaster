@@ -17,6 +17,59 @@ log = get_logger(__name__)
 
 _scheduler = None
 
+# 中文描述：前端「设置 → 定时任务」直接展示，避免把 job id 当作可读名称。
+# schedule 是给人看的执行计划，cron 表达式仍在 trigger 字段里保留原文。
+JOB_META: dict[str, dict[str, str]] = {
+    "calendar": {
+        "label": "同步交易日历",
+        "description": "刷新未来一年的开市日，任务据此判断是否为交易日",
+        "schedule": "交易日 15:20",
+    },
+    "daily": {
+        "label": "同步个股日线",
+        "description": "按自选股与指数成分增量拉取当日日线",
+        "schedule": "交易日 15:35",
+    },
+    "index_daily": {
+        "label": "同步指数日线",
+        "description": "沪深300、中证500、上证指数等指数日线",
+        "schedule": "交易日 16:05",
+    },
+    "analytics": {
+        "label": "计算指标与因子",
+        "description": "写入技术指标与横截面标准化因子",
+        "schedule": "交易日 16:30",
+    },
+    "predict": {
+        "label": "运行预测",
+        "description": "用当前生效模型对全市场打分",
+        "schedule": "交易日 16:45",
+    },
+    "alerts": {
+        "label": "扫描预警规则",
+        "description": "收盘后评估全部启用规则，按标的与当日去重",
+        "schedule": "交易日 17:00",
+    },
+    "snapshot": {
+        "label": "拉取盘中快照",
+        "description": "盘中定时拉取行情快照，供实时预警使用",
+        "schedule": "",  # 由轮询间隔配置决定，见 scheduler_status
+    },
+    "train": {
+        "label": "训练预测模型",
+        "description": "周末用最新数据重训模型并产出新版本",
+        "schedule": "每周六 02:00",
+    },
+}
+
+
+def _job_label(job_id: str) -> dict[str, str]:
+    """中文标签、说明与执行计划；未登记的任务回退到 job id。"""
+    meta = JOB_META.get(job_id)
+    if meta is None:
+        return {"label": job_id, "description": "", "schedule": ""}
+    return dict(meta)
+
 
 def is_trading_day(day: date | None = None) -> bool:
     """Whether ``day`` is an open session according to the stored calendar.
@@ -155,14 +208,25 @@ def stop_scheduler() -> None:
 
 
 def scheduler_status() -> dict:
-    """Jobs and next run times, for the settings page."""
+    """Jobs and next run times, for the settings page.
+
+    Each job carries ``label`` / ``description`` / ``schedule`` in Chinese so the
+    UI never has to map job ids itself.
+    """
     if _scheduler is None:
         return {"running": False, "jobs": []}
     jobs = []
     for job in _scheduler.get_jobs():
+        meta = _job_label(job.id)
+        schedule = meta["schedule"] or str(job.trigger)
+        if job.id == "snapshot":
+            schedule = f"每 {max(60, settings.alert_poll_seconds)} 秒（交易日）"
         jobs.append(
             {
                 "id": job.id,
+                "label": meta["label"],
+                "description": meta["description"],
+                "schedule": schedule,
                 "next_run": str(job.next_run_time) if job.next_run_time else None,
                 "trigger": str(job.trigger),
             }

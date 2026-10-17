@@ -24,7 +24,7 @@ export default function StatusBar() {
   const schedulerRunning = data.scheduler.running;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b border-slate-800 bg-slate-950/80 px-4 py-1.5 text-xs text-slate-400">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-800 bg-slate-950/80 px-3 py-1.5 text-[11px] text-slate-400 sm:gap-x-5 sm:px-4 sm:text-xs">
       <span>
         版本 <span className="text-slate-200">{data.version}</span>
       </span>

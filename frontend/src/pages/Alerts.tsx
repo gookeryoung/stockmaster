@@ -120,8 +120,8 @@ export default function Alerts() {
       {/* Rule editor */}
       <div className="card space-y-3">
         <div className="text-sm font-medium text-slate-300">新建预警规则</div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <div className="col-span-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
+          <div className="sm:col-span-2">
             <label className="label">规则名称</label>
             <input
               className="input w-full"
@@ -129,7 +129,7 @@ export default function Alerts() {
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="label">规则类型</label>
             <select
               className="input w-full"
@@ -211,7 +211,7 @@ export default function Alerts() {
 
         {/* Dynamic parameters driven by the backend schema */}
         {currentType && (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
             {Object.entries(currentType.params).map(([key, spec]) => (
               <div key={key}>
                 <label className="label">
@@ -258,57 +258,62 @@ export default function Alerts() {
       <div className="card">
         <div className="mb-2 text-sm font-medium text-slate-300">规则列表</div>
         {rules.data?.length ? (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-800">
-                <th className="th">名称</th>
-                <th className="th">类型</th>
-                <th className="th">参数</th>
-                <th className="th">范围</th>
-                <th className="th">状态</th>
-                <th className="th text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rules.data.map((rule) => (
-                <tr key={rule.id} className="border-t border-slate-800/60">
-                  <td className="td">{rule.name}</td>
-                  <td className="td text-slate-400">{rule.rule_type}</td>
-                  <td className="td text-xs text-slate-500">
-                    {JSON.stringify(rule.params)}
-                  </td>
-                  <td className="td text-slate-400">
-                    {rule.scope_type}:{rule.scope_value || "-"}
-                  </td>
-                  <td className="td">
-                    <span
-                      className={`badge ${
-                        rule.enabled
-                          ? "bg-emerald-900/60 text-emerald-300"
-                          : "bg-slate-800 text-slate-400"
-                      }`}
-                    >
-                      {rule.enabled ? "启用" : "停用"}
-                    </span>
-                  </td>
-                  <td className="td text-right">
-                    <button
-                      className="mr-2 text-xs text-sky-400 hover:underline"
-                      onClick={() => toggleRule.mutate({ id: rule.id, enabled: !rule.enabled })}
-                    >
-                      {rule.enabled ? "停用" : "启用"}
-                    </button>
-                    <button
-                      className="text-xs text-red-400 hover:underline"
-                      onClick={() => deleteRule.mutate(rule.id)}
-                    >
-                      删除
-                    </button>
-                  </td>
+          <div className="table-wrap">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-800">
+                  <th className="th">名称</th>
+                  <th className="th hidden md:table-cell">类型</th>
+                  <th className="th hidden md:table-cell">参数</th>
+                  <th className="th">范围</th>
+                  <th className="th">状态</th>
+                  <th className="th text-right">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rules.data.map((rule) => (
+                  <tr key={rule.id} className="border-t border-slate-800/60">
+                    <td className="td">{rule.name}</td>
+                    <td className="td hidden text-slate-400 md:table-cell">{rule.rule_type}</td>
+                    <td className="td hidden max-w-[220px] whitespace-normal text-xs text-slate-500 md:table-cell">
+                      {JSON.stringify(rule.params)}
+                    </td>
+                    <td
+                      className="td max-w-[8rem] truncate text-slate-400"
+                      title={`${rule.scope_type}:${rule.scope_value || "-"}`}
+                    >
+                      {rule.scope_type}:{rule.scope_value || "-"}
+                    </td>
+                    <td className="td">
+                      <span
+                        className={`badge ${
+                          rule.enabled
+                            ? "bg-emerald-900/60 text-emerald-300"
+                            : "bg-slate-800 text-slate-400"
+                        }`}
+                      >
+                        {rule.enabled ? "启用" : "停用"}
+                      </span>
+                    </td>
+                    <td className="td text-right">
+                      <button
+                        className="mr-2 text-xs text-sky-400 hover:underline"
+                        onClick={() => toggleRule.mutate({ id: rule.id, enabled: !rule.enabled })}
+                      >
+                        {rule.enabled ? "停用" : "启用"}
+                      </button>
+                      <button
+                        className="text-xs text-red-400 hover:underline"
+                        onClick={() => deleteRule.mutate(rule.id)}
+                      >
+                        删除
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <p className="text-xs text-slate-500">尚未创建规则。</p>
         )}
@@ -330,56 +335,58 @@ export default function Alerts() {
           </select>
         </div>
         {triggers.data?.length ? (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-800">
-                <th className="th">日期</th>
-                <th className="th">代码</th>
-                <th className="th">类型</th>
-                <th className="th">消息</th>
-                <th className="th">状态</th>
-                <th className="th text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {triggers.data.map((trigger) => (
-                <tr key={trigger.id} className="border-t border-slate-800/60">
-                  <td className="td text-slate-400">{trigger.trade_date}</td>
-                  <td className="td">
-                    {trigger.code}
-                    <span className="ml-1 text-slate-500">{trigger.name}</span>
-                  </td>
-                  <td className="td text-slate-400">{trigger.rule_type}</td>
-                  <td className="td">{trigger.message}</td>
-                  <td className="td">
-                    <span
-                      className={`badge ${
-                        trigger.status === "new"
-                          ? "bg-sky-900/60 text-sky-300"
-                          : "bg-slate-800 text-slate-400"
-                      }`}
-                    >
-                      {trigger.status}
-                    </span>
-                  </td>
-                  <td className="td text-right">
-                    <button
-                      className="mr-2 text-xs text-sky-400 hover:underline"
-                      onClick={() => updateTrigger.mutate({ id: trigger.id, status: "read" })}
-                    >
-                      已读
-                    </button>
-                    <button
-                      className="text-xs text-slate-400 hover:underline"
-                      onClick={() => updateTrigger.mutate({ id: trigger.id, status: "muted" })}
-                    >
-                      静音
-                    </button>
-                  </td>
+          <div className="table-wrap">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-800">
+                  <th className="th hidden md:table-cell">日期</th>
+                  <th className="th">代码</th>
+                  <th className="th hidden md:table-cell">类型</th>
+                  <th className="th">消息</th>
+                  <th className="th">状态</th>
+                  <th className="th text-right">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {triggers.data.map((trigger) => (
+                  <tr key={trigger.id} className="border-t border-slate-800/60">
+                    <td className="td hidden text-slate-400 md:table-cell">{trigger.trade_date}</td>
+                    <td className="td">
+                      {trigger.code}
+                      <span className="ml-1 hidden text-slate-500 sm:inline">{trigger.name}</span>
+                    </td>
+                    <td className="td hidden text-slate-400 md:table-cell">{trigger.rule_type}</td>
+                    <td className="td min-w-[9rem] whitespace-normal">{trigger.message}</td>
+                    <td className="td">
+                      <span
+                        className={`badge ${
+                          trigger.status === "new"
+                            ? "bg-sky-900/60 text-sky-300"
+                            : "bg-slate-800 text-slate-400"
+                        }`}
+                      >
+                        {trigger.status}
+                      </span>
+                    </td>
+                    <td className="td text-right">
+                      <button
+                        className="mr-2 text-xs text-sky-400 hover:underline"
+                        onClick={() => updateTrigger.mutate({ id: trigger.id, status: "read" })}
+                      >
+                        已读
+                      </button>
+                      <button
+                        className="text-xs text-slate-400 hover:underline"
+                        onClick={() => updateTrigger.mutate({ id: trigger.id, status: "muted" })}
+                      >
+                        静音
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <p className="text-xs text-slate-500">暂无触发记录。</p>
         )}

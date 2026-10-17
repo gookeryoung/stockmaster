@@ -142,7 +142,7 @@ export default function Predict() {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm md:grid-cols-4">
+          <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2 md:grid-cols-4">
             <Metric label="样本外 AUC" value={metrics.auc} digits={4} />
             <Metric label="AUC 基线" value={metrics.auc_baseline} digits={4} />
             <Metric label="准确率" value={metrics.accuracy} digits={4} />
@@ -181,42 +181,44 @@ export default function Predict() {
           </span>
         </div>
         {predictions.data?.items?.length ? (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-800">
-                <th className="th">代码</th>
-                <th className="th">名称</th>
-                <th className="th text-right">上涨概率</th>
-                <th className="th text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {predictions.data.items.map((item) => (
-                <tr key={`${item.code}-${item.horizon}`} className="border-t border-slate-800/60">
-                  <td className="td">{item.code}</td>
-                  <td className="td text-slate-400">{item.name}</td>
-                  <td className="td text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <div className="h-1.5 w-24 overflow-hidden rounded bg-slate-800">
-                        <div
-                          className="h-full bg-sky-500"
-                          style={{ width: `${(item.prob_up ?? 0) * 100}%` }}
-                        />
-                      </div>
-                      <span className="w-14 text-right text-sky-300">
-                        {item.prob_up === null ? "--" : `${(item.prob_up * 100).toFixed(1)}%`}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="td text-right">
-                    <button className="text-xs text-sky-400 hover:underline" onClick={() => setDetailCode(item.code)}>
-                      查看
-                    </button>
-                  </td>
+          <div className="table-wrap">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-800">
+                  <th className="th">代码</th>
+                  <th className="th">名称</th>
+                  <th className="th text-right">上涨概率</th>
+                  <th className="th text-right">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {predictions.data.items.map((item) => (
+                  <tr key={`${item.code}-${item.horizon}`} className="border-t border-slate-800/60">
+                    <td className="td">{item.code}</td>
+                    <td className="td text-slate-400">{item.name}</td>
+                    <td className="td text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="h-1.5 w-16 overflow-hidden rounded bg-slate-800 sm:w-24">
+                          <div
+                            className="h-full bg-sky-500"
+                            style={{ width: `${(item.prob_up ?? 0) * 100}%` }}
+                          />
+                        </div>
+                        <span className="w-14 text-right text-sky-300">
+                          {item.prob_up === null ? "--" : `${(item.prob_up * 100).toFixed(1)}%`}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="td text-right">
+                      <button className="text-xs text-sky-400 hover:underline" onClick={() => setDetailCode(item.code)}>
+                        查看
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <p className="text-xs text-slate-500">暂无预测结果，请先训练并运行预测。</p>
         )}
@@ -247,28 +249,30 @@ export default function Predict() {
               </div>
               <div className="text-xs text-slate-500">{String(detail.data.disclaimer ?? "")}</div>
               {Array.isArray(detail.data.top_features) && (
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-slate-800">
-                      <th className="th">特征</th>
-                      <th className="th text-right">取值</th>
-                      <th className="th text-right">重要性</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(detail.data.top_features as Array<Record<string, number>>).map((row) => (
-                      <tr key={String(row.feature)} className="border-t border-slate-800/60">
-                        <td className="td text-slate-400">{String(row.feature)}</td>
-                        <td className="td text-right">
-                          {row.value === null ? "--" : formatNumber(row.value, 4)}
-                        </td>
-                        <td className="td text-right">
-                          {row.importance === null ? "--" : formatNumber(row.importance, 4)}
-                        </td>
+                <div className="table-wrap">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-slate-800">
+                        <th className="th">特征</th>
+                        <th className="th text-right">取值</th>
+                        <th className="th text-right">重要性</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {(detail.data.top_features as Array<Record<string, number>>).map((row) => (
+                        <tr key={String(row.feature)} className="border-t border-slate-800/60">
+                          <td className="td text-slate-400">{String(row.feature)}</td>
+                          <td className="td text-right">
+                            {row.value === null ? "--" : formatNumber(row.value, 4)}
+                          </td>
+                          <td className="td text-right">
+                            {row.importance === null ? "--" : formatNumber(row.importance, 4)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           )}

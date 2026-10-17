@@ -123,8 +123,8 @@ export default function Backtest() {
     <div className="space-y-4">
       <div className="card space-y-3">
         <div className="text-sm font-medium text-slate-300">回测参数</div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <div className="col-span-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
+          <div className="sm:col-span-2">
             <label className="label">策略</label>
             <select
               className="input w-full"
@@ -138,7 +138,7 @@ export default function Backtest() {
               ))}
             </select>
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="label">标的（逗号分隔）</label>
             <input className="input w-full" value={codes} onChange={(e) => setCodes(e.target.value)} />
           </div>
@@ -241,7 +241,7 @@ export default function Backtest() {
           {equityOption && (
             <div className="card">
               <div className="mb-2 text-sm font-medium text-slate-300">净值与回撤曲线</div>
-              <EChart option={equityOption} height={520} />
+              <EChart option={equityOption} height="clamp(320px, 58vh, 520px)" />
             </div>
           )}
 
@@ -250,42 +250,44 @@ export default function Backtest() {
               成交明细 <span className="text-xs text-slate-500">共 {result.trades.length} 条</span>
             </div>
             <div className="max-h-96 overflow-auto">
-              <table className="w-full">
-                <thead className="sticky top-0 bg-slate-900">
-                  <tr>
-                    <th className="th">日期</th>
-                    <th className="th">代码</th>
-                    <th className="th">方向</th>
-                    <th className="th text-right">价格</th>
-                    <th className="th text-right">数量</th>
-                    <th className="th text-right">金额</th>
-                    <th className="th text-right">佣金</th>
-                    <th className="th text-right">印花税</th>
-                    <th className="th text-right">盈亏</th>
-                    <th className="th">备注</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.trades.map((trade, index) => (
-                    <tr key={`${trade.trade_date}-${trade.code}-${index}`} className="border-t border-slate-800/60">
-                      <td className="td text-slate-400">{trade.trade_date}</td>
-                      <td className="td">{trade.code}</td>
-                      <td className={`td ${sideColor(trade.side)}`}>
-                        {trade.side === "buy" ? "买入" : "卖出"}
-                      </td>
-                      <td className="td text-right">{formatNumber(trade.price, 3)}</td>
-                      <td className="td text-right">{trade.shares}</td>
-                      <td className="td text-right">{formatNumber(trade.gross, 2)}</td>
-                      <td className="td text-right">{formatNumber(trade.commission, 2)}</td>
-                      <td className="td text-right">{formatNumber(trade.stamp_tax, 2)}</td>
-                      <td className={`td text-right ${trade.pnl === null ? "" : sideColor(trade.pnl > 0 ? "buy" : "sell")}`}>
-                        {trade.pnl === null ? "--" : formatNumber(trade.pnl, 2)}
-                      </td>
-                      <td className="td text-slate-500">{trade.reason}</td>
+              <div className="table-wrap">
+                <table className="w-full">
+                  <thead className="sticky top-0 bg-slate-900">
+                    <tr>
+                      <th className="th">日期</th>
+                      <th className="th">代码</th>
+                      <th className="th">方向</th>
+                      <th className="th text-right">价格</th>
+                      <th className="th text-right">数量</th>
+                      <th className="th text-right">金额</th>
+                      <th className="th text-right">佣金</th>
+                      <th className="th text-right">印花税</th>
+                      <th className="th text-right">盈亏</th>
+                      <th className="th">备注</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {result.trades.map((trade, index) => (
+                      <tr key={`${trade.trade_date}-${trade.code}-${index}`} className="border-t border-slate-800/60">
+                        <td className="td text-slate-400">{trade.trade_date}</td>
+                        <td className="td">{trade.code}</td>
+                        <td className={`td ${sideColor(trade.side)}`}>
+                          {trade.side === "buy" ? "买入" : "卖出"}
+                        </td>
+                        <td className="td text-right">{formatNumber(trade.price, 3)}</td>
+                        <td className="td text-right">{trade.shares}</td>
+                        <td className="td text-right">{formatNumber(trade.gross, 2)}</td>
+                        <td className="td text-right">{formatNumber(trade.commission, 2)}</td>
+                        <td className="td text-right">{formatNumber(trade.stamp_tax, 2)}</td>
+                        <td className={`td text-right ${trade.pnl === null ? "" : sideColor(trade.pnl > 0 ? "buy" : "sell")}`}>
+                          {trade.pnl === null ? "--" : formatNumber(trade.pnl, 2)}
+                        </td>
+                        <td className="td text-slate-500">{trade.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </>
@@ -294,28 +296,30 @@ export default function Backtest() {
       <div className="card">
         <div className="mb-2 text-sm font-medium text-slate-300">历史回测记录</div>
         {history.data?.length ? (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-800">
-                <th className="th">运行 ID</th>
-                <th className="th">策略</th>
-                <th className="th text-right">总收益</th>
-                <th className="th text-right">最大回撤</th>
-                <th className="th">状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.data.map((item) => (
-                <tr key={item.run_id} className="border-t border-slate-800/60">
-                  <td className="td text-slate-500">{item.run_id.slice(0, 8)}</td>
-                  <td className="td">{item.strategy}</td>
-                  <td className="td text-right">{formatPct(Number(item.metrics?.total_return) * 100)}</td>
-                  <td className="td text-right">{formatPct(Number(item.metrics?.max_drawdown) * 100)}</td>
-                  <td className="td text-slate-400">{item.status}</td>
+          <div className="table-wrap">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-800">
+                  <th className="th">运行 ID</th>
+                  <th className="th">策略</th>
+                  <th className="th text-right">总收益</th>
+                  <th className="th text-right">最大回撤</th>
+                  <th className="th">状态</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {history.data.map((item) => (
+                  <tr key={item.run_id} className="border-t border-slate-800/60">
+                    <td className="td text-slate-500">{item.run_id.slice(0, 8)}</td>
+                    <td className="td">{item.strategy}</td>
+                    <td className="td text-right">{formatPct(Number(item.metrics?.total_return) * 100)}</td>
+                    <td className="td text-right">{formatPct(Number(item.metrics?.max_drawdown) * 100)}</td>
+                    <td className="td text-slate-400">{item.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <p className="text-xs text-slate-500">暂无历史记录。</p>
         )}

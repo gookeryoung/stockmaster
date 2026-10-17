@@ -114,7 +114,7 @@ export default function Analyze() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <input
-          className="input w-48"
+          className="input w-full sm:w-48"
           value={code}
           onChange={(event) => setCode(event.target.value.trim().toUpperCase())}
           placeholder="证券代码"
@@ -135,24 +135,26 @@ export default function Analyze() {
               {factors.data.name || factors.data.code} · 因子快照{" "}
               <span className="text-xs text-slate-500">{factors.data.trade_date}</span>
             </div>
-            <table className="w-full">
-              <tbody>
-                {Object.entries(factors.data.factors).map(([key, value]) => (
-                  <tr key={key} className="border-t border-slate-800/50">
-                    <td className="td text-slate-400">{key}</td>
-                    <td className="td text-right">
-                      {value === null ? "--" : value.toFixed(4)}
+            <div className="table-wrap">
+              <table className="w-full">
+                <tbody>
+                  {Object.entries(factors.data.factors).map(([key, value]) => (
+                    <tr key={key} className="border-t border-slate-800/50">
+                      <td className="td text-slate-400">{key}</td>
+                      <td className="td text-right">
+                        {value === null ? "--" : value.toFixed(4)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="border-t border-slate-700">
+                    <td className="td font-medium text-slate-300">综合评分</td>
+                    <td className="td text-right font-medium text-sky-300">
+                      {factors.data.score === null ? "--" : factors.data.score.toFixed(4)}
                     </td>
                   </tr>
-                ))}
-                <tr className="border-t border-slate-700">
-                  <td className="td font-medium text-slate-300">综合评分</td>
-                  <td className="td text-right font-medium text-sky-300">
-                    {factors.data.score === null ? "--" : factors.data.score.toFixed(4)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {radarOption && (
@@ -194,45 +196,47 @@ export default function Analyze() {
         )}
 
         {screen.data && (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-800">
-                <th className="th">代码</th>
-                <th className="th">名称</th>
-                <th className="th text-right">评分</th>
-                <th className="th text-right">动量20</th>
-                <th className="th text-right">动量60</th>
-                <th className="th text-right">波动20</th>
-                <th className="th text-right">换手20</th>
-                <th className="th text-right">RSI14</th>
-              </tr>
-            </thead>
-            <tbody>
-              {screen.data.map((row) => (
-                <tr key={`${row.code}-${row.trade_date}`} className="border-t border-slate-800/60">
-                  <td className="td">{row.code}</td>
-                  <td className="td text-slate-400">{row.name}</td>
-                  <td className="td text-right text-sky-300">{formatNumber(row.score, 3)}</td>
-                  <td className={`td text-right ${changeColor(row.mom_20)}`}>
-                    {formatPct(row.mom_20)}
-                  </td>
-                  <td className={`td text-right ${changeColor(row.mom_60)}`}>
-                    {formatPct(row.mom_60)}
-                  </td>
-                  <td className="td text-right">{formatNumber(row.vol_20, 3)}</td>
-                  <td className="td text-right">{formatNumber(row.turnover_20, 4)}</td>
-                  <td className="td text-right">{formatNumber(row.rsi_14, 2)}</td>
+          <div className="table-wrap">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-800">
+                  <th className="th">代码</th>
+                  <th className="th">名称</th>
+                  <th className="th text-right">评分</th>
+                  <th className="th text-right">动量20</th>
+                  <th className="th text-right">动量60</th>
+                  <th className="th text-right">波动20</th>
+                  <th className="th text-right">换手20</th>
+                  <th className="th text-right">RSI14</th>
                 </tr>
-              ))}
-              {screen.data.length === 0 && (
-                <tr>
-                  <td className="td text-slate-500" colSpan={8}>
-                    无匹配结果
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {screen.data.map((row) => (
+                  <tr key={`${row.code}-${row.trade_date}`} className="border-t border-slate-800/60">
+                    <td className="td">{row.code}</td>
+                    <td className="td text-slate-400">{row.name}</td>
+                    <td className="td text-right text-sky-300">{formatNumber(row.score, 3)}</td>
+                    <td className={`td text-right ${changeColor(row.mom_20)}`}>
+                      {formatPct(row.mom_20)}
+                    </td>
+                    <td className={`td text-right ${changeColor(row.mom_60)}`}>
+                      {formatPct(row.mom_60)}
+                    </td>
+                    <td className="td text-right">{formatNumber(row.vol_20, 3)}</td>
+                    <td className="td text-right">{formatNumber(row.turnover_20, 4)}</td>
+                    <td className="td text-right">{formatNumber(row.rsi_14, 2)}</td>
+                  </tr>
+                ))}
+                {screen.data.length === 0 && (
+                  <tr>
+                    <td className="td text-slate-500" colSpan={8}>
+                      无匹配结果
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -240,7 +244,7 @@ export default function Analyze() {
       <div className="card space-y-3">
         <div className="text-sm font-medium text-slate-300">相关性分析</div>
         <div className="flex flex-wrap items-end gap-2">
-          <div className="flex-1 min-w-[280px]">
+          <div className="min-w-0 flex-1 sm:min-w-[280px]">
             <label className="label">代码（逗号分隔，最多 30 个）</label>
             <input
               className="input w-full"

@@ -49,7 +49,7 @@ export default function Market() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <input
-          className="input w-56"
+          className="input w-full sm:w-56"
           placeholder="搜索代码或名称，如 600519 / 茅台"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
@@ -78,29 +78,31 @@ export default function Market() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[280px_1fr]">
         {/* Symbol list */}
-        <div className="card max-h-[560px] overflow-auto p-0">
-          <table className="w-full">
-            <thead className="sticky top-0 bg-slate-900">
-              <tr>
-                <th className="th">代码</th>
-                <th className="th">名称</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(stocks.data?.items ?? []).map((item) => (
-                <tr
-                  key={item.code}
-                  onClick={() => setSelected(item.code)}
-                  className={`cursor-pointer border-t border-slate-800/60 hover:bg-slate-800/50 ${
-                    item.code === selected ? "bg-sky-950/40" : ""
-                  }`}
-                >
-                  <td className="td">{item.code}</td>
-                  <td className="td text-slate-400">{item.name}</td>
+        <div className="card max-h-56 overflow-auto p-0 xl:max-h-[560px]">
+          <div className="table-wrap">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-slate-900">
+                <tr>
+                  <th className="th">代码</th>
+                  <th className="th">名称</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {(stocks.data?.items ?? []).map((item) => (
+                  <tr
+                    key={item.code}
+                    onClick={() => setSelected(item.code)}
+                    className={`cursor-pointer border-t border-slate-800/60 hover:bg-slate-800/50 ${
+                      item.code === selected ? "bg-sky-950/40" : ""
+                    }`}
+                  >
+                    <td className="td">{item.code}</td>
+                    <td className="td text-slate-400">{item.name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {stocks.isLoading && <div className="p-3 text-xs text-slate-500">加载中…</div>}
         </div>
 
@@ -133,7 +135,11 @@ export default function Market() {
 
           {bars.data?.bars?.length ? (
             <div className="card">
-              <KlineChart bars={bars.data.bars} indicators={indicators.data} />
+              <KlineChart
+                bars={bars.data.bars}
+                indicators={indicators.data}
+                height="clamp(360px, 62vh, 480px)"
+              />
             </div>
           ) : (
             !bars.isLoading && !bars.isError && (

@@ -73,19 +73,21 @@ export default function Dashboard() {
             </Link>
           </div>
           {predictions.data?.items?.length ? (
-            <table className="w-full">
-              <tbody>
-                {predictions.data.items.slice(0, 8).map((item) => (
-                  <tr key={item.code} className="border-t border-slate-800/60">
-                    <td className="td">{item.code}</td>
-                    <td className="td text-slate-400">{item.name}</td>
-                    <td className="td text-right text-sky-300">
-                      {item.prob_up === null ? "--" : `${(item.prob_up * 100).toFixed(1)}%`}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-wrap">
+              <table className="w-full">
+                <tbody>
+                  {predictions.data.items.slice(0, 8).map((item) => (
+                    <tr key={item.code} className="border-t border-slate-800/60">
+                      <td className="td">{item.code}</td>
+                      <td className="td text-slate-400">{item.name}</td>
+                      <td className="td text-right text-sky-300">
+                        {item.prob_up === null ? "--" : `${(item.prob_up * 100).toFixed(1)}%`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p className="text-xs text-slate-500">
               暂无预测。请先在“预测”页训练模型并运行预测。
@@ -102,16 +104,18 @@ export default function Dashboard() {
             </Link>
           </div>
           {watchlist.data?.length ? (
-            <table className="w-full">
-              <tbody>
-                {watchlist.data.slice(0, 8).map((item) => (
-                  <tr key={item.id} className="border-t border-slate-800/60">
-                    <td className="td">{item.code}</td>
-                    <td className="td text-slate-400">{item.name}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-wrap">
+              <table className="w-full">
+                <tbody>
+                  {watchlist.data.slice(0, 8).map((item) => (
+                    <tr key={item.id} className="border-t border-slate-800/60">
+                      <td className="td">{item.code}</td>
+                      <td className="td text-slate-400">{item.name}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p className="text-xs text-slate-500">自选股为空，可在“行情”页添加。</p>
           )}
@@ -127,26 +131,28 @@ export default function Dashboard() {
           </Link>
         </div>
         {triggers.data?.length ? (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-800">
-                <th className="th">时间</th>
-                <th className="th">代码</th>
-                <th className="th">规则</th>
-                <th className="th">消息</th>
-              </tr>
-            </thead>
-            <tbody>
-              {triggers.data.slice(0, 8).map((item) => (
-                <tr key={item.id} className="border-t border-slate-800/60">
-                  <td className="td text-slate-400">{item.trade_date}</td>
-                  <td className="td">{item.code}</td>
-                  <td className="td text-slate-400">{item.rule_type}</td>
-                  <td className="td">{item.message}</td>
+          <div className="table-wrap">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-800">
+                  <th className="th hidden sm:table-cell">时间</th>
+                  <th className="th">代码</th>
+                  <th className="th hidden sm:table-cell">规则</th>
+                  <th className="th">消息</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {triggers.data.slice(0, 8).map((item) => (
+                  <tr key={item.id} className="border-t border-slate-800/60">
+                    <td className="td hidden text-slate-400 sm:table-cell">{item.trade_date}</td>
+                    <td className="td">{item.code}</td>
+                    <td className="td hidden text-slate-400 sm:table-cell">{item.rule_type}</td>
+                    <td className="td min-w-[9rem] whitespace-normal">{item.message}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <p className="text-xs text-slate-500">
             暂无预警。可在“预警”页创建规则后点击“立即扫描”。
