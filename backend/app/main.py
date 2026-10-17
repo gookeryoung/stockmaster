@@ -126,7 +126,7 @@ def create_app() -> FastAPI:
     )
 
     # --- API routers ---
-    from app.api.v1 import alerts, analysis, auth, backtest, market, predict, system, users
+    from app.api.v1 import admin, alerts, analysis, auth, backtest, market, predict, system, users
 
     api_prefix = "/api/v1"
     app.include_router(market.router, prefix=api_prefix)
@@ -137,6 +137,7 @@ def create_app() -> FastAPI:
     app.include_router(system.router, prefix=api_prefix)
     app.include_router(auth.router, prefix=api_prefix)
     app.include_router(users.router, prefix=api_prefix)
+    app.include_router(admin.router, prefix=api_prefix)
 
     # --- error handling: convert domain errors into meaningful HTTP responses ---
     @app.exception_handler(ProviderUnavailable)

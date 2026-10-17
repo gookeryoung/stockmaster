@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import BackupPanel from "../components/BackupPanel";
 import { formatCompact } from "../format";
 
 interface JobDef {
@@ -115,6 +116,8 @@ export default function Settings() {
           </pre>
         )}
       </div>
+
+      {isAdmin && <BackupPanel />}
 
       {/* Watchlist management */}
       <div className="card space-y-3">

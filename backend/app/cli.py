@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import sys
 from datetime import date
+from pathlib import Path
 
 from app import __version__
 from app.core.console import prefer_console_encoding
@@ -125,6 +126,34 @@ def build_parser() -> argparse.ArgumentParser:
     user_unbind = account_sub.add_parser("unbind-wechat", help="解绑账号下的全部微信")
     user_unbind.add_argument("--username", required=True)
 
+    # --- 数据库迁移 ---
+    db = sub.add_parser("db", help="数据库迁移（Alembic）")
+    _add_common(db)
+    db_sub = db.add_subparsers(dest="db_command", required=True)
+    db_sub.add_parser("current", help="显示当前迁移版本与是否最新")
+    db_sub.add_parser("history", help="列出迁移链及已应用情况")
+    db_sub.add_parser("upgrade", help="建表并升级到最新版本（等价于启动时的自动迁移）")
+    db_stamp = db_sub.add_parser("stamp", help="只写版本标记、不执行迁移（认领 create_all 时代的存量库）")
+    db_stamp.add_argument("--revision", default="head", help="目标版本，默认 head")
+    db_sub.add_parser("check", help="比对 ORM 模型与库结构，报告缺表/缺列")
+
+    # --- 备份与恢复 ---
+    backup = sub.add_parser("backup", help="创建应用级备份（tar.gz + manifest）")
+    _add_common(backup)
+    backup.add_argument("-o", "--output", default="", help="输出路径；缺省落到 <数据目录>/backups/")
+    backup.add_argument("--no-models", action="store_true", help="不包含模型产物（*.joblib）")
+    backup.add_argument("--no-secret", action="store_true", help="不包含令牌签名密钥（恢复后所有人需重新登录）")
+    backup.add_argument("--note", default="", help="写进 manifest 的备注")
+    backup.add_argument("--list", dest="list_only", action="store_true", help="只列出本地已有备份")
+
+    restore = sub.add_parser("restore", help="从备份恢复（破坏性，需 --force 才会覆盖非空库）")
+    _add_common(restore)
+    restore.add_argument("archive", help="备份归档路径（.tar.gz）")
+    restore.add_argument("--force", action="store_true", help="目标库非空时必须显式指定")
+    restore.add_argument("--dry-run", action="store_true", help="只体检并打印摘要，不写入")
+    restore.add_argument("--no-pre-backup", action="store_true", help="跳过覆盖前的自动预备份（不推荐）")
+    restore.add_argument("--include-newer", action="store_true", help="允许恢复 schema 比程序新的备份（排障用）")
+
     return parser
 
 
@@ -133,17 +162,29 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     setup_logging(getattr(args, "log_level", "INFO"))
 
-    from app.db import init_db
-
-    init_db()
-
     command = args.command
+
+    # 这两个命令必须能在库结构异常时照常运行：db/* 用于修复迁移状态，
+    # restore/* 用于把库整体换掉。先 init_db 会在坏库上直接抛错，反而挡住救援路径。
+    if command not in {"db", "restore"}:
+        from app.db import init_db
+
+        init_db()
 
     if command == "init":
         from app.config import settings
 
         print(f"数据库已初始化：{settings.db_path}")
         return 0
+
+    if command == "db":
+        return _db_command(args)
+
+    if command == "backup":
+        return _backup_command(args)
+
+    if command == "restore":
+        return _restore_command(args)
 
     if command == "stats":
         return _stats()
@@ -472,6 +513,138 @@ def _serve(args) -> int:
         reload=bool(args.reload),
         log_level=settings.log_level.lower(),
     )
+    return 0
+
+
+def _db_command(args) -> int:
+    """数据库迁移子命令（不经过 init_db，见 main() 的说明）。"""
+    from app.db import migrations
+
+    action = args.db_command
+
+    if action == "current":
+        current = migrations.current_revision()
+        head = migrations.head_revision()
+        print(f"当前版本：{current or '未纳管（库中无 alembic_version）'}")
+        print(f"最新版本：{head}")
+        if current == head:
+            print("状态：已是最新")
+            return 0
+        print("状态：需要执行 `stockmaster db upgrade`")
+        return 1 if current is None else 0
+
+    if action == "history":
+        rows = migrations.history()
+        if not rows:
+            print("迁移链为空")
+            return 0
+        print(f"{'版本':<24}{'已应用':<8}说明")
+        for row in rows:
+            print(f"{row['revision']:<24}{'✓' if row['applied'] else '':<8}{row['description']}")
+        return 0
+
+    if action == "upgrade":
+        before = migrations.current_revision()
+        after = migrations.ensure_migrated()
+        if before == after:
+            print(f"已是最新版本：{after}")
+        else:
+            print(f"已从 {before or '未纳管'} 升级到 {after}")
+        return 0
+
+    if action == "stamp":
+        if args.revision != "head":
+            print("当前只支持 --revision head", file=sys.stderr)
+            return 2
+        head = migrations.stamp_head()
+        print(f"已写入版本标记：{head}（未执行任何迁移）")
+        return 0
+
+    if action == "check":
+        drift = migrations.schema_drift()
+        if not drift:
+            print("schema 与 ORM 模型一致")
+            return 0
+        print(f"发现 {len(drift)} 处差异（迁移链可能不完整）：")
+        for item in drift:
+            print(f"  - {item}")
+        return 1
+
+    print(f"未知的 db 子命令：{action}", file=sys.stderr)
+    return 2
+
+
+def _backup_command(args) -> int:
+    """``stockmaster backup``。"""
+    from app.maintenance import BackupError, create_backup, list_backups
+
+    if args.list_only:
+        rows = list_backups()
+        if not rows:
+            print("本地暂无备份")
+            return 0
+        print(f"{'文件':<58}{'大小':>10}  {'行数':>8}  备注")
+        for row in rows:
+            size = (
+                f"{row['size'] / 1024 / 1024:.2f} MB" if row["size"] >= 1024 * 1024 else f"{row['size'] / 1024:.0f} KB"
+            )
+            flag = "  [损坏] " + row.get("error", "") if row.get("error") else ""
+            print(f"{row['name']:<58}{size:>10}  {row.get('rows', 0):>8}  {row.get('note', '')}{flag}")
+        return 0
+
+    try:
+        archive = create_backup(
+            output=Path(args.output) if args.output else None,
+            include_models=not args.no_models,
+            include_secret=False if args.no_secret else None,
+            note=args.note,
+        )
+    except BackupError as exc:
+        print(f"备份失败：{exc}", file=sys.stderr)
+        return 1
+
+    print(f"备份完成：{archive}")
+    print(f"大小：{archive.stat().st_size / 1024 / 1024:.2f} MB")
+    if args.no_secret:
+        print("提示：未包含签名密钥，恢复后所有已登录会话需要重新登录。")
+    return 0
+
+
+def _restore_command(args) -> int:
+    """``stockmaster restore``（main() 已跳过 init_db，坏库也能救）。"""
+    from app.maintenance import RestoreError, inspect_backup, restore_backup
+
+    archive = Path(args.archive).expanduser()
+    try:
+        if args.dry_run:
+            inspection = inspect_backup(archive)
+            print("[dry-run] 归档有效：")
+            print(inspection.summary)
+            print(f"归档大小：{inspection.archive_size / 1024 / 1024:.2f} MB")
+            return 0
+
+        report = restore_backup(
+            archive,
+            force=args.force,
+            allow_newer=args.include_newer,
+            pre_backup=not args.no_pre_backup,
+        )
+    except RestoreError as exc:
+        print(f"恢复失败：{exc}", file=sys.stderr)
+        return 1
+
+    print("恢复完成：")
+    print(f"  来源版本：{report.app_version or '未知'}（{report.created_at or '未知时间'}）")
+    print(f"  数据库：{report.tables} 张表 / {report.rows} 行，schema {report.schema_version}")
+    if report.schema_restamped:
+        print("  该备份无迁移版本记录，已标记为最新版本")
+    print(f"  模型产物：{report.models_restored} 个文件")
+    print(f"  签名密钥：{'已恢复' if report.secret_restored else '未恢复'}")
+    if report.pre_backup:
+        print(f"  预备份：{report.pre_backup}")
+    for warning in report.warnings:
+        print(f"  注意：{warning}")
+    print("建议重启服务，让所有组件状态一致（调度器已自动恢复）。")
     return 0
 
 

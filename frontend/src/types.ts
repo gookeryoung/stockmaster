@@ -271,3 +271,50 @@ export interface AuditLog {
   ip: string;
   created_at: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// System backup / restore (admin)
+// ---------------------------------------------------------------------------
+
+export interface BackupEntry {
+  name: string;
+  size: number;
+  created_at: string;
+  app_version?: string;
+  note?: string;
+  schema_version?: string;
+  tables?: number;
+  rows?: number;
+  has_models?: boolean;
+  has_secret?: boolean;
+  error?: string;
+}
+
+export interface BackupList {
+  directory: string;
+  keep: number;
+  total_size: number;
+  items: BackupEntry[];
+}
+
+export interface BackupCreated {
+  name: string;
+  size: number;
+  path: string;
+  warnings: string[];
+}
+
+export interface RestoreInspection {
+  manifest: {
+    version: string;
+    app_version: string;
+    created_at: string;
+    note?: string;
+    database?: { schema_version?: string; tables?: string[]; row_counts?: Record<string, number> };
+  };
+  summary: string;
+  archive_size: number;
+  known_schema: boolean;
+  backup_ahead: boolean;
+  target: { tables: number; rows: number; schema_version: string };
+}

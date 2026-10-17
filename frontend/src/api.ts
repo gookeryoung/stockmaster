@@ -13,6 +13,8 @@ import type {
   AuthConfig,
   AuthUser,
   BacktestResponse,
+  BackupCreated,
+  BackupList,
   BarsResponse,
   FactorSnapshot,
   IndicatorSnapshot,
@@ -20,6 +22,7 @@ import type {
   MarketOverview,
   ModelCard,
   PredictionOut,
+  RestoreInspection,
   RuleTypeInfo,
   ScreenRow,
   SystemStatus,
@@ -113,6 +116,39 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** Like `request`, but returns the raw response (file downloads, binary uploads).
+ *
+ * Kept separate because the JSON helper sets Content-Type and parses JSON, both
+ * wrong for an archive body. Error handling intentionally mirrors it so a 401
+ * still drops the session instead of leaving the UI "logged in".
+ */
+async function requestRaw(path: string, init?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
+  });
+
+  if (response.status === 401 && token) {
+    setAuthToken(null);
+    authEvents.dispatchEvent(new Event("unauthorized"));
+  }
+
+  if (!response.ok) {
+    let detail = `请求失败 (HTTP ${response.status})`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // Not JSON (e.g. an HTML error page from a proxy); keep the generic text.
+    }
+    throw new ApiError(response.status, detail);
+  }
+  return response;
+}
+
 export const api = {
   // --- auth ---
   authConfig: () => request<AuthConfig>("/auth/config"),
@@ -162,6 +198,39 @@ export const api = {
     }),
   deleteUser: (id: number) => request<void>(`/users/${id}`, { method: "DELETE" }),
   auditLogs: (limit = 100) => request<AuditLog[]>(`/users/audit-logs?limit=${limit}`),
+
+  // --- admin: system backup / restore ---
+  backups: () => request<BackupList>("/admin/backups"),
+  createBackup: (note = "", includeModels = true, includeSecret = true) => {
+    const search = new URLSearchParams({
+      note,
+      include_models: String(includeModels),
+      include_secret: String(includeSecret),
+    });
+    return request<BackupCreated>(`/admin/backups?${search}`, { method: "POST" });
+  },
+  deleteBackup: (name: string) =>
+    request<void>(`/admin/backups/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  downloadBackup: async (name: string) => {
+    const response = await requestRaw(`/admin/backups/${encodeURIComponent(name)}`);
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
+  inspectRestore: async (file: File) => {
+    const response = await requestRaw("/admin/restore/inspect", { method: "POST", body: file });
+    return (await response.json()) as RestoreInspection;
+  },
+  restoreUpload: async (file: File, confirm: boolean) => {
+    const search = new URLSearchParams({ confirm: String(confirm), filename: file.name });
+    const response = await requestRaw(`/admin/restore?${search}`, { method: "POST", body: file });
+    return (await response.json()) as { status: string; message: string; report: Record<string, unknown> };
+  },
 
   // --- market ---
   health: () => request<{ status: string; version: string }>("/health"),
