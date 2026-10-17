@@ -11,12 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
-from app.auth.deps import current_owner
 from app.backtest.engine import BacktestConfig, run_backtest
 from app.config import settings
 from app.core.logging import get_logger
 from app.db.models import BacktestEquity, BacktestRun, BacktestTrade
-from app.db.scoped import get_owned_or_404, owned
+from app.db.scoped import get_in_workspace_or_404, in_workspace
 from app.db.session import session_scope
 from app.schemas import (
     BacktestRequest,
@@ -25,6 +24,7 @@ from app.schemas import (
     EquityPoint,
     TradeOut,
 )
+from app.workspace.deps import WorkspaceCtx, current_workspace, require_editor
 
 log = get_logger(__name__)
 router = APIRouter(tags=["backtest"])
@@ -62,11 +62,11 @@ def _load_bars(session: Session, codes: list[str], adjust: str = "qfq") -> dict:
 def _default_codes(
     session: Session,  # noqa: ARG001 - kept for call-site symmetry
     limit: int = 50,
-    owner: int | None = None,
+    workspace_id: int | None = None,
 ) -> list[str]:
     from app.jobs.tasks import _default_universe
 
-    codes = _default_universe(owner_id=owner)
+    codes = _default_universe(workspace_id=workspace_id)
     return codes[:limit]
 
 
@@ -161,13 +161,17 @@ def _thin_by_cadence(signals: dict[date, dict[str, float]], rebalance_days: int)
 def run(
     payload: BacktestRequest,
     session: Session = Depends(db_session),
-    owner: int = Depends(current_owner),
+    ws: WorkspaceCtx = Depends(require_editor),
 ):
-    """Execute a backtest and persist the run, equity curve and trade ledger."""
+    """Execute a backtest and persist the run, equity curve and trade ledger.
+
+    Editor and above: a run consumes CPU for minutes and writes into the shared
+    history, so a read-only member must not be able to trigger it.
+    """
     codes = [c.strip() for c in payload.codes if c.strip()]
     if not codes:
-        # 不指定标的时，「默认宇宙」在隔离模式下是本人自选，而不是所有人的并集。
-        codes = _default_codes(session, limit=50, owner=owner if settings.data_isolation else None)
+        # 不指定标的时，「默认宇宙」在隔离模式下是本工作区的自选，而不是全站并集。
+        codes = _default_codes(session, limit=50, workspace_id=ws.id if settings.data_isolation else None)
     if not codes:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -219,7 +223,7 @@ def run(
     )
 
     run_id = str(uuid.uuid4())
-    _persist_run(run_id, payload, result, config, signals, owner=owner)
+    _persist_run(run_id, payload, result, config, signals, workspace_id=ws.id)
 
     return BacktestResponse(
         run_id=run_id,
@@ -265,7 +269,7 @@ def _persist_run(
     config,  # noqa: ARG001 - costs already reflected in result.metrics
     signals,  # noqa: ARG001 - persisted via payload for reproducibility
     *,
-    owner: int = 0,
+    workspace_id: int = 0,
 ) -> None:
     """Store the run summary, equity curve and trades.
 
@@ -277,7 +281,7 @@ def _persist_run(
         session.add(
             BacktestRun(
                 id=run_id,
-                owner_id=owner,
+                workspace_id=workspace_id,
                 name=f"{payload.strategy} {date.today()}",
                 strategy=payload.strategy,
                 universe=",".join(payload.codes[:50]) if payload.codes else "default",
@@ -335,10 +339,10 @@ def _persist_run(
 def list_runs(
     limit: int = Query(default=20, ge=1, le=200),
     session: Session = Depends(db_session),
-    owner: int = Depends(current_owner),
+    ws: WorkspaceCtx = Depends(current_workspace),
 ):
-    """Recent backtest runs."""
-    stmt = owned(select(BacktestRun), BacktestRun, owner).order_by(BacktestRun.created_at.desc()).limit(limit)
+    """Recent backtest runs of the current workspace."""
+    stmt = in_workspace(select(BacktestRun), BacktestRun, ws.id).order_by(BacktestRun.created_at.desc()).limit(limit)
     rows = session.execute(stmt).scalars()
     return [
         BacktestSummary(
@@ -356,10 +360,10 @@ def list_runs(
 def get_run(
     run_id: str,
     session: Session = Depends(db_session),
-    owner: int = Depends(current_owner),
+    ws: WorkspaceCtx = Depends(current_workspace),
 ):
     """Full stored result for a run."""
-    row = get_owned_or_404(session, BacktestRun, run_id, owner, "run")
+    row = get_in_workspace_or_404(session, BacktestRun, run_id, ws.id, "run")
     equity = session.execute(
         select(BacktestEquity).where(BacktestEquity.run_id == run_id).order_by(BacktestEquity.trade_date)
     ).scalars()

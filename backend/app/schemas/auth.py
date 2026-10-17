@@ -60,6 +60,9 @@ class AuthConfigOut(BaseModel):
     wechat_enabled: bool
     wechat_mode: str
     has_users: bool
+    # 数据按工作区隔离（SM_DATA_ISOLATION）。前端据此决定是否显示工作区切换器
+    # 与成员管理：关闭时所有账号共享一份数据，切换工作区没有意义。
+    workspace_enabled: bool = False
     version: str = ""
 
 

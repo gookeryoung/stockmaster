@@ -12,12 +12,11 @@ from sqlalchemy.orm import Session
 from app.alert.engine import AlertEngine
 from app.alert.rules import RULE_TYPES, describe_rule, normalize_params
 from app.api.deps import db_session
-from app.auth.deps import current_owner
 from app.config import settings
 from app.core.errors import DataError
 from app.core.logging import get_logger
 from app.db.models import AlertRule, AlertTrigger
-from app.db.scoped import get_owned_or_404, owned
+from app.db.scoped import get_in_workspace_or_404, in_workspace
 from app.schemas import (
     AlertRuleIn,
     AlertRuleOut,
@@ -25,6 +24,7 @@ from app.schemas import (
     RuleTypeInfo,
     TriggerStatusUpdate,
 )
+from app.workspace.deps import WorkspaceCtx, current_workspace, require_editor
 
 log = get_logger(__name__)
 router = APIRouter(tags=["alerts"])
@@ -76,9 +76,12 @@ def list_rule_types():
 
 
 @router.get("/alerts/rules", response_model=list[AlertRuleOut])
-def list_rules(session: Session = Depends(db_session), owner: int = Depends(current_owner)):
+def list_rules(
+    session: Session = Depends(db_session),
+    ws: WorkspaceCtx = Depends(current_workspace),
+):
     """The caller's alert rules."""
-    stmt = owned(select(AlertRule), AlertRule, owner).order_by(AlertRule.id)
+    stmt = in_workspace(select(AlertRule), AlertRule, ws.id).order_by(AlertRule.id)
     return [_rule_out(row) for row in session.execute(stmt).scalars()]
 
 
@@ -86,7 +89,7 @@ def list_rules(session: Session = Depends(db_session), owner: int = Depends(curr
 def create_rule(
     payload: AlertRuleIn,
     session: Session = Depends(db_session),
-    owner: int = Depends(current_owner),
+    ws: WorkspaceCtx = Depends(require_editor),
 ):
     """Create an alert rule (parameters are validated against the rule schema)."""
     try:
@@ -95,7 +98,7 @@ def create_rule(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
     rule = AlertRule(
-        owner_id=owner,
+        workspace_id=ws.id,
         name=payload.name,
         rule_type=payload.rule_type,
         params_json=json.dumps(normalized),
@@ -118,10 +121,10 @@ def update_rule(
     rule_id: int,
     payload: AlertRuleIn,
     session: Session = Depends(db_session),
-    owner: int = Depends(current_owner),
+    ws: WorkspaceCtx = Depends(require_editor),
 ):
     """Replace a rule's definition."""
-    rule = get_owned_or_404(session, AlertRule, rule_id, owner, "rule")
+    rule = get_in_workspace_or_404(session, AlertRule, rule_id, ws.id, "rule")
     try:
         normalized = normalize_params(payload.rule_type, payload.params)
     except DataError as exc:
@@ -146,10 +149,10 @@ def update_rule(
 def delete_rule(
     rule_id: int,
     session: Session = Depends(db_session),
-    owner: int = Depends(current_owner),
+    ws: WorkspaceCtx = Depends(require_editor),
 ):
     """Delete a rule and its triggers."""
-    rule = get_owned_or_404(session, AlertRule, rule_id, owner, "rule")
+    rule = get_in_workspace_or_404(session, AlertRule, rule_id, ws.id, "rule")
     session.delete(rule)
     session.commit()
 
@@ -161,10 +164,10 @@ def list_triggers(
     trade_date: date | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     session: Session = Depends(db_session),
-    owner: int = Depends(current_owner),
+    ws: WorkspaceCtx = Depends(current_workspace),
 ):
     """Trigger history, newest first."""
-    stmt = owned(select(AlertTrigger), AlertTrigger, owner).order_by(AlertTrigger.trigger_at.desc()).limit(limit)
+    stmt = in_workspace(select(AlertTrigger), AlertTrigger, ws.id).order_by(AlertTrigger.trigger_at.desc()).limit(limit)
     if status_filter:
         stmt = stmt.where(AlertTrigger.status == status_filter)
     if code:
@@ -179,10 +182,10 @@ def update_trigger(
     trigger_id: int,
     payload: TriggerStatusUpdate,
     session: Session = Depends(db_session),
-    owner: int = Depends(current_owner),
+    ws: WorkspaceCtx = Depends(require_editor),
 ):
     """Mark a trigger read or muted."""
-    row = get_owned_or_404(session, AlertTrigger, trigger_id, owner, "trigger")
+    row = get_in_workspace_or_404(session, AlertTrigger, trigger_id, ws.id, "trigger")
     row.status = payload.status
     session.commit()
     session.refresh(row)
@@ -190,7 +193,7 @@ def update_trigger(
 
 
 @router.post("/alerts/scan")
-def scan_now(owner: int = Depends(current_owner)):
+def scan_now(ws: WorkspaceCtx = Depends(require_editor)):
     """Evaluate the caller's rules immediately.
 
     Safe to call repeatedly: triggers are de-duplicated by
@@ -199,7 +202,7 @@ def scan_now(owner: int = Depends(current_owner)):
     Isolation narrows the scan to the caller's own rules — a manual scan must not
     write trigger rows into somebody else's history.
     """
-    candidates = AlertEngine().evaluate_all(owner_id=owner if settings.data_isolation else None)
+    candidates = AlertEngine().evaluate_all(workspace_id=ws.id if settings.data_isolation else None)
     return {
         "triggered": len(candidates),
         "items": [
@@ -221,12 +224,12 @@ def scan_now(owner: int = Depends(current_owner)):
 def preview_rule(
     payload: AlertRuleIn,
     session: Session = Depends(db_session),
-    owner: int = Depends(current_owner),
+    ws: WorkspaceCtx = Depends(current_workspace),
 ):
     """Evaluate a rule definition without saving it (used by the rule editor).
 
-    The probe rule carries the caller's owner so a ``watchlist`` scope previews
-    against *their* list rather than the global one.
+    The probe rule carries the caller's workspace so a ``watchlist`` scope previews
+    against *this workspace's* list rather than another one's.
     """
     try:
         normalized = normalize_params(payload.rule_type, payload.params)
@@ -236,7 +239,7 @@ def preview_rule(
     engine = AlertEngine()
     probe = AlertRule(
         id=-1,
-        owner_id=owner,
+        workspace_id=ws.id,
         name=payload.name,
         rule_type=payload.rule_type,
         params_json=json.dumps(normalized),

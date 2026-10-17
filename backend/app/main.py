@@ -126,7 +126,7 @@ def create_app() -> FastAPI:
     )
 
     # --- API routers ---
-    from app.api.v1 import admin, alerts, analysis, auth, backtest, market, predict, system, users
+    from app.api.v1 import admin, alerts, analysis, auth, backtest, market, predict, system, users, workspaces
 
     api_prefix = "/api/v1"
     app.include_router(market.router, prefix=api_prefix)
@@ -138,6 +138,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=api_prefix)
     app.include_router(users.router, prefix=api_prefix)
     app.include_router(admin.router, prefix=api_prefix)
+    app.include_router(workspaces.router, prefix=f"{api_prefix}/workspaces")
 
     # --- error handling: convert domain errors into meaningful HTTP responses ---
     @app.exception_handler(ProviderUnavailable)
@@ -157,6 +158,18 @@ def create_app() -> FastAPI:
     @app.exception_handler(StockMasterError)
     async def _domain_error(_request: Request, exc: StockMasterError):
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    # 工作区服务既被 API 调用也被 CLI 调用，所以它抛的是带状态码的领域异常；
+    # 在这里翻译成 HTTP，避免服务层依赖 FastAPI。
+    from app.workspace.service import WorkspaceError
+
+    @app.exception_handler(WorkspaceError)
+    async def _workspace_error(_request: Request, exc: WorkspaceError):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers={"X-Auth-Error": exc.code},
+        )
 
     # --- static frontend (only when built) ---
     _mount_frontend(app)

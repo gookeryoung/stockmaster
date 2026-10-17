@@ -17,7 +17,6 @@ from app.auth import tokens
 from app.config import settings
 from app.core.logging import get_logger
 from app.db.models import User
-from app.db.scoped import GUEST_OWNER_ID
 from app.db.session import get_db
 
 log = get_logger(__name__)
@@ -129,24 +128,6 @@ def require_user(user: Annotated[User | None, Depends(current_user)]) -> User:
     return user
 
 
-def current_owner(user: Annotated[User | None, Depends(current_user)]) -> int:
-    """The ``owner_id`` the caller reads and writes user data under.
-
-    Three cases, deliberately collapsed into one integer:
-
-    * isolation off (default) → always ``0``, i.e. the historical shared bucket.
-      Every pre-isolation row is already ``0``, so the API behaves exactly as it
-      did before the feature landed;
-    * isolation on + logged in → the account id;
-    * isolation on + anonymous → ``0`` as well. The gate normally prevents this,
-      but with ``SM_AUTH_ENABLED=false`` an anonymous caller must still see the
-      legacy data instead of an empty app.
-    """
-    if not settings.data_isolation:
-        return GUEST_OWNER_ID
-    return user.id if user is not None else GUEST_OWNER_ID
-
-
 def local_guest_admin() -> User:
     """Synthetic admin used when authentication is switched off.
 
@@ -176,7 +157,6 @@ __all__ = [
     "bearer_scheme",
     "client_agent",
     "client_ip",
-    "current_owner",
     "current_user",
     "local_guest_admin",
     "require_admin",

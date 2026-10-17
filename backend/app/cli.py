@@ -25,6 +25,13 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--years", type=int, default=5, help="历史年数")
 
 
+def _add_workspace_selector(parser: argparse.ArgumentParser) -> None:
+    """``--id`` 与 ``--name`` 二选一：脚本里用 id 稳定，手工排障用名字方便。"""
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--id", type=int, dest="workspace_id", help="工作区 id")
+    group.add_argument("--name", dest="workspace_name", help="工作区名称（重名时需改用 --id）")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stockmaster",
@@ -126,14 +133,51 @@ def build_parser() -> argparse.ArgumentParser:
     user_unbind = account_sub.add_parser("unbind-wechat", help="解绑账号下的全部微信")
     user_unbind.add_argument("--username", required=True)
 
-    user_claim = account_sub.add_parser("claim", help="把未归属（owner=0）的历史数据移交给某个账号")
+    user_claim = account_sub.add_parser("claim", help="把未归属（workspace_id=0）的数据搬进该账号的个人工作区")
     user_claim.add_argument("--username", required=True)
     user_claim.add_argument("--dry-run", action="store_true", help="只统计数量，不改数据")
     user_claim.add_argument(
         "--overwrite",
         action="store_true",
-        help="连同别人名下的数据一起搬（仅用于合并账号，默认只搬 owner=0）",
+        help="连同别的工作区的数据一起搬（仅用于合并，默认只搬未归属）",
     )
+
+    # --- 工作区（隔离边界）与成员角色 ---
+    workspace = sub.add_parser("workspace", help="工作区与成员角色（owner / editor / viewer）")
+    _add_common(workspace)
+    ws_sub = workspace.add_subparsers(dest="workspace_command", required=True)
+    ws_sub.add_parser("list", help="列出全部工作区及成员数")
+
+    ws_members = ws_sub.add_parser("members", help="列出工作区成员与角色")
+    _add_workspace_selector(ws_members)
+
+    ws_create = ws_sub.add_parser("create", help="创建工作区（创建者成为 owner）")
+    ws_create.add_argument("--name", required=True)
+    ws_create.add_argument("--owner", required=True, help="工作区所有者的用户名")
+    ws_create.add_argument("--description", default="")
+
+    ws_add = ws_sub.add_parser("add", help="加成员（editor / viewer）")
+    _add_workspace_selector(ws_add)
+    ws_add.add_argument("--username", required=True)
+    ws_add.add_argument("--role", default="viewer", choices=["editor", "viewer"])
+
+    ws_role = ws_sub.add_parser("role", help="改成员角色（含转让 owner）")
+    _add_workspace_selector(ws_role)
+    ws_role.add_argument("--username", required=True)
+    ws_role.add_argument("--role", required=True, choices=["owner", "editor", "viewer"])
+
+    ws_remove = ws_sub.add_parser("remove", help="移除成员")
+    _add_workspace_selector(ws_remove)
+    ws_remove.add_argument("--username", required=True)
+
+    ws_transfer = ws_sub.add_parser("transfer", help="转让所有权（原 owner 降为 editor）")
+    _add_workspace_selector(ws_transfer)
+    ws_transfer.add_argument("--to", required=True, help="接收所有权的用户名")
+
+    ws_claim = ws_sub.add_parser("claim", help="把未归属（workspace_id=0）的数据搬进工作区")
+    _add_workspace_selector(ws_claim)
+    ws_claim.add_argument("--dry-run", action="store_true", help="只统计数量，不改数据")
+    ws_claim.add_argument("--overwrite", action="store_true", help="连同别的工作区的数据一起搬")
 
     # --- 数据库迁移 ---
     db = sub.add_parser("db", help="数据库迁移（Alembic）")
@@ -209,6 +253,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "user":
         return _user_command(args)
+
+    if command == "workspace":
+        return _workspace_command(args)
 
     if command == "sync-calendar":
         from app.jobs.tasks import job_sync_calendar
@@ -670,73 +717,154 @@ def _generate_password() -> str:
 
 
 def _claim_ownership(session, user, *, dry_run: bool = False, overwrite: bool = False) -> int:
-    """把未归属（``owner_id = 0``）的用户数据划给某个账号。
+    """把未归属（``workspace_id = 0``）的数据搬进该账号的个人工作区。
 
-    为什么需要它
-    ------------
-    隔离上线前写入的自选股、预警规则、回测历史全都是 ``owner_id = 0``。开启
-    ``SM_DATA_ISOLATION`` 之后，登录用户看不到这些数据 —— 它们不是丢了，而是留在
-    「未归属」桶里。这个命令把桶里的东西交给指定账号。
-
-    为什么不直接 ``UPDATE ... SET owner_id = ?``
-    -------------------------------------------
-    ``watchlist_items`` 的唯一约束是 ``(owner_id, list_name, code)``。如果目标账号
-    已经手动加过同一只股票，直接搬会撞约束。这里对冲突行只删「旧的无主副本」，
-    保留账号自己那份（连同它自己的 note），并如实报告跳过了多少条。
+    实现放在 ``app.workspace.service.claim_unassigned``，因为它同时被
+    ``stockmaster workspace claim`` 和 Web 端使用，重复实现必然走样。
     """
-    from sqlalchemy import func, select, update
+    from app.workspace import service
 
-    from app.db.models import AlertRule, AlertTrigger, BacktestRun, WatchlistItem
+    workspace = service.ensure_personal_workspace(session, user)
+    counts = service.claim_unassigned(session, workspace.id, dry_run=dry_run, overwrite=overwrite)
 
-    owner = int(user.id)
-    scope = "全部数据（--overwrite）" if overwrite else "未归属数据（owner=0）"
-
-    def _clause(model):
-        return model.id.isnot(None) if overwrite else model.owner_id == 0
-
-    watch_stmt = select(WatchlistItem).where(_clause(WatchlistItem))
-    watch_rows = list(session.execute(watch_stmt).scalars())
-    if overwrite:
-        watch_rows = [row for row in watch_rows if row.owner_id != owner]
-
-    mine = {
-        (row.list_name, row.code)
-        for row in session.execute(select(WatchlistItem).where(WatchlistItem.owner_id == owner)).scalars()
-    }
-    conflicts = [row for row in watch_rows if (row.list_name, row.code) in mine]
-    movable = [row for row in watch_rows if (row.list_name, row.code) not in mine]
-
-    counts: dict[str, int] = {"watchlist_items": len(movable)}
-    for model, key in (
-        (AlertRule, "alert_rules"),
-        (AlertTrigger, "alert_triggers"),
-        (BacktestRun, "backtest_runs"),
-    ):
-        counts[key] = int(session.execute(select(func.count()).select_from(model).where(_clause(model))).scalar_one())
-
-    print(f"将把 {scope} 移交给 {user.username}（id={owner}）：")
+    scope = "全部数据（--overwrite）" if overwrite else "未归属数据（workspace_id=0）"
+    print(f"将把 {scope} 搬进「{workspace.name}」(#{workspace.id})：")
     for table, count in counts.items():
+        if table == "duplicates_skipped":
+            continue
         print(f"  {table:<18}{count}")
-    if conflicts:
-        print(f"  另外 {len(conflicts)} 条自选股与账号已有的记录重复，将删除旧的无主副本")
-
+    if counts.get("duplicates_skipped"):
+        print(f"  另有 {counts['duplicates_skipped']} 条自选股与工作区已有记录重复，将删除旧的无主副本")
     if dry_run:
         print("（--dry-run，未写入）")
         return 0
-
-    for row in conflicts:
-        session.delete(row)
-    for row in movable:
-        row.owner_id = owner
-
-    for model in (AlertRule, AlertTrigger, BacktestRun):
-        session.execute(update(model).where(_clause(model)).values(owner_id=owner))
-
-    session.commit()
-    print(f"已完成。共移交 {sum(counts.values())} 条记录，跳过重复 {len(conflicts)} 条。")
+    moved = sum(v for k, v in counts.items() if k != "duplicates_skipped")
+    print(f"已完成。共移交 {moved} 条记录，跳过重复 {counts.get('duplicates_skipped', 0)} 条。")
     if counts.get("alert_rules"):
-        print("提示：这些规则的作用域若是 watchlist，现在会按该账号的自选解析。")
+        print("提示：这些规则的作用域若是 watchlist，现在会按该工作区的自选解析。")
     return 0
+
+
+def _workspace_command(args) -> int:
+    """工作区与成员角色运维（不开浏览器也能救回被锁死的工作区）。"""
+    from sqlalchemy import select
+
+    from app.db import session_scope
+    from app.db.models import User, Workspace
+    from app.workspace import service
+    from app.workspace.roles import label
+
+    def fail(message: str) -> int:
+        print(f"错误：{message}", file=sys.stderr)
+        return 1
+
+    def selector(session) -> Workspace:
+        if args.workspace_id is not None:
+            workspace = session.get(Workspace, args.workspace_id)
+            if workspace is None:
+                raise SystemExit(fail(f"工作区 #{args.workspace_id} 不存在"))
+            return workspace
+        rows = session.execute(select(Workspace).where(Workspace.name == args.workspace_name)).scalars().all()
+        if not rows:
+            raise SystemExit(fail(f"工作区不存在：{args.workspace_name}"))
+        if len(rows) > 1:
+            raise SystemExit(fail(f"有 {len(rows)} 个同名工作区，请改用 --id"))
+        return rows[0]
+
+    def account(session, username: str) -> User:
+        user = session.execute(select(User).where(User.username == username)).scalar_one_or_none()
+        if user is None:
+            raise SystemExit(fail(f"账号不存在：{username}"))
+        return user
+
+    with session_scope() as session:
+        try:
+            if args.workspace_command == "list":
+                rows = session.execute(select(Workspace).order_by(Workspace.id)).scalars().all()
+                if not rows:
+                    print("暂无工作区。账号第一次登录时会自动获得一个个人工作区。")
+                    return 0
+                print(f"{'ID':<5}{'类型':<10}{'名称':<24}{'成员':<6}所有者")
+                for workspace in rows:
+                    owner = session.get(User, workspace.owner_id) if workspace.owner_id else None
+                    kind = "个人" if workspace.kind == "personal" else "共享"
+                    print(
+                        f"{workspace.id:<5}{kind:<10}{workspace.name[:22]:<24}"
+                        f"{service.member_count(session, workspace.id):<6}"
+                        f"{owner.username if owner else '（已删除）'}"
+                    )
+                return 0
+
+            workspace = selector(session)
+
+            if args.workspace_command == "members":
+                rows = service.member_rows(session, workspace.id)
+                print(f"工作区「{workspace.name}」#{workspace.id}（{len(rows)} 名成员）")
+                for member, user in rows:
+                    name = user.username if user is not None else f"user#{member.user_id}"
+                    print(f"  {name:<20}{label(member.role):<6}{member.role}")
+                return 0
+
+            if args.workspace_command == "create":
+                owner = account(session, args.owner)
+                created = service.create_workspace(
+                    session,
+                    owner,
+                    name=args.name,
+                    description=args.description,
+                )
+                print(f"已创建工作区「{created.name}」#{created.id}，所有者 {owner.username}")
+                return 0
+
+            if args.workspace_command == "add":
+                target = account(session, args.username)
+                service.add_member(session, workspace, username=target.username, role=args.role)
+                print(f"已把 {target.username} 加入「{workspace.name}」，角色 {label(args.role)}")
+                return 0
+
+            if args.workspace_command == "role":
+                target = account(session, args.username)
+                if args.role == "owner":
+                    service.transfer_owner(session, workspace, user_id=target.id)
+                    print(f"已把「{workspace.name}」的所有权转让给 {target.username}（原所有者降为编辑者）")
+                else:
+                    service.set_member_role(session, workspace, user_id=target.id, role=args.role)
+                    print(f"已把 {target.username} 的角色改为 {label(args.role)}")
+                return 0
+
+            if args.workspace_command == "remove":
+                target = account(session, args.username)
+                service.remove_member(session, workspace, user_id=target.id)
+                print(f"已把 {target.username} 移出「{workspace.name}」")
+                return 0
+
+            if args.workspace_command == "transfer":
+                target = account(session, args.to)
+                service.transfer_owner(session, workspace, user_id=target.id)
+                print(f"已把「{workspace.name}」的所有权转让给 {target.username}")
+                return 0
+
+            if args.workspace_command == "claim":
+                counts = service.claim_unassigned(
+                    session,
+                    workspace.id,
+                    dry_run=args.dry_run,
+                    overwrite=args.overwrite,
+                )
+                print(f"目标工作区：「{workspace.name}」#{workspace.id}")
+                for table, count in counts.items():
+                    if table == "duplicates_skipped":
+                        continue
+                    print(f"  {table:<18}{count}")
+                if counts.get("duplicates_skipped"):
+                    print(f"  重复自选股（将删除旧副本）{counts['duplicates_skipped']}")
+                if args.dry_run:
+                    print("（--dry-run，未写入）")
+                return 0
+        except service.WorkspaceError as exc:
+            return fail(exc.detail)
+
+    return fail(f"未知的 workspace 子命令：{args.workspace_command}")
 
 
 def _user_command(args) -> int:

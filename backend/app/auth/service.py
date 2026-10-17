@@ -231,11 +231,17 @@ def create_user(
         status=status,
     )
     session.add(user)
+    session.flush()  # 需要 user.id 才能建「个人工作区」及其成员关系
+
+    # 每个账号自带一个 personal 工作区。注册时就建好，避免「第一次请求时并发建出
+    # 两个空间」这种边角情况；依赖里仍会兜一次，覆盖迁移之前的存量账号。
+    from app.workspace.service import ensure_personal_workspace
+
+    ensure_personal_workspace(session, user)
+
     if commit:
         session.commit()
         session.refresh(user)
-    else:
-        session.flush()
     log.info("created user %s (role=%s)", user.username, user.role)
     return user
 

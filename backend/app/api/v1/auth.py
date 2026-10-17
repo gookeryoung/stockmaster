@@ -122,6 +122,7 @@ def auth_config(session: SessionDep):
         wechat_enabled=settings.wechat_enabled,
         wechat_mode=settings.wechat_mode,
         has_users=service.count_users(session) > 0,
+        workspace_enabled=settings.data_isolation,
         version=__version__,
     )
 
