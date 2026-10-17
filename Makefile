@@ -3,7 +3,7 @@
 #
 # 约定与 cndb 项目一致：所有 Python 命令经 `uv run` 执行，避免依赖手动激活虚拟环境。
 
-PACKAGE := app
+PACKAGE := stockmaster
 COV_THRESHOLD := 75
 
 # dev/serve 目标绑定地址与端口，可在命令行覆盖：make serve DEV_PORT=9000
@@ -103,15 +103,15 @@ build b: frontend-build ## 构建分发包（前端产物 + wheel/sdist）
 # ── 质量门禁 ─────────────────────────────────────────────────
 
 lint: ## 后端代码风格检查（ruff check + format 校验）
-	uv run ruff check backend scripts --cache-dir .ruff_cache
-	uv run ruff format --check backend scripts --cache-dir .ruff_cache
+	uv run ruff check src tests scripts --cache-dir .ruff_cache
+	uv run ruff format --check src tests scripts --cache-dir .ruff_cache
 
 typecheck: ## 环境与配置自检（依赖/编码/路径；暂无独立类型检查器）
 	uv run stockmaster doctor
 
 format: ## 后端代码自动格式化（ruff format）
-	uv run ruff format backend scripts --cache-dir .ruff_cache
-	uv run ruff check backend scripts --cache-dir .ruff_cache --fix
+	uv run ruff format src tests scripts --cache-dir .ruff_cache
+	uv run ruff check src tests scripts --cache-dir .ruff_cache --fix
 
 check-fast: lint frontend-typecheck ## 轻量静态门禁（不含测试，适合实现阶段快速反馈）
 

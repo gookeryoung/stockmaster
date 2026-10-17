@@ -9,17 +9,17 @@ import sys
 import time
 import warnings
 
-sys.path.insert(0, "backend")
+sys.path.insert(0, "src")
 warnings.filterwarnings("ignore")
 
 from datetime import date
 
-from app.config import settings
-from app.core.console import prefer_console_encoding
-from app.db import init_db, session_scope
-from app.providers.registry import get_registry
-from app.sync import repository as repo
-from app.sync.sync_service import SyncService
+from stockmaster.config import settings
+from stockmaster.core.console import prefer_console_encoding
+from stockmaster.db import init_db, session_scope
+from stockmaster.providers.registry import get_registry
+from stockmaster.sync import repository as repo
+from stockmaster.sync.sync_service import SyncService
 
 UNIVERSE = ["600519.SH", "000001.SZ", "300750.SZ", "601318.SH", "000858.SZ", "002594.SZ", "600036.SH", "601899.SH"]
 START = date(2023, 1, 1)
@@ -99,14 +99,14 @@ rebuilt = service.rebuild_stale_adjustments(UNIVERSE)
 check("adjustment rebuild ran", rebuilt >= 0, f"rebuilt={rebuilt} {time.time() - t0:.1f}s")
 
 # ---------------------------------------------------------------- analytics
-from app.jobs.tasks import job_compute_analytics
+from stockmaster.jobs.tasks import job_compute_analytics
 
 t0 = time.time()
 analytics = job_compute_analytics(UNIVERSE)
 check("analytics job", analytics.get("symbols", 0) > 0, f"{analytics} {time.time() - t0:.1f}s")
 
 # -------------------------------------------------------------- prediction
-from app.jobs.tasks import job_predict, job_train_models
+from stockmaster.jobs.tasks import job_predict, job_train_models
 
 t0 = time.time()
 train_result = job_train_models(algo="hist_gbdt", horizon=1)
@@ -137,9 +137,9 @@ check(
 )
 
 # ----------------------------------------------------------------- backtest
-from app.api.v1.backtest import _build_signals, _load_bars
-from app.backtest.engine import BacktestConfig, run_backtest
-from app.schemas import BacktestRequest
+from stockmaster.api.v1.backtest import _build_signals, _load_bars
+from stockmaster.backtest.engine import BacktestConfig, run_backtest
+from stockmaster.schemas import BacktestRequest
 
 with session_scope() as session:
     bars = _load_bars(session, UNIVERSE)
@@ -169,7 +169,7 @@ if signals:
     check("T+1 / limit machinery exercised", isinstance(m.get("skip_reasons"), dict))
 
 # ------------------------------------------------------------------- alerts
-from app.alert.engine import AlertEngine
+from stockmaster.alert.engine import AlertEngine
 
 engine = AlertEngine()
 rule_id = engine.create_rule(

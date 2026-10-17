@@ -7,7 +7,7 @@
 > 状态：**已实施**（`0002_owner_columns` + 读写路径改造 + 交叉访问测试）；
 > 其中归属列已在 `0003_workspaces` 改名并重新解释为 `workspace_id`。
 > 开关：`SM_DATA_ISOLATION`，默认 `false`（= 隔离前的共享语义），可随时回退。
-> 前置：账号体系（`backend/app/auth/`）已落地，`SM_AUTH_ENABLED` 控制是否强制登录。
+> 前置：账号体系（`src/stockmaster/auth/`）已落地，`SM_AUTH_ENABLED` 控制是否强制登录。
 > 本文记录设计取舍；实际落地位置见 §9。
 
 ---
@@ -54,7 +54,7 @@
 统一命名 `owner_id`（而不是 `user_id`）：它将来可能指向"组/工作区"，语义上比 `user_id` 更耐改。
 
 ```python
-# backend/app/db/models.py —— 四张表统一追加（OWNER_UNASSIGNED = 0）
+# src/stockmaster/db/models.py —— 四张表统一追加（OWNER_UNASSIGNED = 0）
 owner_id: Mapped[int] = mapped_column(Integer, default=OWNER_UNASSIGNED, nullable=False)
 ```
 
@@ -103,17 +103,18 @@ Index("ix_backtest_runs_owner", "owner_id", "created_at")
 选 **B**，并用「交叉访问测试」兜底，而不是靠人肉 review 保证不漏：
 
 ```python
-# backend/app/auth/deps.py —— 归属判定
+# src/stockmaster/auth/deps.py —— 归属判定
 def current_owner(user: User | None = Depends(current_user)) -> int:
     if not settings.data_isolation:
-        return GUEST_OWNER_ID          # 开关关闭：全部落 0，等价旧语义
+        return GUEST_OWNER_ID  # 开关关闭：全部落 0，等价旧语义
     return user.id if user is not None else GUEST_OWNER_ID
 ```
 
 ```python
-# backend/app/db/scoped.py —— 统一入口（约 70 行）
-def owned(stmt, model, owner):        # 给查询加 owner 条件；关闭时原样返回
+# src/stockmaster/db/scoped.py —— 统一入口（约 70 行）
+def owned(stmt, model, owner):  # 给查询加 owner 条件；关闭时原样返回
     return stmt if not scope_enabled() else stmt.where(model.owner_id == owner)
+
 
 def get_owned_or_404(session, model, pk, owner, label):
     """按主键取本人记录；不属于本人时返回 404 而不是 403。
@@ -145,9 +146,9 @@ def get_owned_or_404(session, model, pk, owner, label):
 
 | 组件 | 作用 |
 |---|---|
-| `alembic.ini` + `backend/migrations/env.py` | 从 `settings.database_url` 取库；`render_as_batch=True`、`compare_type=True` |
+| `alembic.ini` + `src/stockmaster/alembic/env.py` | 从 `settings.database_url` 取库；`render_as_batch=True`、`compare_type=True` |
 | `0001_baseline`（空迁移） | schema 真源仍是 ORM 模型，baseline 只做「存量库可 stamp 的锚点」 |
-| `app/db/migrations.py` | `ensure_migrated()` 处理三态：全新库 / 存量库（无版本表）/ 已纳管库 |
+| `stockmaster/db/migrations.py` | `ensure_migrated()` 处理三态：全新库 / 存量库（无版本表）/ 已纳管库 |
 | `stockmaster db current\|history\|upgrade\|stamp\|check` | 运维入口，坏库也能跑（`main()` 对 `db`/`restore` 跳过 `init_db`） |
 
 ### 隔离的迁移：`0002_owner_columns`
@@ -247,18 +248,18 @@ def get_owned_or_404(session, model, pk, owner, label):
 
 ## 10. 测试矩阵（这是"不漏"的真正保障）
 
-已落地 `backend/tests/test_isolation.py`（9 项），用两个账号 A/B 对**每一个私有端点**做交叉访问，
+已落地 `tests/test_isolation.py`（9 项），用两个账号 A/B 对**每一个私有端点**做交叉访问，
 参数化覆盖，新增端点漏加过滤时测试会红：
 
 ```python
 PRIVATE_CASES = [
-    ("GET",    "/api/v1/watchlist",              None),
-    ("DELETE", "/api/v1/watchlist/{a_item}",     None),
-    ("GET",    "/api/v1/alerts/rules",           None),
-    ("PATCH",  "/api/v1/alerts/rules/{a_rule}",  {...}),
-    ("DELETE", "/api/v1/alerts/rules/{a_rule}",  None),
-    ("GET",    "/api/v1/alerts/triggers",        None),
-    ("GET",    "/api/v1/backtest/{a_run}",       None),
+    ("GET", "/api/v1/watchlist", None),
+    ("DELETE", "/api/v1/watchlist/{a_item}", None),
+    ("GET", "/api/v1/alerts/rules", None),
+    ("PATCH", "/api/v1/alerts/rules/{a_rule}", {...}),
+    ("DELETE", "/api/v1/alerts/rules/{a_rule}", None),
+    ("GET", "/api/v1/alerts/triggers", None),
+    ("GET", "/api/v1/backtest/{a_run}", None),
 ]
 # 断言：B 的 token 访问 A 的资源 → 404 或空列表，绝不返回 200 + A 的数据
 ```

@@ -17,11 +17,11 @@ import shutil
 import sys
 from pathlib import Path
 
-# Make `app` importable when run directly, then align output with the terminal so
+# Make `stockmaster` importable when run directly, then align output with the terminal so
 # Chinese messages stay readable on a GBK console.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from app.core.console import prefer_console_encoding
+from stockmaster.core.console import prefer_console_encoding
 
 prefer_console_encoding()
 
@@ -40,7 +40,7 @@ CACHE_DIRS = (
     ".coverage",
     "coverage.xml",
     "coverage.json",
-    "backend/stockmaster.egg-info",
+    "src/stockmaster.egg-info",
     "stockmaster.egg-info",
 )
 
@@ -61,7 +61,7 @@ PROTECTED = (
 def _iter_pycache() -> list[Path]:
     """Every ``__pycache__`` directory under the source trees."""
     found: list[Path] = []
-    for base in ("backend", "scripts"):
+    for base in ("src", "tests", "scripts"):
         root = ROOT / base
         if root.is_dir():
             found.extend(p for p in root.rglob("__pycache__") if p.is_dir())
@@ -87,7 +87,7 @@ def collect_targets() -> list[Path]:
     targets.extend(p for p in ROOT.glob(".coverage.*") if p.is_file())
 
     # Stray bytecode outside __pycache__.
-    for base in ("backend", "scripts"):
+    for base in ("src", "tests", "scripts"):
         root = ROOT / base
         if root.is_dir():
             targets.extend(p for p in root.rglob("*") if p.is_file() and p.suffix in {".pyc", ".pyo"})

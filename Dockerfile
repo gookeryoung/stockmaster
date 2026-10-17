@@ -38,7 +38,7 @@ RUN uv python install 3.13
 # 预装项目 dev 依赖（仅复制依赖描述文件，利用 Docker 层缓存）
 WORKDIR /workspace
 COPY pyproject.toml uv.lock alembic.ini README.md ./
-COPY backend/ ./backend/
+COPY src/ ./src/
 
 # 同步依赖到 /opt/venv（CI 时直接复用）
 # uv.lock 随仓库提交，--frozen 锁定版本保证可复现；若 lock 与 pyproject 失配则直接失败，

@@ -77,3 +77,4 @@ desktop.ini
 .vscode/
 *.bak
 *backup-*.tar.gz
+pytest-of-*

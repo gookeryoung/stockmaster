@@ -8,9 +8,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# 确保 backend/ 在 sys.path 中, autodoc 能导入 app 包
-# （项目实际布局为 backend/app，与 pyproject.toml 的 pythonpath 保持一致）
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
+# 确保 src/ 在 sys.path 中, autodoc 能导入 stockmaster 包
+# （项目实际布局为 src/stockmaster，与 pyproject.toml 的 pythonpath 保持一致）
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 # -- 项目信息 --------------------------------------------------------------
 project = "stockmaster"
@@ -18,7 +18,8 @@ author = "gookeryoung"
 copyright = "2026, gookeryoung"
 
 try:
-    from app import __version__  # type: ignore[import-not-found]
+    from stockmaster import __version__  # type: ignore[import-not-found]
+
     release = __version__
     version = __version__
 except ImportError:

@@ -30,7 +30,7 @@
               │  docker 端口映射
               ▼
         容器 stockmaster:8770
-          uvicorn app.main:app  ──> SQLite（/data/data/stockmaster.db，宿主机数据卷内）
+          uvicorn stockmaster.main:app  ──> SQLite（/data/data/stockmaster.db，宿主机数据卷内）
 ```
 
 **数据持久化**：唯一数据卷 `stockmaster-data` 挂在 `/data`，库与训练模型全在里面。换版本只换镜像，卷不动。
@@ -209,14 +209,14 @@ sudo bash /opt/stockmaster/deploy/setup-tls.sh
 cd /opt/stockmaster
 
 # 当前库版本（应等于最新版本）
-docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli db current
+docker compose --env-file .env -f docker-compose.prod.yml exec app python -m stockmaster.cli db current
 
 # 手工打一份基线备份（之后的任何操作都有退路；也可在网页「设置」里点按钮）
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m app.cli backup --note "manual"
+  python -m stockmaster.cli backup --note "manual"
 
 # 结构体检：迁移链漏写时会指出缺哪张表/哪一列
-docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli db check
+docker compose --env-file .env -f docker-compose.prod.yml exec app python -m stockmaster.cli db check
 ```
 
 恢复（**破坏性**，且会暂停定时任务；完成后建议重启服务）：
@@ -225,9 +225,9 @@ docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app
 # 归档放在宿主机任意位置，先拷进容器可读的目录再执行
 docker compose --env-file .env -f docker-compose.prod.yml cp ./xxx.tar.gz app:/tmp/xxx.tar.gz
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m app.cli restore /tmp/xxx.tar.gz --dry-run     # 先体检
+  python -m stockmaster.cli restore /tmp/xxx.tar.gz --dry-run     # 先体检
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m app.cli restore /tmp/xxx.tar.gz --force       # 覆盖恢复（自动预备份）
+  python -m stockmaster.cli restore /tmp/xxx.tar.gz --force       # 覆盖恢复（自动预备份）
 ```
 
 网页端路径：登录管理员 → 设置 → 系统备份与恢复 → 选文件即自动体检 → 勾选确认后恢复。
@@ -265,13 +265,13 @@ SKIP_BUILD=1 ./deploy/deploy.sh
 ```bash
 DC="docker compose --env-file .env -f docker-compose.prod.yml"
 
-$DC exec app python -m app.cli sync-calendar      # 交易日历
-$DC exec app python -m app.cli sync-instruments   # 证券主数据
-$DC exec app python -m app.cli sync-daily         # 核心池日线（几分钟内可用）
-$DC exec app python -m app.cli analytics          # 指标与因子
-$DC exec app python -m app.cli train              # 训练模型
-$DC exec app python -m app.cli predict            # 批量预测
-$DC exec app python -m app.cli stats              # 数据概况
+$DC exec app python -m stockmaster.cli sync-calendar      # 交易日历
+$DC exec app python -m stockmaster.cli sync-instruments   # 证券主数据
+$DC exec app python -m stockmaster.cli sync-daily         # 核心池日线（几分钟内可用）
+$DC exec app python -m stockmaster.cli analytics          # 指标与因子
+$DC exec app python -m stockmaster.cli train              # 训练模型
+$DC exec app python -m stockmaster.cli predict            # 批量预测
+$DC exec app python -m stockmaster.cli stats              # 数据概况
 ```
 
 > 全市场回补耗时较长、支持断点续传：`sync-daily --full`。
@@ -324,7 +324,7 @@ curl -v http://127.0.0.1:8770/api/v1/health    # 服务器本机探测，绕过�
 | 本机 curl 通、外网不通 | Lighthouse 防火墙未放行 8770（见二.2） |
 | 外网 404 / 空白页 | 前端产物没进镜像：确认 `frontend/dist` 构建成功（构建日志里的 node 阶段） |
 | 页面能开、数据全空 | 未做数据初始化（见第四节） |
-| 数据源全部不可用 | 服务器出网异常。`$DC exec app python -m app.cli doctor` 自检 |
+| 数据源全部不可用 | 服务器出网异常。`$DC exec app python -m stockmaster.cli doctor` 自检 |
 | 构建卡在 `FROM`/`npm install` | 基础镜像源或 npm 源不可达。检查 `mirror.ccs.tencentyun.com` 与 `registry.npmmirror.com` |
 | 构建 OOM（被 kill 137） | 2G 内存跑前端构建吃紧。先确认 swap 开着（`swapon --show`），或换更大规格 |
 | 磁盘不足 | `docker system df` 看占用；`docker image prune -a` 清理旧镜像后重跑 |

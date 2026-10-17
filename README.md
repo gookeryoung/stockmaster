@@ -108,12 +108,12 @@ cp deploy/.env.prod.example .env && vim .env      # 改 SM_BIND 端口等
 | **预备份** | 重建前把数据卷打包到 `backups/pre-deploy-<版本>-<时间戳>.tar.gz`，仅保留最近 5 份 |
 | **健康探测** | 轮询 `/api/v1/health` 最长 180s，失败自动回滚到上一个镜像并打印容器日志 |
 
-容器内运维命令（`app.cli` 与本地 CLI 完全等价）：
+容器内运维命令（`stockmaster.cli` 与本地 CLI 完全等价）：
 
 ```bash
-docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli stats
-docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli sync-calendar
-docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli sync-daily
+docker compose --env-file .env -f docker-compose.prod.yml exec app python -m stockmaster.cli stats
+docker compose --env-file .env -f docker-compose.prod.yml exec app python -m stockmaster.cli sync-calendar
+docker compose --env-file .env -f docker-compose.prod.yml exec app python -m stockmaster.cli sync-daily
 ```
 
 相关文件：
@@ -188,7 +188,7 @@ make dev-stop       # 清理遗留的开发进程并释放端口
   避免把健康的数据源误判为故障（见 `test_code_coverage.py`）。
 
 > 该矩阵由实测得出，会随上游接口变化；如需复核可重新运行探测脚本或参考
-> `backend/tests/test_code_coverage.py` 中的断言。
+> `tests/test_code_coverage.py` 中的断言。
 
 ### 3.2 关键修复：baostock 挂死问题
 `baostock/util/socketutil.py` 创建 socket 时**未设置 timeout**，`recv()` 无界阻塞，异常又被 `print` 吞掉返回 `None`，导致查询**挂死数分钟**。
@@ -217,20 +217,20 @@ stockmaster/
 ├─ ruff.toml           # lint 规则（与 cndb 口径一致）
 ├─ .pre-commit-config.yaml
 ├─ .gitattributes      # 行尾规范化
-├─ backend/app/
+├─ src/stockmaster/
 │  ├─ providers/    # 数据源抽象 + baostock/腾讯/新浪 + 熔断注册表
 │  ├─ sync/         # 仓储、增量同步、断点续传、复权重建
-│  ├─ indicators/   # 23 列技术指标
-│  ├─ factors/      # 横截面因子 + 标准化 + 综合评分
+│  ├─ core/         # 指标、因子、市场规则、错误、日志、控制台
 │  ├─ model/        # 数据集、时序切分、模型、评估、训练
 │  ├─ backtest/     # 撮合引擎 + 信号生成
 │  ├─ alert/        # 规则引擎 + 去重 + 推送通道
 │  ├─ jobs/         # 流水线任务 + APScheduler
 │  ├─ api/v1/       # FastAPI 路由
+│  ├─ alembic/      # 数据库迁移（随包发布）
 │  └─ cli.py        # 命令行（回补/体检/训练等）
 ├─ .github/workflows/ci.yml  # CI（后端+前端）与 tag 触发的 Release
 ├─ frontend/src/    # React + ECharts 工作台
-├─ backend/tests/   # 448 项测试（含 12 项网络契约测试，默认跳过）
+├─ tests/           # 448 项测试（含 12 项网络契约测试，默认跳过）
 └─ scripts/         # 启动、开发、清理、验收脚本
 ```
 
@@ -273,9 +273,9 @@ make check           # 全套门禁（lint + 前端类型检查 + 快速测试 +
 等价的手动命令：
 
 ```powershell
-.venv\Scripts\python.exe -m pytest backend/tests -q -m "not slow"   # 快速离线
-.venv\Scripts\python.exe -m pytest backend/tests -q -m slow         # 慢测试集
-.venv\Scripts\python.exe -m pytest backend/tests -q -m network      # 网络契约
+.venv\Scripts\python.exe -m pytest tests -q -m "not slow"   # 快速离线
+.venv\Scripts\python.exe -m pytest tests -q -m slow         # 慢测试集
+.venv\Scripts\python.exe -m pytest tests -q -m network      # 网络契约
 .venv\Scripts\python.exe -u scripts\acceptance_live.py
 cd frontend; pnpm exec tsc --noEmit; pnpm build
 ```
@@ -352,7 +352,7 @@ UTF-8（这也是现代终端/编辑器/CI 日志的通行假设），行为在�
 - `make doctor` 会打印全部信号（`编码诊断` 一行），便于排查；
 - `Makefile` **不使用内联 Python** 输出中文（内联 `python -c` 是新进程，编码不可控），
   改为调用 `stockmaster` CLI 与 `scripts/*.py`；
-- 回归保护见 `backend/tests/test_console_bytes.py`：直接断言 CLI 子进程的
+- 回归保护见 `tests/test_console_bytes.py`：直接断言 CLI 子进程的
   **原始字节是合法 UTF-8**（仅断言编码名无法发现问题）。
 
 ### 6.4 CI / CD

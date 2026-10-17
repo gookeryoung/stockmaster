@@ -62,14 +62,14 @@ test = [
 ]
 
 [project.scripts]
-stockmaster = "app.cli:main"
+stockmaster = "stockmaster.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend/app"]
+packages = ["src/stockmaster"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
@@ -100,13 +100,13 @@ search = '(version\s+=\s+)"{current_version}"'
 replace = '\1"{new_version}"'
 
 [[tool.bumpversion.files]]
-filename = "backend/app/__init__.py"
+filename = "src/stockmaster/__init__.py"
 search = '__version__ = "{current_version}"'
 replace = '__version__ = "{new_version}"'
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests"]
-pythonpath = ["backend"]
+testpaths = ["tests"]
+pythonpath = ["src"]
 # --dist worksteal 仅在调用方传入 -n/--numprocesses 时生效：Makefile `test`/`cov`
 # 传 PYTEST_JOBS；单独执行 `pytest`（无 -n）时该选项被 xdist 忽略，串行运行。
 addopts = "-q --strict-markers --dist worksteal --durations=20"
@@ -135,10 +135,10 @@ filterwarnings = [
 
 [tool.coverage.run]
 branch = true
-source = ["app"]
+source = ["stockmaster"]
 omit = [
-    "backend/app/cli.py",
-    "backend/app/main.py",
+    "src/stockmaster/cli.py",
+    "src/stockmaster/main.py",
 ]
 
 [tool.coverage.report]

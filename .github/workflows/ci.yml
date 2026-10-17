@@ -44,8 +44,8 @@ jobs:
 
       - name: 代码风格检查（ruff check + format）
         run: |
-          uv run ruff check backend scripts --cache-dir .ruff_cache
-          uv run ruff format --check backend scripts --cache-dir .ruff_cache
+          uv run ruff check src tests scripts --cache-dir .ruff_cache
+          uv run ruff format --check src tests scripts --cache-dir .ruff_cache
 
       - name: 单元与集成测试
         # Network-marked contract tests are excluded: they depend on live public
@@ -56,7 +56,7 @@ jobs:
         # excluded to keep push/PR feedback fast; they run locally via `make test-slow`.
         env:
           SM_PROVIDER_OFFLINE: "true"
-        run: uv run pytest -n auto -m "not network and not slow" --cov=app --cov-report=term --cov-fail-under=75
+        run: uv run pytest -n auto -m "not network and not slow" --cov=stockmaster --cov-report=term --cov-fail-under=75
 
       - name: 构建 wheel 与 sdist
         run: uv build

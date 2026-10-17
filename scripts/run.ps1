@@ -29,9 +29,9 @@ if (-not (Test-Path $distIndex)) {
 }
 
 $env:PYTHONIOENCODING = "utf-8"
-$env:PYTHONPATH = Join-Path $root "backend"
+$env:PYTHONPATH = Join-Path $root "src"
 
-$args = @("-m", "app.cli", "serve", "--host", $Host_, "--port", "$Port")
+$args = @("-m", "stockmaster.cli", "serve", "--host", $Host_, "--port", "$Port")
 if ($Reload) { $args += "--reload" }
 
 Write-Host "启动 StockMaster： http://${Host_}:${Port}" -ForegroundColor Cyan

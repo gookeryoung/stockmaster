@@ -9,15 +9,15 @@
 
 | 能力 | 状态 | 落地位置 |
 |---|---|---|
-| Alembic 迁移链 | ✅ 已接入 | `alembic.ini`、`backend/migrations/`、`app/db/migrations.py` |
+| Alembic 迁移链 | ✅ 已接入 | `alembic.ini`、`src/stockmaster/alembic/`、`stockmaster/db/migrations.py` |
 | 存量库认领（无版本表的旧库） | ✅ 自动 | `ensure_migrated()` 判 `alembic_version` |
 | 数据库版本 CLI | ✅ | `stockmaster db current / history / upgrade / stamp / check` |
-| 应用级备份（含 manifest） | ✅ | `app/maintenance/backup.py`、`stockmaster backup` |
-| 备份体检（dry-run） | ✅ | `app/maintenance/inspect.py`、`--dry-run`、`POST /admin/restore/inspect` |
-| 恢复（含预备份 / 恢复后迁移） | ✅ | `app/maintenance/restore.py`、`stockmaster restore` |
+| 应用级备份（含 manifest） | ✅ | `stockmaster/maintenance/backup.py`、`stockmaster backup` |
+| 备份体检（dry-run） | ✅ | `stockmaster/maintenance/inspect.py`、`--dry-run`、`POST /admin/restore/inspect` |
+| 恢复（含预备份 / 恢复后迁移） | ✅ | `stockmaster/maintenance/restore.py`、`stockmaster restore` |
 | 备份管理 API + 设置页入口 | ✅ | `api/v1/admin.py`、`components/BackupPanel.tsx` |
 | 用户隔离 PR-1 / PR-2（owner_id，已被 0003 取代） | ✅ 已完成 | `0002_owner_columns`、`tests/test_isolation.py` |
-| 工作区隔离（Workspace + owner/editor/viewer） | ✅ 已完成，默认关闭 | `0003_workspaces`、`app/workspace/`、`tests/test_workspace.py`、见 `WORKSPACE.md` |
+| 工作区隔离（Workspace + owner/editor/viewer） | ✅ 已完成，默认关闭 | `0003_workspaces`、`stockmaster/workspace/`、`tests/test_workspace.py`、见 `WORKSPACE.md` |
 | 按工作区通知投递 / 配额 | ❌ 未开始 | `WORKSPACE.md` §11 |
 
 ### 关键设计决定（已落地，改动前先读）
@@ -78,12 +78,12 @@ P3 按用户通知与配额（可选，按需）
 
 | 文件 | 改动 |
 |---|---|
-| `backend/app/db/models.py` | `WatchlistItem` / `AlertRule` / `AlertTrigger` / `BacktestRun` 加 `owner_id: int = 0`；唯一约束改 `(owner_id, list_name, code)`；新增 4 个复合索引 |
-| `backend/migrations/versions/0002_owner_columns.py` | 四张表 `add_column`（`NOT NULL DEFAULT 0`）；`watchlist_items` 用 `batch_alter_table` 重建唯一约束；`alert_triggers.owner_id` 从 `alert_rules` 回填 |
-| `backend/app/auth/deps.py` | 新增 `current_owner()`：登录用户取 `user.id`，匿名回落 `GUEST_OWNER_ID = 0` |
+| `src/stockmaster/db/models.py` | `WatchlistItem` / `AlertRule` / `AlertTrigger` / `BacktestRun` 加 `owner_id: int = 0`；唯一约束改 `(owner_id, list_name, code)`；新增 4 个复合索引 |
+| `src/stockmaster/alembic/versions/0002_owner_columns.py` | 四张表 `add_column`（`NOT NULL DEFAULT 0`）；`watchlist_items` 用 `batch_alter_table` 重建唯一约束；`alert_triggers.owner_id` 从 `alert_rules` 回填 |
+| `src/stockmaster/auth/deps.py` | 新增 `current_owner()`：登录用户取 `user.id`，匿名回落 `GUEST_OWNER_ID = 0` |
 | 各 `create_*` | 显式写 `owner_id=owner`（不依赖模型默认值 0） |
-| `backend/app/cli.py` | `stockmaster user claim --username <name> [--dry-run]`：把 owner 0 的历史数据交给某个账号 |
-| `backend/app/config.py` | `data_isolation: bool = False`（灰度开关，默认关 = 现状） |
+| `src/stockmaster/cli.py` | `stockmaster user claim --username <name> [--dry-run]`：把 owner 0 的历史数据交给某个账号 |
+| `src/stockmaster/config.py` | `data_isolation: bool = False`（灰度开关，默认关 = 现状） |
 
 **迁移写法（关键片段）**
 
@@ -116,13 +116,13 @@ def upgrade() -> None:
 
 ### PR-2：读路径隔离 —— ✅ 已完成
 
-> 落地后的名字：`owned()` / `get_owned_or_404()`（`app/db/scoped.py`）、
-> `current_owner`（`app/auth/deps.py`）。开关关闭时两个助手都退化成空操作，
+> 落地后的名字：`owned()` / `get_owned_or_404()`（`stockmaster/db/scoped.py`）、
+> `current_owner`（`stockmaster/auth/deps.py`）。开关关闭时两个助手都退化成空操作，
 > 所以 `SM_DATA_ISOLATION=false` 时请求路径与升级前逐字节一致。
 
 | 文件 | 改动 |
 |---|---|
-| `backend/app/db/scoped.py`（新增） | `owned_stmt()` / `owned_or_404()`：非本人一律 **404**（403 会泄露 id 是否存在） |
+| `src/stockmaster/db/scoped.py`（新增） | `owned_stmt()` / `owned_or_404()`：非本人一律 **404**（403 会泄露 id 是否存在） |
 | `api/v1/system.py` | 自选股 4 个端点按 owner 过滤 |
 | `api/v1/alerts.py` | 规则/触发/扫描/预览按 owner；`/alerts/scan` 只扫本人 |
 | `api/v1/backtest.py` | 历史与详情按 owner |
@@ -130,18 +130,18 @@ def upgrade() -> None:
 | `jobs/tasks.py` | `_default_universe()` / `job_snapshot_poll` 取所有用户自选的**并集**（共享行情数据只存一份） |
 | `frontend` | 基本无改动；用户页可加只读统计列（自选数/规则数/回测数） |
 
-**验收（= 测试矩阵，`backend/tests/test_isolation.py`）**
+**验收（= 测试矩阵，`tests/test_isolation.py`）**
 
 两个账号 A/B 对每个私有端点交叉访问，断言 404 或空列表：
 
 ```python
 PRIVATE_CASES = [
-    ("GET",    "/api/v1/watchlist"),
+    ("GET", "/api/v1/watchlist"),
     ("DELETE", "/api/v1/watchlist/{a_item}"),
-    ("GET",    "/api/v1/alerts/rules"),
-    ("PATCH",  "/api/v1/alerts/rules/{a_rule}"),
-    ("GET",    "/api/v1/alerts/triggers"),
-    ("GET",    "/api/v1/backtest/{a_run}"),
+    ("GET", "/api/v1/alerts/rules"),
+    ("PATCH", "/api/v1/alerts/rules/{a_rule}"),
+    ("GET", "/api/v1/alerts/triggers"),
+    ("GET", "/api/v1/backtest/{a_run}"),
 ]
 ```
 
@@ -157,14 +157,14 @@ B 的 `scope=watchlist` 规则只命中 B 的自选；匿名（`SM_AUTH_ENABLED=
 
 | 文件 | 改动 |
 |---|---|
-| `backend/migrations/versions/0003_workspaces.py` | 幂等迁移：`owner_id` 改名 `workspace_id`、建 `workspaces`/`workspace_members`、按用户回填个人工作区、重建索引与 `uq_watchlist_item` |
-| `backend/app/db/models.py` | `WORKSPACE_UNASSIGNED = 0`；Workspace / WorkspaceMember 模型 |
-| `backend/app/workspace/`（新增） | `roles.py`（ROLE_RANK / at_least，未知角色拒绝）、`service.py`（成员管理、最后 owner 保护、所有权转让、认领）、`deps.py`（`current_workspace` / `require_editor`，解析 `X-Workspace-Id`） |
-| `backend/app/db/scoped.py` | `owned_*` 重写为 `in_workspace()` / `get_in_workspace_or_404()` |
+| `src/stockmaster/alembic/versions/0003_workspaces.py` | 幂等迁移：`owner_id` 改名 `workspace_id`、建 `workspaces`/`workspace_members`、按用户回填个人工作区、重建索引与 `uq_watchlist_item` |
+| `src/stockmaster/db/models.py` | `WORKSPACE_UNASSIGNED = 0`；Workspace / WorkspaceMember 模型 |
+| `src/stockmaster/workspace/`（新增） | `roles.py`（ROLE_RANK / at_least，未知角色拒绝）、`service.py`（成员管理、最后 owner 保护、所有权转让、认领）、`deps.py`（`current_workspace` / `require_editor`，解析 `X-Workspace-Id`） |
+| `src/stockmaster/db/scoped.py` | `owned_*` 重写为 `in_workspace()` / `get_in_workspace_or_404()` |
 | `api/v1/{system,alerts,backtest}.py` | 读端点 `current_workspace`、写端点 `require_editor`；`/alerts/preview` 保持只读可用 |
 | `alert/engine.py` / `jobs/tasks.py` | watchlist 按 `(rule.workspace_id, list_name)` 解析；调度器取全站并集 |
 | `api/v1/workspaces.py`（新增） | 工作区与成员 CRUD、候选列表、所有权转让 |
-| `backend/app/cli.py` | `stockmaster workspace list/create/add/role/remove/transfer/claim`；`user claim` 委托为个人工作区认领 |
+| `src/stockmaster/cli.py` | `stockmaster workspace list/create/add/role/remove/transfer/claim`；`user claim` 委托为个人工作区认领 |
 | frontend | zustand workspace store + `X-Workspace-Id` 头 + 切换器 + `/workspace` 成员管理页 + viewer 只读态 |
 
 **验收**：`tests/test_workspace.py`（角色矩阵：viewer 403 + `X-Auth-Error: read_only`、
@@ -193,32 +193,32 @@ editor 不可管成员、最后 owner 保护、跨工作区 404、转让）；`t
 ## 5. 上线 Runbook（本次改动）
 
 ```bash
-# 1) 拉代码（本次新增了 alembic.ini、backend/migrations、app/maintenance，必须重建镜像）
+# 1) 拉代码（本次新增了 alembic.ini、src/stockmaster/alembic、stockmaster/maintenance，必须重建镜像）
 cd /opt/stockmaster && git pull
 
 # 2) 部署前先看清当前库版本与数据量
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m app.cli db history    # 升级前通常显示「未纳管」
+  python -m stockmaster.cli db history    # 升级前通常显示「未纳管」
 
 # 3) 构建并发布（deploy.sh 会自动备份 /data 卷，保留 5 份）
 ./deploy/deploy.sh
 
 # 4) 确认启动时已自动认领版本并执行增量
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m app.cli db current      # 应输出 当前=最新=0002_owner_columns
+  python -m stockmaster.cli db current      # 应输出 当前=最新=0002_owner_columns
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m app.cli db check        # 应无「缺列」输出
+  python -m stockmaster.cli db check        # 应无「缺列」输出
 
 # 5) 手工打一份基线备份（之后的任何操作都有退路）
 docker compose --env-file .env -f docker-compose.prod.yml exec app \
-  python -m app.cli backup --note "alembic-introduced"
+  python -m stockmaster.cli backup --note "alembic-introduced"
 ```
 
 演练恢复（**先在本地/临时数据目录做**）：
 
 ```bash
-SM_DATA_DIR=/tmp/drill python -m app.cli restore ~/backups/xxx.tar.gz --dry-run
-SM_DATA_DIR=/tmp/drill python -m app.cli restore ~/backups/xxx.tar.gz --force
+SM_DATA_DIR=/tmp/drill python -m stockmaster.cli restore ~/backups/xxx.tar.gz --dry-run
+SM_DATA_DIR=/tmp/drill python -m stockmaster.cli restore ~/backups/xxx.tar.gz --force
 ```
 
 ### 需要的配置项（都有默认值，可不动）
@@ -240,7 +240,7 @@ SM_DATA_DIR=/tmp/drill python -m app.cli restore ~/backups/xxx.tar.gz --force
 
 | 风险 | 影响 | 对策 |
 |---|---|---|
-| 镜像漏拷 `alembic.ini` / `migrations` | 容器内 `db` 命令报「迁移目录缺失」 | Dockerfile.prod 已加 `COPY alembic.ini ./`；`backend/migrations` 随 `COPY backend/` 进入 |
+| 镜像漏拷 `alembic.ini` / `migrations` | 容器内 `db` 命令报「迁移目录缺失」 | Dockerfile.prod 已加 `COPY alembic.ini ./`；`src/stockmaster/alembic` 随 `COPY src/` 进入 |
 | 存量库被误 `stamp` 到 head 但结构落后 | 少了列，业务查询才报错 | `ensure_migrated` 之后跑 `schema_drift()` 告警；`db check` 可显式体检 |
 | 恢复期间仍有 HTTP 写请求 | 数据竞争 | 恢复前暂停调度器 + 进程内互斥锁；**完成后建议重启服务**（响应里已提示） |
 | 备份含签名密钥 | 归档泄露 = 可伪造会话 | manifest 标注 `secrets.auth_secret`，检查页与列表都提示；可 `--no-secret` / `include_secret=false` |

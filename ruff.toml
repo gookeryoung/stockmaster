@@ -50,11 +50,11 @@ select = [
 ]
 # 离线替身必须逐字实现 BaseProvider 契约，即使某些参数在该替身中未被使用；
 # 这正是"可替换性"的要求，因此整文件豁免未使用参数检查。
-"backend/app/providers/mock_provider.py" = ["ARG001", "ARG002"]
+"src/stockmaster/providers/mock_provider.py" = ["ARG001", "ARG002"]
 # 通知通道统一实现 Channel 协议；DatabaseChannel 只做落库，不需要读取通知内容。
-"backend/app/alert/channels.py" = ["ARG002"]
+"src/stockmaster/alert/channels.py" = ["ARG002"]
 # 验收脚本按顺序执行断言，局部导入与长函数是刻意的
 "scripts/**" = ["PLC0415", "PLR0915", "E402"]
 
 [lint.isort]
-known-first-party = ["app"]
+known-first-party = ["stockmaster"]

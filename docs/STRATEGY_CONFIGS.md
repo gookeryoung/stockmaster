@@ -4,7 +4,7 @@
 > `algorithm_configs` 三张工作区私有表 + `/api/v1/strategy/*` 路由 + 前端「策略」页）。
 > 开关：`SM_DATA_ISOLATION`，默认 `false`（= 全部落 `workspace_id = 0`，无工作区语义，可随时回退）。
 > 前置：工作区与角色体系（`docs/WORKSPACE.md`，`0003_workspaces`）；指标/因子数据（`analytics`）；
-> 训练链路（`backend/app/model/train.py`）。
+> 训练链路（`src/stockmaster/model/train.py`）。
 > 本文沿用 `docs/WORKSPACE.md` 的归属与角色规则，只描述新增的三类「策略配置」资源。
 
 ---
@@ -136,7 +136,7 @@
 
 #### 算法超参 `algorithm_configs.params_json`
 
-超参是扁平字典，键直接透传给 `app/model/models.py` 的 `build_estimator()`。**只接受数值**
+超参是扁平字典，键直接透传给 `stockmaster/model/models.py` 的 `build_estimator()`。**只接受数值**
 （整数/浮点，布尔与字符串都会 422）；每个算法的可用键与取值范围由 `strategy/algorithm.py`
 的 `PARAM_SPECS` 白名单校验，未知键、越界、类型错误一律在写入时 422，而不是等 sklearn
 抛异常。不传的键用代码内置默认值，`random_state` 由服务端统一注入以保证可复现
@@ -419,7 +419,7 @@ curl -s -X POST http://127.0.0.1:8770/api/v1/backtest/run \
 
 ### 6.3 与 `data_counts` / `purge` / `claim_unassigned` 的集成
 
-三张表纳入 `backend/app/workspace/service.py` 的 `DATA_MODELS`：
+三张表纳入 `src/stockmaster/workspace/service.py` 的 `DATA_MODELS`：
 
 - **`data_counts()`**：工作区页会显示「选股/样本/算法配置各 N 条」，删除工作区前可确认；
 - **`delete_workspace(..., purge=True)`**：按表清理这三类配置，返回值计入删除统计；
@@ -462,7 +462,7 @@ curl -s -X POST http://127.0.0.1:8770/api/v1/backtest/run \
 
 ## 8. 测试矩阵
 
-- `backend/tests/test_strategy_configs.py`（新增）：
+- `tests/test_strategy_configs.py`（新增）：
   1. 三类配置 CRUD（创建 201、列表、详情、PATCH、DELETE 204）；
   2. 角色矩阵：viewer 对全部写端点 403 且 `X-Auth-Error=read_only`；viewer 可 GET、可运行选股、
      可解析样本；editor/owner 可写；

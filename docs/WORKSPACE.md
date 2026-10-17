@@ -2,7 +2,7 @@
 
 > 状态：**已实施**（`0003_workspaces` 迁移 + Workspace/WorkspaceMember 表 + 读写路径改造 + 角色矩阵测试）。
 > 开关：`SM_DATA_ISOLATION`，默认 `false`（= 无工作区概念的共享语义），可随时回退。
-> 前置：账号体系（`backend/app/auth/`）已落地。
+> 前置：账号体系（`src/stockmaster/auth/`）已落地。
 > 本文取代 `docs/USER_ISOLATION.md` 的设计（owner_id 用户级隔离 → cndb 式工作区隔离），
 > 设计取舍仍大量沿用前文，冲突处以本文为准。
 
@@ -24,9 +24,9 @@
 ## 2. 角色模型
 
 ```python
-# backend/app/workspace/roles.py
+# src/stockmaster/workspace/roles.py
 ROLE_RANK = {"owner": 3, "editor": 2, "viewer": 1}
-GRANTABLE_ROLES = {"editor", "viewer"}      # owner 只能通过「转让」产生
+GRANTABLE_ROLES = {"editor", "viewer"}  # owner 只能通过「转让」产生
 ```
 
 | 角色 | 读数据 | 写数据（自选/规则/回测/扫描） | 管理成员 | 改名/删除工作区 |
@@ -50,8 +50,8 @@ GRANTABLE_ROLES = {"editor", "viewer"}      # owner 只能通过「转让」产�
 ### 列语义变更
 
 ```python
-# backend/app/db/models.py
-WORKSPACE_UNASSIGNED = 0     # 原 OWNER_UNASSIGNED
+# src/stockmaster/db/models.py
+WORKSPACE_UNASSIGNED = 0  # 原 OWNER_UNASSIGNED
 
 # 四张私有表统一（0003 迁移里由 owner_id 改名而来）
 workspace_id: Mapped[int] = mapped_column(Integer, default=WORKSPACE_UNASSIGNED, nullable=False)
@@ -86,7 +86,7 @@ workspace_id: Mapped[int] = mapped_column(Integer, default=WORKSPACE_UNASSIGNED,
 `workspace/deps`：
 
 ```python
-# backend/app/workspace/deps.py
+# src/stockmaster/workspace/deps.py
 @dataclass
 class WorkspaceCtx:
     workspace: Workspace
@@ -100,7 +100,7 @@ def require_editor(...) -> WorkspaceCtx:
     """写端点专用：viewer → 403，响应头 X-Auth-Error: read_only。"""
 ```
 
-端点分层（`backend/app/api/v1/`）：
+端点分层（`src/stockmaster/api/v1/`）：
 
 | 端点 | 依赖 | viewer 结果 |
 |---|---|---|
@@ -170,10 +170,10 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 
 ## 9. 测试矩阵
 
-- `backend/tests/test_workspace.py`：角色矩阵 —— viewer 写 403 + `X-Auth-Error: read_only`；
+- `tests/test_workspace.py`：角色矩阵 —— viewer 写 403 + `X-Auth-Error: read_only`；
   editor 不可管成员；最后一个 owner 保护；跨工作区 404；转让后角色互换；
   preview 对 viewer 200；
-- `backend/tests/test_isolation.py`：重写为工作区语义 —— 两个工作区对每个私有端点交叉访问，
+- `tests/test_isolation.py`：重写为工作区语义 —— 两个工作区对每个私有端点交叉访问，
   参数化断言「404 或空列表，绝不返回对方数据」；同名清单同码股票在两个工作区互不冲突；
   预警规则只命中本工作区自选；匿名 + 隔离关闭落 workspace 0。
 

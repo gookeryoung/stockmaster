@@ -34,8 +34,8 @@ Write-Host "==> 安装后端依赖" -ForegroundColor Cyan
 
 Write-Host "==> 初始化数据库" -ForegroundColor Cyan
 $env:PYTHONIOENCODING = "utf-8"
-$env:PYTHONPATH = Join-Path $root "backend"
-& ".venv\Scripts\python.exe" -m app.cli init
+$env:PYTHONPATH = Join-Path $root "src"
+& ".venv\Scripts\python.exe" -m stockmaster.cli init
 
 if (-not $SkipFrontend) {
     Write-Host "==> 安装并构建前端" -ForegroundColor Cyan
@@ -54,4 +54,4 @@ if (-not $SkipFrontend) {
 
 Write-Host ""
 Write-Host "设置完成。启动： .\scripts\run.ps1" -ForegroundColor Green
-Write-Host "首次使用请先同步数据： .venv\Scripts\python.exe -m app.cli sync-daily" -ForegroundColor Green
+Write-Host "首次使用请先同步数据： .venv\Scripts\python.exe -m stockmaster.cli sync-daily" -ForegroundColor Green

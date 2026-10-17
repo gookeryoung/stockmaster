@@ -15,9 +15,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from app.core.console import prefer_console_encoding
+from stockmaster.core.console import prefer_console_encoding
 
 
 def main(argv: list[str]) -> int:

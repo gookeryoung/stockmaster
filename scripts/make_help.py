@@ -16,7 +16,7 @@ import re
 import sys
 from pathlib import Path
 
-from app.core.console import detect_console_encoding, prefer_console_encoding
+from stockmaster.core.console import detect_console_encoding, prefer_console_encoding
 
 # A target line may declare several names ("build b:") and an optional `## help`.
 _TARGET_RE = re.compile(r"^([a-zA-Z][\w -]*):.*?##\s*(.*)$")

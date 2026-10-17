@@ -17,8 +17,8 @@
 #
 # 常用运维命令：
 #   docker compose --env-file .env -f docker-compose.prod.yml logs -f app
-#   docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli stats
-#   docker compose --env-file .env -f docker-compose.prod.yml exec app python -m app.cli doctor
+#   docker compose --env-file .env -f docker-compose.prod.yml exec app python -m stockmaster.cli stats
+#   docker compose --env-file .env -f docker-compose.prod.yml exec app python -m stockmaster.cli doctor
 # ═══════════════════════════════════════════════════════════════════
 
 services:
@@ -69,7 +69,7 @@ services:
       # 工作区隔离（owner/editor/viewer，见 docs/WORKSPACE.md）；false = 共享一份（旧语义）
       - SM_DATA_ISOLATION=${SM_DATA_ISOLATION:-false}
       # ── 数据库迁移与备份 ──────────────────────────────────────
-      # 启动自动迁移；设 false 则要求先执行 `python -m app.cli db upgrade`
+      # 启动自动迁移；设 false 则要求先执行 `python -m stockmaster.cli db upgrade`
       - SM_DB_AUTO_MIGRATE=${SM_DB_AUTO_MIGRATE:-true}
       # 本地备份保留份数（/data/backups），0 表示不清理
       - SM_BACKUP_KEEP=${SM_BACKUP_KEEP:-7}

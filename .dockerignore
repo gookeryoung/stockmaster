@@ -22,7 +22,7 @@ htmlcov
 .tox
 coverage.xml
 
-# 前端依赖与构建产物（Dockerfile 只复制 backend/，无需送入构建上下文）
+# 前端依赖与构建产物（Dockerfile 只复制 src/，无需送入构建上下文）
 frontend/node_modules
 frontend/dist
 frontend/.vite
