@@ -13,31 +13,84 @@ hermetic and fast.
 
 from __future__ import annotations
 
-import uuid
+import os
+import shutil
 from datetime import date
+from pathlib import Path
 
 import pytest
 
 from app.providers.mock_provider import MockProvider
 from app.providers.registry import ProviderRegistry
 
+_ENV_KEYS = ("SM_DATA_DIR", "SM_DB_FILENAME", "SM_SCHEDULER_ENABLED")
+
+
+@pytest.fixture(scope="module")
+def seeded_template(tmp_path_factory) -> Path:
+    """Seed one throwaway database that every test in this module copies.
+
+    The setup is the expensive part of this file (multi-symbol sync plus years of
+    bars), and it used to be repeated for each of the nine tests. Every test still
+    mutates only its own copy, so a seeded template is behaviourally equivalent and
+    an order of magnitude cheaper.
+    """
+    base = tmp_path_factory.mktemp("pipeline-template")
+    previous = {key: os.environ.get(key) for key in _ENV_KEYS}
+    try:
+        os.environ["SM_DATA_DIR"] = str(base)
+        os.environ["SM_DB_FILENAME"] = "template.db"
+        os.environ["SM_SCHEDULER_ENABLED"] = "false"
+
+        from app.config import get_settings
+        from app.db import init_db
+        from app.db import session as session_mod
+        from app.sync.sync_service import SyncService
+
+        get_settings.cache_clear()
+        session_mod.reset_engine()
+        init_db()
+        _seed(SyncService(ProviderRegistry([MockProvider()], order=["mock"])))
+
+        # 关闭连接让 SQLite 把 WAL 落盘；模板连同 sidecar 一起拷贝（见 _copy_db）。
+        session_mod.reset_engine()
+        get_settings.cache_clear()
+        return base / "template.db"
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+
+
+def _copy_db(source: Path, target: Path) -> None:
+    """Copy a SQLite database, including its WAL sidecars when present."""
+    shutil.copy2(source, target)
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(f"{source}{suffix}")
+        if sidecar.exists():
+            shutil.copy2(sidecar, Path(f"{target}{suffix}"))
+
 
 @pytest.fixture
-def pipeline_env(tmp_path, monkeypatch):
-    """Fresh database plus a mock-backed sync service."""
+def pipeline_env(tmp_path, monkeypatch, seeded_template):
+    """Per-test copy of the seeded database plus a mock-backed sync service."""
     monkeypatch.setenv("SM_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SM_DB_FILENAME", f"e2e-{uuid.uuid4().hex}.db")
+    monkeypatch.setenv("SM_DB_FILENAME", "e2e.db")
     monkeypatch.setenv("SM_SCHEDULER_ENABLED", "false")
 
     from app.config import get_settings
 
     get_settings.cache_clear()
 
-    from app.db import init_db
     from app.db import session as session_mod
 
     session_mod.reset_engine()
-    init_db()
+    _copy_db(seeded_template, tmp_path / "e2e.db")
 
     from app.sync.sync_service import SyncService
 

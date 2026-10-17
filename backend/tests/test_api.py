@@ -557,11 +557,35 @@ class TestSystem:
     def test_unknown_job_returns_404(self, client):
         assert client.post("/api/v1/system/jobs/nope").status_code == 404
 
-    def test_daily_job_runs_with_mock_disabled_providers(self, client):
+    def test_daily_job_runs_with_mock_disabled_providers(self, client, monkeypatch):
         """The daily job must not 500 when live providers are unreachable.
 
-        In tests no network provider is configured for the temp DB, so this
-        exercises the error path: it should report a structured failure.
+        The providers are replaced with an always-failing stub instead of hitting
+        the real network: the failure path is what this pins, and a live attempt
+        used to cost 40-50s in CI (and made the suite network-dependent).
+        ``sync_index_members`` talks to akshare directly rather than through the
+        registry, so it is stubbed to the same structured failure.
         """
+        from app.jobs import tasks
+        from app.providers.mock_provider import FailingProvider
+        from app.providers.registry import ProviderRegistry
+        from app.sync.sync_service import SyncReport, SyncService
+
+        def offline_service() -> SyncService:
+            service = SyncService(ProviderRegistry([FailingProvider()], order=["offline"]))
+            monkeypatch.setattr(
+                service,
+                "sync_index_members",
+                lambda *_args, **_kwargs: SyncReport(job="index_members", failed=1, errors=["offline"]),
+            )
+            return service
+
+        monkeypatch.setattr(tasks, "get_sync_service", offline_service)
+
         response = client.post("/api/v1/system/jobs/instruments")
-        assert response.status_code in (200, 500)
+        assert response.status_code == 200, response.text
+        detail = response.json()["detail"]
+        assert detail["job"] == "instruments"
+        assert detail["failed"] == 1
+        assert detail["error_count"] >= 1
+        assert [item["failed"] for item in detail["indices"]] == [1, 1]

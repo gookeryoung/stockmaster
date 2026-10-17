@@ -141,35 +141,66 @@ class TestTerminateTree:
     # verified below against the real `uvicorn --reload` process structure, which is
     # the shape that actually matters.
 
-    def test_run_dev_releases_port_after_shutdown(self):
+    def test_run_dev_releases_port_after_shutdown(self, monkeypatch):
         """The real reloader tree must not outlive shutdown.
 
         `uvicorn --reload` runs a reloader parent plus a server child, so a released
         port is direct evidence the whole tree was terminated.
+
+        The orchestrator runs on a worker thread and is stopped by its
+        ``max_seconds`` budget; the test thread only waits for the port to come up
+        and then for shutdown. The budget is kept small because the assertion only
+        needs "came up, then stopped cleanly" — the old 20s budget was pure
+        wall-clock cost on every CI run. The graceful-exit grace is also shortened:
+        Windows cannot gracefully stop a Python process anyway, so waiting the full
+        production grace only slows the test down.
         """
+        import threading
+
+        monkeypatch.setattr("app.dev_server.GRACEFUL_EXIT_SECONDS", 1.0)
+
         port = _free_port()
-        code = run_dev(
-            host="127.0.0.1",
-            port=port,
-            with_frontend=False,
-            reload=True,
-            project_root=REPO_ROOT,
-            max_seconds=20,
-        )
-        assert code == 0
+        result: dict = {}
+
+        def run() -> None:
+            result["code"] = run_dev(
+                host="127.0.0.1",
+                port=port,
+                with_frontend=False,
+                reload=True,
+                project_root=REPO_ROOT,
+                max_seconds=10,
+            )
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+
+        # 先确认后端确实起来了：否则「预算到期后干净退出」可能只是启动失败提前返回，
+        # 端口释放的断言就成了空转。
+        deadline = time.time() + 40
+        while time.time() < deadline and not port_in_use("127.0.0.1", port):
+            time.sleep(0.1)
+        came_up = port_in_use("127.0.0.1", port)
+
+        worker.join(timeout=60)
+        assert not worker.is_alive(), "run_dev did not stop after max_seconds"
+        assert result.get("code") == 0
+        assert came_up, "backend never came up; the port-release assertion would be vacuous"
 
         deadline = time.time() + 20
         while time.time() < deadline and port_in_use("127.0.0.1", port):
-            time.sleep(0.5)
+            time.sleep(0.1)
         assert not port_in_use("127.0.0.1", port), "reloader child survived shutdown and kept the port bound"
 
-    def test_stop_event_shuts_down_and_releases_the_port(self):
+    def test_stop_event_shuts_down_and_releases_the_port(self, monkeypatch):
         """Setting the stop event must terminate the tree and free the port.
 
         This is the exact path the Ctrl+C handler drives in `_dev`: the handler only
         sets an event, and the orchestrator performs an ordered tree shutdown.
         """
         import threading
+
+        monkeypatch.setattr("app.dev_server.GRACEFUL_EXIT_SECONDS", 1.0)
 
         port = _free_port()
         stop_event = threading.Event()

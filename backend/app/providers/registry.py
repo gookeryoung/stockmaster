@@ -268,6 +268,15 @@ class ProviderRegistry:
 
 def _default_providers() -> list[BaseProvider]:
     """Instantiate the built-in providers, tolerating missing optional deps."""
+    if settings.provider_offline:
+        # 气隙/CI：返回一个始终失败的替身，调用方在毫秒内拿到 ProviderError，而不是
+        # 等真实数据源超时。不能返回空列表——注册表要求至少一个 provider，且失败
+        # 信息必须仍然是「数据源不可用」，否则上层会误判为配置错误。
+        from app.providers.mock_provider import FailingProvider
+
+        log.warning("SM_PROVIDER_OFFLINE=true: data providers disabled (all calls fail fast)")
+        return [FailingProvider(name="offline")]
+
     providers: list[BaseProvider] = []
     try:
         from app.providers.baostock_provider import BaostockProvider

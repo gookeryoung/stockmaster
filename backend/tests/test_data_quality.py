@@ -8,8 +8,10 @@ for the clean baseline, that nothing is reported.
 
 from __future__ import annotations
 
-import uuid
+import os
+import shutil
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -23,20 +25,56 @@ from app.sync.quality import (
     summarize_for_log,
 )
 
+_ENV_KEYS = ("SM_DATA_DIR", "SM_DB_FILENAME")
 
-@pytest.fixture
-def seeded(tmp_path, monkeypatch):
+
+@pytest.fixture(scope="module")
+def seeded_template(tmp_path_factory) -> Path:
+    """Seed one clean database that every test in this module copies.
+
+    Every test injects a single defect into an otherwise clean database, so the
+    expensive part (schema + two years of bars for three symbols) is identical
+    across all of them. Seeding it once and copying the file per test keeps the
+    isolation while removing ~20 repeated setups from CI.
+    """
+    base = tmp_path_factory.mktemp("quality-template")
+    previous = {key: os.environ.get(key) for key in _ENV_KEYS}
+    try:
+        os.environ["SM_DATA_DIR"] = str(base)
+        os.environ["SM_DB_FILENAME"] = "template.db"
+
+        from app.config import get_settings
+        from app.db import session as session_mod
+
+        get_settings.cache_clear()
+        session_mod.reset_engine()
+        session_mod.init_db()
+        _seed_clean_database()
+        session_mod.reset_engine()
+        get_settings.cache_clear()
+        return base / "template.db"
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+
+
+def _copy_db(source: Path, target: Path) -> None:
+    """Copy a SQLite database, including its WAL sidecars when present."""
+    shutil.copy2(source, target)
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(f"{source}{suffix}")
+        if sidecar.exists():
+            shutil.copy2(sidecar, Path(f"{target}{suffix}"))
+
+
+def _seed_clean_database() -> None:
     """A clean database: a real calendar plus healthy bars for a few symbols."""
-    monkeypatch.setenv("SM_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SM_DB_FILENAME", f"quality-{uuid.uuid4().hex}.db")
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    from app.db import session as session_mod
-
-    session_mod.reset_engine()
-    session_mod.init_db()
-
     # Business-day calendar over 2 years, so coverage checks have a real basis.
     start = date(2025, 1, 1)
     sessions: list[date] = []
@@ -57,10 +95,27 @@ def seeded(tmp_path, monkeypatch):
             ],
         )
         for code, base in (("600519.SH", 100.0), ("000001.SZ", 10.0), ("300750.SZ", 200.0)):
-            repo.upsert_daily_bars(session, code, _healthy_bars(code, sessions, base), "qfq")
-            repo.upsert_daily_bars(session, code, _healthy_bars(code, sessions, base), "raw")
+            # 两种复权口径共用同一份 bar 列表：写库只读字段，不修改对象。
+            healthy = _healthy_bars(code, sessions, base)
+            repo.upsert_daily_bars(session, code, healthy, "qfq")
+            repo.upsert_daily_bars(session, code, healthy, "raw")
 
-    yield session_mod, sessions
+
+@pytest.fixture
+def seeded(tmp_path, monkeypatch, seeded_template):
+    """Per-test copy of the clean database (tests mutate their own copy)."""
+    monkeypatch.setenv("SM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SM_DB_FILENAME", "quality.db")
+
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    from app.db import session as session_mod
+
+    session_mod.reset_engine()
+    _copy_db(seeded_template, tmp_path / "quality.db")
+
+    yield
 
     session_mod.reset_engine()
     get_settings.cache_clear()

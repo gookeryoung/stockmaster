@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     provider_max_retries: int = 3
     provider_circuit_threshold: int = 3
     provider_circuit_cooldown: float = 300.0
+    # 气隙/CI 模式：不实例化真实数据源，所有取数调用立即失败（不发起任何网络
+    # 请求）。生产默认关闭；测试用它把「数据源不可达」的路径变成确定且毫秒级的。
+    provider_offline: bool = False
     sync_workers: int = 4
     sync_request_delay: float = 0.05
 

@@ -386,6 +386,7 @@ uv run --with prek prek run --all-files   # 手动全量运行
 | `SM_PORT` | 8770 | 服务端口 |
 | `SM_PROVIDER_ORDER` | baostock,tencent,sina | 数据源优先级 |
 | `SM_PROVIDER_TIMEOUT` | 30 | 单请求超时（秒） |
+| `SM_PROVIDER_OFFLINE` | false | true 时不实例化真实数据源，取数立即失败（气隙环境/可重复测试） |
 | `SM_SYNC_WORKERS` | 4 | 并发取数线程 |
 | `SM_PREDICT_HORIZONS` | 1,5,20 | 预测周期 |
 | `SM_SCHEDULER_ENABLED` | true | 是否启用定时任务 |

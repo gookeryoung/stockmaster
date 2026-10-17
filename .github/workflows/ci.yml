@@ -49,7 +49,11 @@ jobs:
 
       - name: 单元与集成测试
         # Network-marked contract tests are excluded: they depend on live public
-        # data sources, which would make CI flaky and slow.
+        # data sources, which would make CI flaky and slow. SM_PROVIDER_OFFLINE
+        # makes any *other* accidental live fetch fail in milliseconds instead of
+        # waiting for provider timeouts — the suite must stay hermetic.
+        env:
+          SM_PROVIDER_OFFLINE: "true"
         run: uv run pytest -n auto -m "not network" --cov=app --cov-report=term --cov-fail-under=75
 
       - name: 构建 wheel 与 sdist

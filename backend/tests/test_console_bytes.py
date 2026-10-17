@@ -67,8 +67,10 @@ class TestStdoutIsValidUtf8:
     def test_sync_daily_chinese_is_valid_utf8(self):
         """The exact command the user reported mojibake from.
 
-        Runs with a non-existent code so it exercises the Chinese progress/preamble
-        lines without touching the network.
+        Runs with data providers forced offline (``SM_PROVIDER_OFFLINE``), so the
+        Chinese preamble/progress lines are produced without any network access:
+        the source being unreachable is irrelevant to the byte-level assertion, and
+        a live fetch here made CI slow and network-dependent.
         """
         result = _run_cli(
             [
@@ -83,7 +85,8 @@ class TestStdoutIsValidUtf8:
                 "0",
                 "--log-level",
                 "ERROR",
-            ]
+            ],
+            {"SM_PROVIDER_OFFLINE": "true"},
         )
         combined = result.stdout + result.stderr
         assert combined, "sync-daily produced no output"
