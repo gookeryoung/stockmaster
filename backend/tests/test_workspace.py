@@ -197,12 +197,16 @@ def test_editor_writes_data_but_cannot_manage_members(ws_client):
     assert _add(client, client.bob, ws_id, "carol", "viewer")["status"] == 403
     assert client.patch(f"/api/v1/workspaces/{ws_id}", headers=h, json={"name": "改名"}).status_code == 403
     assert client.delete(f"/api/v1/workspaces/{ws_id}", headers=h).status_code == 403
-    assert client.post(
-        f"/api/v1/workspaces/{ws_id}/transfer", headers=h, json={"user_id": client.bob["id"]}
-    ).status_code == 403
-    assert client.patch(
-        f"/api/v1/workspaces/{ws_id}/members/{client.alice['id']}", headers=h, json={"role": "viewer"}
-    ).status_code == 403
+    assert (
+        client.post(f"/api/v1/workspaces/{ws_id}/transfer", headers=h, json={"user_id": client.bob["id"]}).status_code
+        == 403
+    )
+    assert (
+        client.patch(
+            f"/api/v1/workspaces/{ws_id}/members/{client.alice['id']}", headers=h, json={"role": "viewer"}
+        ).status_code
+        == 403
+    )
     assert client.delete(f"/api/v1/workspaces/{ws_id}/members/{client.alice['id']}", headers=h).status_code == 403
 
 
@@ -233,7 +237,9 @@ def test_owner_manages_members(ws_client):
     )
     assert res.status_code == 200 and res.json()["role"] == "viewer"
     # 降级后 bob 立刻变成只读（权限判断不缓存）
-    assert client.post("/api/v1/watchlist", headers=_h(client.bob, ws_id), json={"code": "600519.SH"}).status_code == 403
+    assert (
+        client.post("/api/v1/watchlist", headers=_h(client.bob, ws_id), json={"code": "600519.SH"}).status_code == 403
+    )
 
     # 候选列表排除已有成员
     candidates = client.get(f"/api/v1/workspaces/{ws_id}/members/candidates", headers=_h(client.alice)).json()
@@ -241,9 +247,10 @@ def test_owner_manages_members(ws_client):
     assert "carol" not in names and "dave" in names
 
     # 移除成员
-    assert client.delete(
-        f"/api/v1/workspaces/{ws_id}/members/{client.carol['id']}", headers=_h(client.alice)
-    ).status_code == 204
+    assert (
+        client.delete(f"/api/v1/workspaces/{ws_id}/members/{client.carol['id']}", headers=_h(client.alice)).status_code
+        == 204
+    )
     assert client.get("/api/v1/watchlist", headers=_h(client.carol, ws_id)).status_code == 404
 
 
@@ -278,13 +285,16 @@ def test_transfer_owner_demotes_previous_owner(ws_client):
 
     # 原 owner 降为 editor：还能写数据，但不能再管成员
     assert _member(client, client.alice, ws_id, client.alice["id"])["role"] == "editor"
-    assert client.post("/api/v1/watchlist", headers=_h(client.alice, ws_id), json={"code": "600519.SH"}).status_code == 201
+    assert (
+        client.post("/api/v1/watchlist", headers=_h(client.alice, ws_id), json={"code": "600519.SH"}).status_code == 201
+    )
     assert _add(client, client.alice, ws_id, "carol", "viewer")["status"] == 403
 
     # 转让之后 bob 是唯一 owner，谁也动不了他
-    assert client.delete(
-        f"/api/v1/workspaces/{ws_id}/members/{client.bob['id']}", headers=_h(client.alice)
-    ).status_code == 403
+    assert (
+        client.delete(f"/api/v1/workspaces/{ws_id}/members/{client.bob['id']}", headers=_h(client.alice)).status_code
+        == 403
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -316,9 +326,13 @@ def test_workspace_header_switches_scope(ws_client):
     # 新工作区是空的
     assert client.get("/api/v1/watchlist", headers=_h(client.bob, ws_id)).json() == []
     # 写进新工作区，不影响个人空间
-    assert client.post("/api/v1/watchlist", headers=_h(client.bob, ws_id), json={"code": "000001.SZ"}).status_code == 201
+    assert (
+        client.post("/api/v1/watchlist", headers=_h(client.bob, ws_id), json={"code": "000001.SZ"}).status_code == 201
+    )
     assert [r["code"] for r in client.get("/api/v1/watchlist", headers=_h(client.bob, ws_id)).json()] == ["000001.SZ"]
-    assert [r["code"] for r in client.get("/api/v1/watchlist", headers=_h(client.bob, personal_id)).json()] == ["600519.SH"]
+    assert [r["code"] for r in client.get("/api/v1/watchlist", headers=_h(client.bob, personal_id)).json()] == [
+        "600519.SH"
+    ]
 
     # 非法头直接 400：静默降级到个人空间会让人以为数据写丢了
     bad = client.get("/api/v1/watchlist", headers={**_h(client.bob), "X-Workspace-Id": "abc"})
@@ -333,7 +347,9 @@ def test_workspace_header_switches_scope(ws_client):
 def test_personal_workspace_cannot_be_deleted(ws_client):
     client = ws_client
     personal_id = next(
-        row["id"] for row in client.get("/api/v1/workspaces", headers=_h(client.bob)).json() if row["kind"] == "personal"
+        row["id"]
+        for row in client.get("/api/v1/workspaces", headers=_h(client.bob)).json()
+        if row["kind"] == "personal"
     )
     res = client.delete(f"/api/v1/workspaces/{personal_id}", headers=_h(client.bob))
     assert res.status_code == 400
@@ -368,7 +384,5 @@ def test_admin_lists_every_workspace(ws_client):
     everything = client.get("/api/v1/workspaces?all=true", headers=_h(client.alice)).json()
     assert len(everything) > len(mine)
     # 管理员看别人工作区时按 owner 处理（救援用），但读数据仍要走成员身份
-    bob_personal = next(
-        row for row in everything if row["kind"] == "personal" and row["owner_id"] == client.bob["id"]
-    )
+    bob_personal = next(row for row in everything if row["kind"] == "personal" and row["owner_id"] == client.bob["id"])
     assert bob_personal["role"] == "owner"

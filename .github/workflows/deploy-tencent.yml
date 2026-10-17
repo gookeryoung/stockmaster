@@ -1,0 +1,124 @@
+name: Deploy to Tencent Cloud
+
+# 触发：推送 v*.*.* tag 时自动部署到腾讯云 Lighthouse 生产机。
+# 参考 cndb 的 deploy-tencent.yml，但载荷链路更简单：stockmaster 在服务器上
+# 是 git clone（/opt/stockmaster），不需要 wheel/PyPI/锁定清单那套分发，
+# 一条「checkout tag → deploy.sh」命令即可。
+#
+# 完整链路：
+#   tag push → 本 workflow 把命令交给 TAT（自动化助手）下发
+#            → 服务器 git fetch + checkout tag → deploy.sh
+#              （docker build → 预备份数据卷 → 重建容器 → 健康探测 →
+#                失败自动回滚上一镜像）→ 回传输出，SUCCESS 才算成功
+#
+# 为什么用 TAT 下发，而不是 SSH 直连（与 cndb 相同的理由）
+# ────────────────────────────────────────────────────────────────
+# GitHub 托管 runner 的出口 IP 在美国，SSH 登录生产机会持续触发腾讯云
+# 「异地登录」高危告警；runner 的 CIDR 池随时变动，白名单固定不住。
+# TAT 是「下发」模型：命令进云端队列，实例上的 agent 拉取执行，
+# 全程无入站连接，22 端口可以对公网关闭。
+#
+# 必需的 Repository Secrets（Settings → Secrets and variables → Actions）
+# ────────────────────────────────────────────────────────────────
+#   TENCENTCLOUD_SECRET_ID / TENCENTCLOUD_SECRET_KEY
+#       子账号 API 密钥（**不要用主账号密钥**）。最小权限策略：
+#         { "version": "2.0", "statement": [{
+#             "effect": "allow", "action": ["tat:RunCommand", "tat:DescribeInvocationTasks"],
+#             "resource": ["*"] }] }
+#   SM_INSTANCE_ID      Lighthouse 实例 ID，如 lhins-xxxxxxxx
+#   SM_REGION           实例地域，如 ap-shanghai
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  # 手动触发：重跑部署或部署到指定 tag（输入已存在的版本号即可）
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "要部署的版本 tag（如 v0.2.0）。留空则用最近一个 tag"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# 并发部署会导致镜像与 .env 相互覆盖，排队而不取消
+concurrency:
+  group: deploy-tencent-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy via TAT (server-side build)
+    runs-on: ubuntu-24.04
+    # 70 分钟是排障上限而非预估：首次无缓存构建 15-30 分钟，
+    # 之后走 Docker 层缓存通常 5 分钟内。
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version
+        id: meta
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            # push 触发用 tag 名；手动触发兜底取最近一个 v* tag
+            VERSION="${GITHUB_REF_NAME}"
+            if [ "$VERSION" = "main" ] || [ -z "$VERSION" ]; then
+              VERSION="$(git describe --tags --abbrev=0 --match 'v*.*.*')"
+            fi
+          fi
+          case "$VERSION" in
+            v*) ;;
+            *) echo "::error::版本号必须形如 v0.2.0，当前为 ${VERSION}"; exit 1 ;;
+          esac
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "部署版本: ${VERSION}"
+
+      - name: Build deploy command
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/sm-deploy-cmd.sh <<'CMD'
+          set -euo pipefail
+          cd /opt/stockmaster
+          echo "=== 部署前状态 ==="
+          docker ps --format '{{.Names}} {{.Image}} {{.Status}}' | grep stockmaster || true
+          echo "=== 拉取代码 ==="
+          git fetch origin --tags --prune --force
+          CMD
+          # 变量在双引号 heredoc 外展开，命令文本里只留最终值
+          cat >> /tmp/sm-deploy-cmd.sh <<CMD
+          git checkout -f ${VERSION}
+          echo "=== 当前版本 ==="
+          git describe --tags
+          echo "=== 开始部署 ==="
+          ./deploy/deploy.sh ${VERSION}
+          echo "=== 部署后状态 ==="
+          docker ps --format '{{.Names}} {{.Image}} {{.Status}}' | grep stockmaster
+          curl -fsS -m 5 http://127.0.0.1:8770/api/v1/health
+          CMD
+          echo "--- 部署命令预览 ---"
+          cat /tmp/sm-deploy-cmd.sh
+
+      - name: Deploy via TAT
+        env:
+          TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
+          TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
+        run: |
+          python3 scripts/deploy_via_tat.py \
+            --region "${{ secrets.SM_REGION }}" \
+            --instance-id "${{ secrets.SM_INSTANCE_ID }}" \
+            --command-file /tmp/sm-deploy-cmd.sh \
+            --timeout 3600 \
+            --max-wait 3300 \
+            --poll-interval 15 \
+            --working-directory /opt/stockmaster
+
+      - name: Notify failure
+        if: failure()
+        run: |
+          echo "::error::部署失败。deploy.sh 会自动回滚，服务仍运行在上一版本。"
+          echo "::error::完整日志需上机查看：tail -100 /tmp（TAT 回传输出有长度上限）。"
+          echo "::error::若卡在服务器端 docker build，多为基础镜像或 PyPI 拉取超时，重跑一次通常恢复。"
