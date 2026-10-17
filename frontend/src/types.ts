@@ -241,6 +241,20 @@ export interface AuthUser {
   identities: Identity[];
 }
 
+/** 管理员用户列表的条目：在账号信息之外附带工作区与数据量统计。
+ *
+ * 统计只在该接口出现（普通 `/auth/me` 等仍是 `AuthUser`），避免把管理端字段
+ * 泄露到普通账号的响应里。
+ */
+export interface AdminUser extends AuthUser {
+  /** 参与的工作区数量（含自己创建与他人共享的）。 */
+  workspace_count: number;
+  /** 其中自己是所有者的工作区数量。 */
+  owned_workspace_count: number;
+  /** 个人工作区的数据量；共享工作区不计入。 */
+  personal_data_total: number;
+}
+
 export interface AuthConfig {
   auth_enabled: boolean;
   allow_register: boolean;
@@ -263,6 +277,8 @@ export interface Workspace {
   /** 当前账号在该工作区的角色（不是工作区的「主所有者」）。 */
   role: WorkspaceRole;
   member_count: number;
+  /** 工作区数据量：自选 + 预警规则 + 回测 + 三类策略配置（不含成员/通知通道）。 */
+  data_total: number;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -321,7 +337,7 @@ export interface TokenResponse {
 
 export interface UserPage {
   total: number;
-  items: AuthUser[];
+  items: AdminUser[];
 }
 
 export interface AuditLog {

@@ -8,13 +8,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from stockmaster.core import quota
 from stockmaster.core.auth_deps import client_agent, client_ip, require_admin
 from stockmaster.core.deps import db_session
 from stockmaster.core.logging import get_logger
-from stockmaster.db.models import AuthAuditLog, User
+from stockmaster.db.models import AuthAuditLog, User, Workspace, WorkspaceMember
 from stockmaster.plugins.auth.routers.auth import as_utc
 from stockmaster.plugins.auth.routers.auth import user_out as _user_out
 from stockmaster.plugins.auth.schemas.auth import (
+    AdminUserOut,
     AuditLogOut,
     PasswordResetIn,
     UserCreateIn,
@@ -23,6 +25,7 @@ from stockmaster.plugins.auth.schemas.auth import (
     UserUpdateIn,
 )
 from stockmaster.plugins.auth.services import passwords, service
+from stockmaster.plugins.workspaces.services.service import PERSONAL_KIND
 
 log = get_logger(__name__)
 # Router-level guard: every account-management endpoint is administrator-only,
@@ -35,6 +38,50 @@ AdminDep = Annotated[User, Depends(require_admin)]
 
 def _out(session: Session, user: User) -> UserOut:
     return _user_out(session, user, with_identities=True)
+
+
+def _admin_stats(session: Session, user_ids: list[int]) -> dict[int, dict[str, int]]:
+    """批量计算管理员列表的统计列。
+
+    三件事各用一次聚合查询解决：参与的成员关系数、owned 工作区数、个人工作区数据量
+    （后者交给 ``quota.data_totals`` 的批量 GROUP BY）。列表最多 200 人，逐人查会变成
+    数百次往返；这里与页大小无关，固定几次查询。
+    """
+    stats: dict[int, dict[str, int]] = {
+        user_id: {"workspace_count": 0, "owned_workspace_count": 0, "personal_data_total": 0} for user_id in user_ids
+    }
+    if not stats:
+        return stats
+
+    for user_id, count in session.execute(
+        select(WorkspaceMember.user_id, func.count())
+        .where(WorkspaceMember.user_id.in_(stats))
+        .group_by(WorkspaceMember.user_id)
+    ).all():
+        stats[int(user_id)]["workspace_count"] = int(count)
+
+    for owner_id, count in session.execute(
+        select(Workspace.owner_id, func.count()).where(Workspace.owner_id.in_(stats)).group_by(Workspace.owner_id)
+    ).all():
+        if owner_id is not None:
+            stats[int(owner_id)]["owned_workspace_count"] = int(count)
+
+    # personal 工作区按 owner_id 唯一；数据量只算「自己的空间」，共享工作区不重复
+    # 算到每个成员头上（数据属于工作区，不是属于人）。
+    personal = {
+        int(owner_id): int(workspace_id)
+        for owner_id, workspace_id in session.execute(
+            select(Workspace.owner_id, Workspace.id).where(
+                Workspace.kind == PERSONAL_KIND,
+                Workspace.owner_id.in_(stats),
+            )
+        ).all()
+        if owner_id is not None
+    }
+    totals = quota.data_totals(session, personal.values())
+    for user_id, workspace_id in personal.items():
+        stats[user_id]["personal_data_total"] = totals.get(workspace_id, 0)
+    return stats
 
 
 def _require_other_admin(session: Session, target: User, acting: User) -> None:
@@ -75,7 +122,13 @@ def list_users(
 
     total = int(session.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0)
     rows = session.execute(stmt.order_by(User.id).offset((page - 1) * page_size).limit(page_size)).scalars().all()
-    return UserPage(total=total, items=[_out(session, row) for row in rows])
+    stats = _admin_stats(session, [row.id for row in rows])
+    # AdminUserOut 与 UserOut 兼容：新建/更新/删除等端点仍返回 UserOut。
+    items = []
+    for row in rows:
+        base = _out(session, row)
+        items.append(AdminUserOut(**base.model_dump(), **stats[row.id]))
+    return UserPage(total=total, items=items)
 
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)

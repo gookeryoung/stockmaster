@@ -34,7 +34,7 @@ from stockmaster.db.models import (
     WorkspaceMember,
 )
 
-__all__ = ["USAGE_COUNTERS", "USAGE_LABELS", "enforce", "limits", "usage"]
+__all__ = ["DATA_COUNTERS", "USAGE_COUNTERS", "USAGE_LABELS", "data_total", "data_totals", "enforce", "limits", "usage"]
 
 #: 计入用量的资源 → ORM 模型。键同时是 API 返回与配置文件里的名字。
 #: 只统计「工作区私有数据 + 成员 + 通道」，行情/指标/模型等共享参考数据不计入。
@@ -58,6 +58,14 @@ USAGE_LABELS: dict[str, str] = {
     "sample_configs": "样本配置",
     "algorithm_configs": "算法配置",
     "channels": "通知通道",
+}
+
+#: 「数据量」口径：只算工作区里的业务数据，不含成员与通知通道。
+#:
+#: 用户页/管理员列表展示的「数据量」用这个口径；与用量卡片的 ``total``（含成员、
+#: 通道）刻意区分开 —— 把「成员 1 人」算进「数据 1 条」在列表里很怪。
+DATA_COUNTERS: dict[str, type] = {
+    key: model for key, model in USAGE_COUNTERS.items() if key not in ("members", "channels")
 }
 
 
@@ -89,6 +97,30 @@ def _count(session: Session, model: type, workspace_id: int) -> int:
 def usage(session: Session, workspace_id: int) -> dict[str, int]:
     """该工作区在各资源上的当前用量（只读）。"""
     return {resource: _count(session, model, workspace_id) for resource, model in USAGE_COUNTERS.items()}
+
+
+def data_total(session: Session, workspace_id: int) -> int:
+    """单个工作区的「数据量」：自选/规则/回测/三类策略配置，不含成员与通道。"""
+    return sum(_count(session, model, workspace_id) for model in DATA_COUNTERS.values())
+
+
+def data_totals(session: Session, workspace_ids) -> dict[int, int]:
+    """批量计算多个工作区的数据量，供工作区列表/管理员用户列表避免 N×M 次查询。
+
+    按表各做一次 ``GROUP BY workspace_id``；输入 id 去重、缺失的 id 补 0，调用方
+    不需要自己兜底。
+    """
+    ids = list(dict.fromkeys(int(i) for i in workspace_ids))
+    totals = dict.fromkeys(ids, 0)
+    if not ids:
+        return totals
+    for model in DATA_COUNTERS.values():
+        rows = session.execute(
+            select(model.workspace_id, func.count()).where(model.workspace_id.in_(ids)).group_by(model.workspace_id)
+        ).all()
+        for workspace_id, count in rows:
+            totals[int(workspace_id)] += int(count)
+    return totals
 
 
 def enforce(session: Session, workspace_id: int, resource: str, *, amount: int = 1) -> None:

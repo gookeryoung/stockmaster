@@ -483,6 +483,10 @@ owner 可创建共享工作区并邀请成员。前端顶栏可随时切换工�
 给每个工作区设上限（默认全 `0` = 不限，隔离关闭时一律不生效）；超限写入返回
 `409` + `X-Auth-Error: quota_exceeded`。设计见 **[docs/WORKSPACE.md](docs/WORKSPACE.md)** §5.2。
 
+「我的」页（`/account`）展示参与工作区数、个人工作区数据量与可访问数据合计；管理员
+「用户管理」列表新增每个账号的参与工作区数与个人数据量两列。数据量口径为自选/预警规则/
+回测/三类策略配置，不含成员与通知通道。
+
 策略配置（选股 / 样本 / 算法）同样按工作区归属：editor 及以上可增删改与训练，viewer 只读但可运行
 选股、解析样本；回测请求可直接引用 `screening_id` 使用某套选股口径。字段、JSON 约定、API 与权限矩阵见
 **[docs/STRATEGY_CONFIGS.md](docs/STRATEGY_CONFIGS.md)**。

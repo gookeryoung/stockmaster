@@ -203,7 +203,14 @@ def require_editor(...) -> WorkspaceCtx:
 
 **回滚**：把所有 `SM_WORKSPACE_MAX_*` 置回 `0`（或不设置）即完全恢复无配额行为；统计端点可保留，不影响任何写路径。
 
+**用户页与管理员统计列**（同一数据口径，无新表/新端点）：
 
+- `WorkspaceOut.data_total`：每个工作区的「数据量」——自选 + 预警规则 + 回测 + 三类策略配置，**不含成员与通知通道**。`GET /workspaces` 会把「我参与的工作区」连同 data_total 一次返回（批量 GROUP BY，不做 N×6 查询），用户页据此展示「参与工作区数 / 个人工作区数据量 / 可访问数据合计」。
+- 管理员 `GET /users` 的每条用户额外返回：`workspace_count`（参与工作区数）、`owned_workspace_count`（`workspaces.owner_id` 计数，含个人工作区）、`personal_data_total`（其 personal 工作区的 data_total）。管理员用户列表直接渲染为统计列。
+- 共享工作区的数据计入「可访问数据合计」，但不计入任何用户的 `personal_data_total` —— 它属于工作区，不属于某个账号。
+- 隔离关闭时 `/workspaces` 为空、用户页不展示概览；管理员列退化为 0。
+
+## 6. 迁移：`0003_workspaces`
 
 幂等设计 —— 同一个迁移既要在**全新库**（列建出来就叫 `workspace_id`）跳过改名，
 又要在 **0002 存量库**（还是 `owner_id`）上执行：
@@ -247,6 +254,9 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
   并显示只读提示；`/alerts/preview` 对 viewer 保持可用；
 - `/workspace` 页面：owner 管理成员（邀请、改角色、移除、转让）；
   隔离关闭时该页显示「未启用数据隔离」说明，切换器不出现。
+- `/account` 页面：「我的数据概览」展示参与工作区数、个人工作区数据量、可访问数据合计，
+  以及每个工作区的角色/成员数/数据量（只读）；
+- `/users` 页面（管理员）：用户列表新增「工作区」「个人数据量」两列。
 
 ## 9. 测试矩阵
 
@@ -264,6 +274,9 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 - `tests/test_workspace_stats_quota.py`：用量统计（usage/limits/labels/total、成员可读、
   非成员 404）与超限矩阵 —— 自选/规则/通道/成员/策略配置超限均 409 +
   `X-Auth-Error: quota_exceeded`；删除后释放额度；`SM_WORKSPACE_MAX_*=0` 或隔离关闭时不限制。
+- `tests/test_user_stats.py`：用户页/管理员统计 —— `GET /workspaces` 的 data_total 口径
+  （不含成员/通道）、`GET /users` 三个统计字段、权限（非管理员 403）、`q` 过滤后统计正确、
+  `quota.data_totals` 批量计算与未知 id 补 0。
 
 ## 10. 配置
 
@@ -295,10 +308,15 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 
 - ~~按工作区通知通道~~：**已实现** —— 见 §5.1（`0005_workspace_channels`、owner 管理
   webhook/Bark 通道、按工作区路由投递、`SM_ALERT_GLOBAL_FALLBACK` 兜底开关）；
-- **配额与统计**：~~工作区级用量统计与可选配额~~ **已实现** —— 见 §5.2（`GET /workspaces/{id}/stats`、
-  6 个 `SM_WORKSPACE_MAX_*`、写路径 409 `quota_exceeded`；默认全 0 不改变行为）。
-  仍需后续 PR：用户页的个人数据量细粒度统计、管理员工作区列表的统计列；
-- 工作区级预警参数覆盖、共享清单细粒度可见性；
+- **配额与统计**：~~工作区级用量统计与可选配额、用户页数据概览、管理员用户统计列~~
+  **已实现** —— 见 §5.2（`GET /workspaces/{id}/stats`、6 个 `SM_WORKSPACE_MAX_*`、
+  `WorkspaceOut.data_total`、管理员 `GET /users` 的 3 个统计字段）。
+  仍未做：管理员「工作区总览」列表页（数据已由 `GET /workspaces?all=true` 的
+  `data_total` 提供，只缺 UI）；
+- 工作区级预警参数覆盖；
+- ~~共享清单可见性细分~~：**已取消（2026-10-17）** —— 维持「同一工作区成员全量共享、
+  角色只分读写」的语义，不引入清单级 private/shared 可见性；
+  `USER_ISOLATION.md` 中的对应待确认项仅保留为历史记录。
 - ~~工作区级策略配置~~：**已实现** —— 选股 / 样本 / 算法三类命名配置随工作区隔离与角色权限，
   支持 `viewer` 只读运行；详见 [`docs/STRATEGY_CONFIGS.md`](STRATEGY_CONFIGS.md)。三张新表
   （`screening_configs` / `sample_configs` / `algorithm_configs`）已加入 `DATA_MODELS`：

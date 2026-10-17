@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { formatDateTime } from "../format";
+import { ROLE_LABEL } from "../workspace";
 
 export default function Account() {
   const navigate = useNavigate();
@@ -64,6 +65,13 @@ export default function Account() {
     }
   };
 
+  // 我的数据概览：隔离关闭时没有「个人工作区」概念，因此不查（后端也不会返回该字段）。
+  const workspaces = useQuery({
+    queryKey: ["account-workspaces"],
+    queryFn: () => api.workspaces(),
+    enabled: Boolean(config?.workspace_enabled),
+  });
+
   if (!user) {
     return (
       <div className="card text-sm text-slate-400">
@@ -77,6 +85,12 @@ export default function Account() {
 
   const wechatIdentities = user.identities.filter((item) => item.provider === "wechat");
   const wechatAvailable = Boolean(config?.wechat_enabled);
+
+  const workspaceList = workspaces.data ?? [];
+  const personalTotal = workspaceList
+    .filter((row) => row.kind === "personal")
+    .reduce((sum, row) => sum + row.data_total, 0);
+  const accessibleTotal = workspaceList.reduce((sum, row) => sum + row.data_total, 0);
 
   return (
     <div className="space-y-4">
@@ -200,6 +214,73 @@ export default function Account() {
             {changePassword.isPending ? "提交中…" : "更新密码"}
           </button>
         </form>
+      </div>
+
+      <div className="card space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-medium text-slate-300">我的数据概览</div>
+          <span className="text-[11px] text-slate-500">只读 · 统计你参与的工作区</span>
+        </div>
+
+        {!config?.workspace_enabled && (
+          <p className="text-xs text-slate-500">未启用数据隔离，数据为全站共享，不区分个人工作区。</p>
+        )}
+
+        {config?.workspace_enabled && workspaces.isLoading && (
+          <p className="text-xs text-slate-500">数据概览加载中…</p>
+        )}
+
+        {config?.workspace_enabled && workspaces.isError && (
+          <p className="text-xs text-slate-500">数据概览暂不可用，不影响其他功能。</p>
+        )}
+
+        {config?.workspace_enabled && workspaces.data && (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="badge bg-slate-800 text-slate-300">
+                参与工作区 {workspaceList.length} 个
+              </span>
+              <span className="badge bg-slate-800 text-slate-300">
+                个人工作区数据 {personalTotal} 条
+              </span>
+              <span className="badge bg-slate-800 text-slate-300">
+                可访问数据合计 {accessibleTotal} 条
+              </span>
+            </div>
+
+            <div className="table-wrap">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-800">
+                    <th className="th">工作区</th>
+                    <th className="th">类型</th>
+                    <th className="th">我的角色</th>
+                    <th className="th">成员</th>
+                    <th className="th">数据量</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {workspaceList.map((row) => (
+                    <tr key={row.id} className="border-b border-slate-800/50 last:border-0">
+                      <td className="td font-medium text-slate-100">{row.name}</td>
+                      <td className="td text-slate-400">{row.kind === "personal" ? "个人" : "共享"}</td>
+                      <td className="td text-slate-300">{ROLE_LABEL[row.role] ?? row.role}</td>
+                      <td className="td text-slate-400">{row.member_count}</td>
+                      <td className="td text-slate-300">{row.data_total} 条</td>
+                    </tr>
+                  ))}
+                  {workspaceList.length === 0 && (
+                    <tr>
+                      <td className="td text-slate-500" colSpan={5}>
+                        还没有加入任何工作区。
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="card space-y-3">

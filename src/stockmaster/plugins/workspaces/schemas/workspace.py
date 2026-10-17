@@ -29,6 +29,8 @@ class WorkspaceOut(BaseModel):
     # workspace can be owned by someone else and the UI needs *my* permissions.
     role: str = "viewer"
     member_count: int = 0
+    # 「数据量」口径：自选/规则/回测/三类策略配置，不含成员与通道（见 core.quota）。
+    data_total: int = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

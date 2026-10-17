@@ -49,7 +49,7 @@ router = APIRouter(tags=["workspaces"])
 log = get_logger(__name__)
 
 
-def _out(session: Session, workspace, role: str) -> WorkspaceOut:
+def _out(session: Session, workspace, role: str, *, data_total: int | None = None) -> WorkspaceOut:
     return WorkspaceOut(
         id=workspace.id,
         name=workspace.name,
@@ -58,6 +58,8 @@ def _out(session: Session, workspace, role: str) -> WorkspaceOut:
         owner_id=workspace.owner_id,
         role=role,
         member_count=service.member_count(session, workspace.id),
+        # 列表页会批量算好传进来；详情/创建等单条路径由这里兜底。
+        data_total=quota.data_total(session, workspace.id) if data_total is None else data_total,
         created_at=workspace.created_at,
         updated_at=workspace.updated_at,
     )
@@ -100,11 +102,15 @@ def list_workspaces(
 ):
     """我参与的工作区（``?all=true`` 时管理员可列出全部）。"""
     if all_ and user.is_admin:
-        return [
-            _out(session, workspace, service.role_of(session, workspace.id, user.id) or "owner")
+        rows = [
+            (workspace, service.role_of(session, workspace.id, user.id) or "owner")
             for workspace in service.all_workspaces(session)
         ]
-    return [_out(session, workspace, role) for workspace, role in service.my_workspaces(session, user)]
+    else:
+        rows = service.my_workspaces(session, user)
+    # 数据量按 6 张表各一次 GROUP BY 批量算：列表 N 个工作区逐个算会退化成 N×6 次查询。
+    totals = quota.data_totals(session, [workspace.id for workspace, _role in rows])
+    return [_out(session, workspace, role, data_total=totals.get(workspace.id, 0)) for workspace, role in rows]
 
 
 @router.post("", response_model=WorkspaceOut, status_code=status.HTTP_201_CREATED)

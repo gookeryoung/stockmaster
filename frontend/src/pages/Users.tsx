@@ -105,20 +105,22 @@ export default function Users() {
                 <th className="th">状态</th>
                 <th className="th">登录方式</th>
                 <th className="th">最近登录</th>
+                <th className="th">工作区</th>
+                <th className="th">个人数据量</th>
                 <th className="th">操作</th>
               </tr>
             </thead>
             <tbody>
               {users.isLoading && (
                 <tr>
-                  <td className="td text-slate-500" colSpan={6}>
+                  <td className="td text-slate-500" colSpan={8}>
                     加载中…
                   </td>
                 </tr>
               )}
               {!users.isLoading && rows.length === 0 && (
                 <tr>
-                  <td className="td text-slate-500" colSpan={6}>
+                  <td className="td text-slate-500" colSpan={8}>
                     没有匹配的账号
                   </td>
                 </tr>
@@ -183,6 +185,18 @@ export default function Users() {
                         .join(" / ") || "—"}
                     </td>
                     <td className="td text-xs text-slate-400">{formatDateTime(row.last_login_at)}</td>
+                    <td
+                      className="td text-xs text-slate-400"
+                      title={`其中 ${row.owned_workspace_count} 个为所有者`}
+                    >
+                      {row.workspace_count} 个
+                    </td>
+                    <td
+                      className="td text-xs text-slate-400"
+                      title="仅统计个人工作区的数据，不含共享工作区"
+                    >
+                      {row.personal_data_total} 条
+                    </td>
                     <td className="td">
                       <div className="flex gap-1">
                         <button className="btn px-2 py-1 text-xs" onClick={() => setResetTarget(row)}>

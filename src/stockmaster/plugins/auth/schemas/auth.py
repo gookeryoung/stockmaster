@@ -40,9 +40,21 @@ class UserOut(BaseModel):
     identities: list[IdentityOut] = Field(default_factory=list)
 
 
+class AdminUserOut(UserOut):
+    """管理员用户列表投影：在 ``UserOut`` 之上追加工作区/数据量统计。
+
+    ``personal_data_total`` 只算该账号 **personal 工作区**的数据量（数据属于工作区，
+    共享工作区的数据不重复算到每个成员头上）；``owned_workspace_count`` 含 personal。
+    """
+
+    workspace_count: int = 0  # 参与的成员关系数
+    owned_workspace_count: int = 0  # owner_id 指向该账号的工作区数
+    personal_data_total: int = 0  # 其 personal 工作区内的业务数据量
+
+
 class UserPage(BaseModel):
     total: int
-    items: list[UserOut]
+    items: list[AdminUserOut]
 
 
 class TokenOut(BaseModel):
@@ -129,3 +141,23 @@ class AuditLogOut(BaseModel):
     detail: str = ""
     ip: str = ""
     created_at: datetime | None = None
+
+
+__all__ = [
+    "AdminUserOut",
+    "AuditLogOut",
+    "AuthConfigOut",
+    "IdentityOut",
+    "LoginIn",
+    "PasswordChangeIn",
+    "PasswordResetIn",
+    "ProfileUpdateIn",
+    "RegisterIn",
+    "TicketExchangeIn",
+    "TokenOut",
+    "UserCreateIn",
+    "UserOut",
+    "UserPage",
+    "UserUpdateIn",
+    "WechatUrlOut",
+]

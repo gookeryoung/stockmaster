@@ -20,7 +20,8 @@
 | 工作区隔离（Workspace + owner/editor/viewer） | ✅ 已完成，默认关闭 | `0003_workspaces`、`src/stockmaster/plugins/workspaces/`、`tests/test_workspace.py`、见 `WORKSPACE.md` |
 | 工作区级通知通道（webhook / Bark） | ✅ 已完成 | `0005_workspace_channels`、`plugins/workspaces/routers/workspaces.py`、`plugins/alerts/services/channels.py`、见 `WORKSPACE.md` §5.1 |
 | 工作区用量统计 + 可选配额 | ✅ 已完成（配额默认关闭） | `core/quota.py`、`GET /workspaces/{id}/stats`、`SM_WORKSPACE_MAX_*`、见 `WORKSPACE.md` §5.2 |
-| 用户页/管理员统计列 | ❌ 未开始 | `WORKSPACE.md` §11 |
+| 用户页数据概览 + 管理员用户统计列 | ✅ 已完成 | `WorkspaceOut.data_total`、`AdminUserOut`、`GET /users` 统计字段、见 `WORKSPACE.md` §5.2 |
+| 管理员工作区总览页 UI | ❌ 未开始（数据已就绪） | `GET /workspaces?all=true` 已含 `data_total`，仅缺前端页面 |
 
 ### 关键设计决定（已落地，改动前先读）
 
@@ -57,7 +58,8 @@ P1 数据隔离（已完成）
  ├─ PR-3 升级为工作区隔离：0003 迁移 + owner/editor/viewer 角色 + 成员管理
  ├─ PR-4 工作区级通知通道：0005 迁移 + owner 管理通道 + 按工作区投递
  ├─ PR-5 工作区用量统计 + 可选配额：stats 端点 + SM_WORKSPACE_MAX_* + 写路径 409
- └─ 待办：用户页/管理员统计列
+ ├─ PR-6 用户页数据概览 + 管理员用户统计列：data_total + AdminUserOut
+ └─ 待办：管理员工作区总览页 UI
         │
         ▼
 P2 备份自动化（1 个 PR）
@@ -226,6 +228,26 @@ editor 不可管成员、最后 owner 保护、跨工作区 404、转让）；`t
 
 **回滚**：把所有 `SM_WORKSPACE_MAX_*` 置回 0 即完全恢复无配额行为；`stats` 端点可保留。
 
+### PR-6：用户页数据概览 + 管理员用户统计列 —— ✅ 已完成
+
+> 设计细节见 `WORKSPACE.md` §5.2。核心变化：把工作区级「数据量」口径复用到用户页与
+> 管理员视图；**无 schema 变更、无迁移、无新端点**。同一工作区的成员全量共享数据的
+> 语义保持不变；「共享清单可见性细分」方向已取消。
+
+| 文件 | 改动 |
+|---|---|
+| `src/stockmaster/core/quota.py` | `DATA_COUNTERS`（仅 6 类业务数据）、`data_total()`、`data_totals()`（批量 `GROUP BY`） |
+| `plugins/workspaces/{schemas,router}` | `WorkspaceOut.data_total`；`GET /workspaces` 批量填充，避免 N×6 查询 |
+| `plugins/auth/schemas/auth.py` | `AdminUserOut(UserOut)`：`workspace_count` / `owned_workspace_count` / `personal_data_total`；`UserPage.items` 改用该类型 |
+| `plugins/auth/routers/users.py` | `GET /users` 批量计算三个统计字段（成员关系、owner 计数、个人工作区数据量） |
+| frontend | `/account` 新增「我的数据概览」；`/users` 表格新增「工作区」「个人数据量」两列 |
+| docs | `WORKSPACE.md` §5.2/§11；`USER_ISOLATION.md` 标注共享清单方向取消；README 说明 |
+
+**验收**：`tests/test_user_stats.py`（data_total 口径、管理员统计列、非管理员 403、
+搜索过滤后统计正确、批量计算补 0）；既有 workspace/auth/isolation 测试全绿。
+
+**回滚**：纯读路径增强，回退代码即可；统计字段有默认值 0，旧前端/旧调用方无需改动。
+
 ---
 
 ## 4. P2 备份自动化
@@ -304,6 +326,8 @@ SM_DATA_DIR=/tmp/drill python -m stockmaster.cli restore ~/backups/xxx.tar.gz --
 
 ## 7. 未决项
 
-1. 工作区是否需要「共享清单」可见性细分（当前：同工作区成员全量共享，角色只分读写）。
-2. 回测结果是否支持发链接共享：需要 `visibility` + `share_token`，而不是放宽工作区过滤。
-3. 备份是否异地留存（COS）：等本地轮转稳定运行一段时间再评估。
+> **已取消（2026-10-17）**：不再评估「共享清单」可见性细分 —— 同一工作区成员全量共享、
+> 角色只分读写（决策见 `WORKSPACE.md` §11）。`USER_ISOLATION.md` 中的对应条目仅为历史记录。
+
+1. 回测结果是否支持发链接共享：需要 `visibility` + `share_token`，而不是放宽工作区过滤。
+2. 备份是否异地留存（COS）：等本地轮转稳定运行一段时间再评估。
