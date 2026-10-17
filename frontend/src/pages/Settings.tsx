@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import BackupPanel from "../components/BackupPanel";
 import { formatCompact } from "../format";
+import { useViewState } from "../view";
 
 interface JobDef {
   key: string;
@@ -36,7 +37,8 @@ export default function Settings() {
   // hide the buttons instead of letting people click into a 403.
   const isAdmin = authUser?.role === "admin" || Boolean(authConfig && !authConfig.auth_enabled);
   const [lastResult, setLastResult] = useState<string | null>(null);
-  const [newWatchCode, setNewWatchCode] = useState("");
+  const newWatchCode = useViewState((state) => state.settings.newWatchCode);
+  const setSettings = useViewState((state) => state.setSettings);
 
   const status = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 20_000 });
   const watchlist = useQuery({ queryKey: ["watchlist"], queryFn: () => api.watchlist() });
@@ -54,7 +56,7 @@ export default function Settings() {
   const addWatch = useMutation({
     mutationFn: (code: string) => api.addWatch(code),
     onSuccess: () => {
-      setNewWatchCode("");
+      setSettings({ newWatchCode: "" });
       queryClient.invalidateQueries({ queryKey: ["watchlist"] });
     },
   });
@@ -127,7 +129,7 @@ export default function Settings() {
             className="input w-full sm:w-40"
             placeholder="如 600519.SH"
             value={newWatchCode}
-            onChange={(event) => setNewWatchCode(event.target.value)}
+            onChange={(event) => setSettings({ newWatchCode: event.target.value })}
           />
           <button
             className="btn"

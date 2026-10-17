@@ -1,14 +1,13 @@
-import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import EChart from "../components/EChart";
 import { formatNumber, formatPct, changeColor } from "../format";
+import { useViewState } from "../view";
 import type { EChartsOption } from "echarts";
 
 export default function Analyze() {
-  const [code, setCode] = useState("600519.SH");
-  const [correlationInput, setCorrelationInput] = useState("600519.SH,000001.SZ,300750.SZ");
-  const [screenMinScore, setScreenMinScore] = useState<string>("");
+  const { code, correlationInput, screenMinScore } = useViewState((state) => state.analyze);
+  const setAnalyze = useViewState((state) => state.setAnalyze);
 
   const factors = useQuery({
     queryKey: ["factors", code],
@@ -116,7 +115,7 @@ export default function Analyze() {
         <input
           className="input w-full sm:w-48"
           value={code}
-          onChange={(event) => setCode(event.target.value.trim().toUpperCase())}
+          onChange={(event) => setAnalyze({ code: event.target.value.trim().toUpperCase() })}
           placeholder="证券代码"
         />
         <span className="text-xs text-slate-500">
@@ -178,7 +177,7 @@ export default function Analyze() {
             <input
               className="input w-32"
               value={screenMinScore}
-              onChange={(event) => setScreenMinScore(event.target.value)}
+              onChange={(event) => setAnalyze({ screenMinScore: event.target.value })}
               placeholder="如 1.0"
             />
           </div>
@@ -249,7 +248,7 @@ export default function Analyze() {
             <input
               className="input w-full"
               value={correlationInput}
-              onChange={(event) => setCorrelationInput(event.target.value)}
+              onChange={(event) => setAnalyze({ correlationInput: event.target.value })}
             />
           </div>
           <button

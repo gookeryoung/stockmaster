@@ -2,26 +2,16 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
+import { useViewState } from "../view";
 import type { RuleTypeInfo } from "../types";
 
 export default function Alerts() {
   const queryClient = useQueryClient();
   const workspace = useCurrentWorkspace();
   const readOnly = !canWriteWorkspace(workspace);
-  const [statusFilter, setStatusFilter] = useState("");
-  const [form, setForm] = useState({
-    name: "新预警规则",
-    rule_type: "price_cross",
-    scope_type: "watchlist",
-    scope_value: "default",
-    once_per_day: true,
-    exclude_st: true,
-    min_amount: 0,
-  });
-  const [params, setParams] = useState<Record<string, string>>({
-    threshold: "100",
-    direction: "above",
-  });
+  const { statusFilter, form, params } = useViewState((state) => state.alerts);
+  const setAlerts = useViewState((state) => state.setAlerts);
+  const setAlertForm = useViewState((state) => state.setAlertForm);
   const [message, setMessage] = useState<string | null>(null);
 
   const ruleTypes = useQuery({ queryKey: ["ruleTypes"], queryFn: api.ruleTypes });
@@ -138,7 +128,7 @@ export default function Alerts() {
             <input
               className="input w-full"
               value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              onChange={(e) => setAlertForm({ name: e.target.value })}
             />
           </div>
           <div className="sm:col-span-2">
@@ -153,8 +143,8 @@ export default function Alerts() {
                 Object.entries(spec?.params ?? {}).forEach(([key, param]) => {
                   if (param.default !== undefined) defaults[key] = String(param.default);
                 });
-                setParams(defaults);
-                setForm({ ...form, rule_type: next });
+                setAlerts({ params: defaults });
+                setAlertForm({ rule_type: next });
               }}
             >
               {(ruleTypes.data ?? []).map((item) => (
@@ -170,7 +160,7 @@ export default function Alerts() {
             <select
               className="input w-full"
               value={form.scope_type}
-              onChange={(e) => setForm({ ...form, scope_type: e.target.value })}
+              onChange={(e) => setAlertForm({ scope_type: e.target.value })}
             >
               <option value="watchlist">自选股清单</option>
               <option value="codes">指定代码</option>
@@ -189,7 +179,7 @@ export default function Alerts() {
             <input
               className="input w-full"
               value={form.scope_value}
-              onChange={(e) => setForm({ ...form, scope_value: e.target.value })}
+              onChange={(e) => setAlertForm({ scope_value: e.target.value })}
             />
           </div>
           <div>
@@ -198,7 +188,7 @@ export default function Alerts() {
               type="number"
               className="input w-full"
               value={form.min_amount}
-              onChange={(e) => setForm({ ...form, min_amount: Number(e.target.value) })}
+              onChange={(e) => setAlertForm({ min_amount: Number(e.target.value) })}
             />
           </div>
           <div className="flex items-end gap-4">
@@ -206,7 +196,7 @@ export default function Alerts() {
               <input
                 type="checkbox"
                 checked={form.once_per_day}
-                onChange={(e) => setForm({ ...form, once_per_day: e.target.checked })}
+                onChange={(e) => setAlertForm({ once_per_day: e.target.checked })}
               />
               每日仅一次
             </label>
@@ -214,7 +204,7 @@ export default function Alerts() {
               <input
                 type="checkbox"
                 checked={form.exclude_st}
-                onChange={(e) => setForm({ ...form, exclude_st: e.target.checked })}
+                onChange={(e) => setAlertForm({ exclude_st: e.target.checked })}
               />
               排除 ST
             </label>
@@ -234,7 +224,7 @@ export default function Alerts() {
                   <select
                     className="input w-full"
                     value={params[key] ?? String(spec.default ?? "")}
-                    onChange={(e) => setParams({ ...params, [key]: e.target.value })}
+                    onChange={(e) => setAlerts({ params: { ...params, [key]: e.target.value } })}
                   >
                     {spec.choices.map((choice) => (
                       <option key={String(choice)} value={String(choice)}>
@@ -246,7 +236,7 @@ export default function Alerts() {
                   <input
                     className="input w-full"
                     value={params[key] ?? String(spec.default ?? "")}
-                    onChange={(e) => setParams({ ...params, [key]: e.target.value })}
+                    onChange={(e) => setAlerts({ params: { ...params, [key]: e.target.value } })}
                   />
                 )}
               </div>
@@ -340,7 +330,7 @@ export default function Alerts() {
           <select
             className="input"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => setAlerts({ statusFilter: e.target.value })}
           >
             <option value="">全部</option>
             <option value="new">未读</option>

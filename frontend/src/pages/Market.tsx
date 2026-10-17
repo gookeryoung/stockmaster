@@ -1,14 +1,14 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import KlineChart from "../components/KlineChart";
 import { formatCompact, formatNumber, formatPct, changeColor } from "../format";
+import { useViewState } from "../view";
 
 export default function Market() {
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<string>("600519.SH");
-  const [adjust, setAdjust] = useState("qfq");
+  const { search, selected, adjust } = useViewState((state) => state.market);
+  const setMarket = useViewState((state) => state.setMarket);
 
   const stocks = useQuery({
     queryKey: ["stocks", search],
@@ -52,9 +52,9 @@ export default function Market() {
           className="input w-full sm:w-56"
           placeholder="搜索代码或名称，如 600519 / 茅台"
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => setMarket({ search: event.target.value })}
         />
-        <select className="input" value={adjust} onChange={(e) => setAdjust(e.target.value)}>
+        <select className="input" value={adjust} onChange={(e) => setMarket({ adjust: e.target.value })}>
           <option value="qfq">前复权 (qfq)</option>
           <option value="raw">不复权 (raw)</option>
         </select>
@@ -91,7 +91,7 @@ export default function Market() {
                 {(stocks.data?.items ?? []).map((item) => (
                   <tr
                     key={item.code}
-                    onClick={() => setSelected(item.code)}
+                    onClick={() => setMarket({ selected: item.code })}
                     className={`cursor-pointer border-t border-slate-800/60 hover:bg-slate-800/50 ${
                       item.code === selected ? "bg-sky-950/40" : ""
                     }`}

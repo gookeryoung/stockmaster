@@ -3,8 +3,9 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import type { EChartsOption } from "echarts";
 import { api } from "../api";
 import EChart from "../components/EChart";
-import { formatNumber, formatPct, sideColor, todayISO, yearsAgoISO } from "../format";
+import { formatNumber, formatPct, sideColor } from "../format";
 import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
+import { useViewState } from "../view";
 import type { BacktestResponse } from "../types";
 
 const STRATEGIES = [
@@ -17,15 +18,9 @@ const STRATEGIES = [
 export default function Backtest() {
   const workspace = useCurrentWorkspace();
   const readOnly = !canWriteWorkspace(workspace);
-  const [strategy, setStrategy] = useState("buy_hold");
-  const [codes, setCodes] = useState("600519.SH");
-  const [start, setStart] = useState(yearsAgoISO(2));
-  const [end, setEnd] = useState(todayISO());
-  const [cash, setCash] = useState(1_000_000);
-  const [topN, setTopN] = useState(10);
-  const [rebalanceDays, setRebalanceDays] = useState(5);
-  const [commission, setCommission] = useState(0.00025);
-  const [slippage, setSlippage] = useState(0.0005);
+  const { strategy, codes, start, end, cash, topN, rebalanceDays, commission, slippage } =
+    useViewState((state) => state.backtest);
+  const setBacktest = useViewState((state) => state.setBacktest);
   const [result, setResult] = useState<BacktestResponse | null>(null);
 
   const history = useQuery({ queryKey: ["backtests"], queryFn: api.backtests });
@@ -132,7 +127,7 @@ export default function Backtest() {
             <select
               className="input w-full"
               value={strategy}
-              onChange={(e) => setStrategy(e.target.value)}
+              onChange={(e) => setBacktest({ strategy: e.target.value })}
             >
               {STRATEGIES.map((item) => (
                 <option key={item.value} value={item.value}>
@@ -143,15 +138,15 @@ export default function Backtest() {
           </div>
           <div className="sm:col-span-2">
             <label className="label">标的（逗号分隔）</label>
-            <input className="input w-full" value={codes} onChange={(e) => setCodes(e.target.value)} />
+            <input className="input w-full" value={codes} onChange={(e) => setBacktest({ codes: e.target.value })} />
           </div>
           <div>
             <label className="label">开始日期</label>
-            <input type="date" className="input w-full" value={start} onChange={(e) => setStart(e.target.value)} />
+            <input type="date" className="input w-full" value={start} onChange={(e) => setBacktest({ start: e.target.value })} />
           </div>
           <div>
             <label className="label">结束日期</label>
-            <input type="date" className="input w-full" value={end} onChange={(e) => setEnd(e.target.value)} />
+            <input type="date" className="input w-full" value={end} onChange={(e) => setBacktest({ end: e.target.value })} />
           </div>
           <div>
             <label className="label">初始资金</label>
@@ -159,7 +154,7 @@ export default function Backtest() {
               type="number"
               className="input w-full"
               value={cash}
-              onChange={(e) => setCash(Number(e.target.value))}
+              onChange={(e) => setBacktest({ cash: Number(e.target.value) })}
             />
           </div>
           <div>
@@ -168,7 +163,7 @@ export default function Backtest() {
               type="number"
               className="input w-full"
               value={topN}
-              onChange={(e) => setTopN(Number(e.target.value))}
+              onChange={(e) => setBacktest({ topN: Number(e.target.value) })}
             />
           </div>
           <div>
@@ -177,7 +172,7 @@ export default function Backtest() {
               type="number"
               className="input w-full"
               value={rebalanceDays}
-              onChange={(e) => setRebalanceDays(Number(e.target.value))}
+              onChange={(e) => setBacktest({ rebalanceDays: Number(e.target.value) })}
             />
           </div>
           <div>
@@ -187,7 +182,7 @@ export default function Backtest() {
               step="0.00001"
               className="input w-full"
               value={commission}
-              onChange={(e) => setCommission(Number(e.target.value))}
+              onChange={(e) => setBacktest({ commission: Number(e.target.value) })}
             />
           </div>
           <div>
@@ -197,7 +192,7 @@ export default function Backtest() {
               step="0.0001"
               className="input w-full"
               value={slippage}
-              onChange={(e) => setSlippage(Number(e.target.value))}
+              onChange={(e) => setBacktest({ slippage: Number(e.target.value) })}
             />
           </div>
         </div>

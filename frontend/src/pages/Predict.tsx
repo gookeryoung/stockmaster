@@ -1,7 +1,7 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { formatNumber } from "../format";
+import { useViewState } from "../view";
 import type { EChartsOption } from "echarts";
 import EChart from "../components/EChart";
 
@@ -13,9 +13,8 @@ const ALGOS = [
 
 export default function Predict() {
   const queryClient = useQueryClient();
-  const [algo, setAlgo] = useState("hist_gbdt");
-  const [horizon, setHorizon] = useState(1);
-  const [detailCode, setDetailCode] = useState("");
+  const { algo, horizon, detailCode } = useViewState((state) => state.predict);
+  const setPredict = useViewState((state) => state.setPredict);
 
   const models = useQuery({
     queryKey: ["models", horizon],
@@ -83,7 +82,7 @@ export default function Predict() {
         <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="label">算法</label>
-            <select className="input" value={algo} onChange={(e) => setAlgo(e.target.value)}>
+            <select className="input" value={algo} onChange={(e) => setPredict({ algo: e.target.value })}>
               {ALGOS.map((item) => (
                 <option key={item.value} value={item.value}>
                   {item.label}
@@ -96,7 +95,7 @@ export default function Predict() {
             <select
               className="input"
               value={horizon}
-              onChange={(e) => setHorizon(Number(e.target.value))}
+              onChange={(e) => setPredict({ horizon: Number(e.target.value) })}
             >
               {[1, 5, 20].map((value) => (
                 <option key={value} value={value}>
@@ -210,7 +209,7 @@ export default function Predict() {
                       </div>
                     </td>
                     <td className="td text-right">
-                      <button className="text-xs text-sky-400 hover:underline" onClick={() => setDetailCode(item.code)}>
+                      <button className="text-xs text-sky-400 hover:underline" onClick={() => setPredict({ detailCode: item.code })}>
                         查看
                       </button>
                     </td>
@@ -230,7 +229,7 @@ export default function Predict() {
             <div className="text-sm font-medium text-slate-300">
               个股预测明细 · {detailCode}
             </div>
-            <button className="btn" onClick={() => setDetailCode("")}>
+            <button className="btn" onClick={() => setPredict({ detailCode: "" })}>
               关闭
             </button>
           </div>
