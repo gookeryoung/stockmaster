@@ -14,8 +14,15 @@ import pytest
 from stockmaster.jobs import scheduler as sched
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def db(tmp_path, monkeypatch):
+    """本模块全量隔离到临时库。
+
+    ``_guarded`` 的 runner 会真实调用 ``record_task_status`` 写库，若某个用例
+    没声明这个 fixture，就会落到默认的 ``data/stockmaster.db``——本地因为开发库
+    恰好有表而「通过」，CI 上却是空库直接报 no such table。autouse 让这类
+    顺序依赖无从发生。
+    """
     monkeypatch.setenv("SM_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SM_DB_FILENAME", f"sched-{uuid.uuid4().hex}.db")
     monkeypatch.setenv("SM_SCHEDULER_ENABLED", "false")
