@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, timedelta
+from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
 
-from stockmaster.providers.base import Bar, InstrumentInfo
+from stockmaster.core.errors import ProviderUnavailable
+from stockmaster.providers.base import Bar, InstrumentInfo, Snapshot
+from stockmaster.providers.registry import get_registry
 
 
 def business_days(n: int, start: date = date(2025, 1, 6)) -> list[date]:
@@ -539,6 +542,302 @@ class TestWatchlist:
     def test_invalid_code_rejected(self, client):
         response = client.post("/api/v1/watchlist", json={"code": "bad"})
         assert response.status_code == 422
+
+    def test_lists_are_derived_and_default_first(self, client):
+        empty = client.get("/api/v1/watchlist/lists")
+        assert empty.status_code == 200
+        assert empty.json() == [{"list_name": "default", "count": 0, "last_added_at": None}]
+
+        client.post("/api/v1/watchlist", json={"code": "600519.SH"})
+        client.post("/api/v1/watchlist", json={"code": "000001.SZ"})
+        client.post("/api/v1/watchlist", json={"code": "600519.SH", "list_name": "growth"})
+
+        body = client.get("/api/v1/watchlist/lists").json()
+        assert body[0]["list_name"] == "default"
+        assert body[0]["count"] == 2
+        assert body[0]["last_added_at"] is not None
+        assert [(row["list_name"], row["count"]) for row in body] == [("default", 2), ("growth", 1)]
+
+    def test_rename_list_moves_rows_and_reports_conflicts(self, client):
+        client.post("/api/v1/watchlist", json={"code": "600519.SH", "list_name": "old"})
+
+        renamed = client.patch("/api/v1/watchlist/lists/old", json={"new_name": "new"})
+        assert renamed.status_code == 200, renamed.text
+        assert renamed.json() == {"old_name": "old", "new_name": "new", "updated": 1}
+        assert client.get("/api/v1/watchlist?list_name=old").json() == []
+        assert [row["code"] for row in client.get("/api/v1/watchlist?list_name=new").json()] == ["600519.SH"]
+
+        missing = client.patch("/api/v1/watchlist/lists/old", json={"new_name": "another"})
+        assert missing.status_code == 404
+        assert missing.headers["X-Auth-Error"] == "list_not_found"
+
+        client.post("/api/v1/watchlist", json={"code": "000001.SZ", "list_name": "taken"})
+        conflict = client.patch("/api/v1/watchlist/lists/new", json={"new_name": "taken"})
+        assert conflict.status_code == 409
+        assert conflict.headers["X-Auth-Error"] == "list_exists"
+
+        invalid = client.patch("/api/v1/watchlist/lists/new", json={"new_name": "   "})
+        assert invalid.status_code == 422
+        assert invalid.headers["X-Auth-Error"] == "invalid_name"
+
+    def test_rename_list_supports_chinese_names(self, client):
+        client.post("/api/v1/watchlist", json={"code": "600519.SH", "list_name": "核心组合"})
+        path = "/api/v1/watchlist/lists/" + quote("核心组合", safe="")
+        renamed = client.patch(path, json={"new_name": "核心持仓"})
+        assert renamed.status_code == 200, renamed.text
+        assert renamed.json()["new_name"] == "核心持仓"
+        rows = client.get("/api/v1/watchlist", params={"list_name": "核心持仓"}).json()
+        assert {row["list_name"] for row in rows} == {"核心持仓"}
+
+    def test_delete_list_removes_rows_and_404_afterwards(self, client):
+        for code in ("600519.SH", "000001.SZ"):
+            client.post("/api/v1/watchlist", json={"code": code, "list_name": "temp"})
+
+        deleted = client.delete("/api/v1/watchlist/lists/temp")
+        assert deleted.status_code == 200, deleted.text
+        assert deleted.json() == {"list_name": "temp", "deleted": 2}
+        assert client.get("/api/v1/watchlist?list_name=temp").json() == []
+
+        again = client.delete("/api/v1/watchlist/lists/temp")
+        assert again.status_code == 404
+        assert again.headers["X-Auth-Error"] == "list_not_found"
+
+    def test_batch_delete_reports_missing_ids(self, client):
+        first = client.post("/api/v1/watchlist", json={"code": "600519.SH"}).json()
+        second = client.post("/api/v1/watchlist", json={"code": "000001.SZ"}).json()
+        third = client.post("/api/v1/watchlist", json={"code": "300750.SZ"}).json()
+
+        response = client.post(
+            "/api/v1/watchlist/batch-delete",
+            json={"ids": [first["id"], second["id"], 999999, second["id"]]},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json() == {"deleted": 2, "missing": [999999]}
+        remaining = client.get("/api/v1/watchlist").json()
+        assert [row["id"] for row in remaining] == [third["id"]]
+
+    def test_import_adds_skips_updates_and_reports_invalid(self, client):
+        client.post("/api/v1/watchlist", json={"code": "600519.SH", "note": "old"})
+
+        imported = client.post(
+            "/api/v1/watchlist/import",
+            json={
+                "list_name": "default",
+                "codes": ["600519.SH", "000001", "bad", "000001", "300750.SZ"],
+                "notes": {"600519.SH": "ignored-when-skipped"},
+                "skip_existing": True,
+            },
+        )
+        assert imported.status_code == 200, imported.text
+        body = imported.json()
+        assert body["added"] == 2
+        assert body["updated"] == 0
+        assert body["skipped"] == 2
+        assert body["list_created"] is False
+        assert body["total_items"] == 3
+        assert body["quota"] is None
+        assert body["invalid"] == [{"index": 2, "code": "bad", "reason": "invalid_code", "message": "无法识别证券代码"}]
+
+        rows = {row["code"]: row for row in client.get("/api/v1/watchlist").json()}
+        assert rows["600519.SH"]["note"] == "old"
+
+        updated = client.post(
+            "/api/v1/watchlist/import",
+            json={
+                "list_name": "default",
+                "codes": ["600519.SH", "000001.SZ"],
+                "notes": {"600519.SH": "覆盖"},
+                "skip_existing": False,
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["updated"] == 2
+        assert updated.json()["added"] == 0
+        rows = {row["code"]: row for row in client.get("/api/v1/watchlist").json()}
+        assert rows["600519.SH"]["note"] == "覆盖"
+        assert rows["000001.SZ"]["note"] == ""
+
+    def test_import_creates_list_or_404_when_forbidden(self, client):
+        created = client.post(
+            "/api/v1/watchlist/import",
+            json={"list_name": "观察池", "codes": ["600519.SH", "000001.SZ"]},
+        )
+        assert created.status_code == 200, created.text
+        body = created.json()
+        assert body["list_created"] is True
+        assert body["added"] == 2
+        assert body["total_items"] == 2
+
+        missing = client.post(
+            "/api/v1/watchlist/import",
+            json={"list_name": "不存在", "codes": ["600519.SH"], "create_list": False},
+        )
+        assert missing.status_code == 404
+        assert missing.headers["X-Auth-Error"] == "list_not_found"
+
+        invalid_only = client.post(
+            "/api/v1/watchlist/import",
+            json={"list_name": "空清单", "codes": ["bad"]},
+        )
+        assert invalid_only.status_code == 200
+        assert invalid_only.json()["list_created"] is False
+        assert invalid_only.json()["added"] == 0
+        assert len(invalid_only.json()["invalid"]) == 1
+
+        too_long = client.post(
+            "/api/v1/watchlist/import",
+            json={
+                "list_name": "长备注",
+                "codes": ["600519.SH"],
+                "notes": {"600519.SH": "x" * 257},
+            },
+        )
+        assert too_long.status_code == 422
+        assert too_long.headers["X-Auth-Error"] == "invalid_notes"
+
+
+class TestMarketQuotes:
+    def test_snapshot_batch_and_daily_fallback(self, client, monkeypatch):
+        calls: list[list[str]] = []
+
+        def fake_snapshot(codes=None):
+            calls.append(list(codes or []))
+            return [
+                Snapshot(
+                    code="600519.SH",
+                    name="贵州茅台",
+                    price=1688.0,
+                    preclose=1680.0,
+                    open=1681.0,
+                    high=1690.0,
+                    low=1670.0,
+                    volume=1e6,
+                    amount=2e8,
+                    pct_chg=0.48,
+                    turnover=0.5,
+                    quote_time="2026-10-17T14:55:00",
+                    source="mock",
+                )
+            ]
+
+        monkeypatch.setattr(get_registry(), "fetch_snapshot", fake_snapshot)
+        response = client.get("/api/v1/market/quotes", params={"codes": "600519.SH,000001.SZ"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["source"] == "snapshot"
+        assert body["missing"] == []
+        assert body["as_of"] is not None
+        assert calls == [["600519.SH", "000001.SZ"]]
+
+        by_code = {item["code"]: item for item in body["items"]}
+        assert by_code["600519.SH"]["source"] == "snapshot"
+        assert by_code["600519.SH"]["turnover"] == 0.5
+        assert by_code["600519.SH"]["quote_time"] == "2026-10-17T14:55:00"
+        assert by_code["000001.SZ"]["source"] == "daily"
+        assert by_code["000001.SZ"]["trade_date"] is not None
+
+    def test_snapshot_failure_falls_back_to_daily_with_header(self, client, monkeypatch):
+        def failing_snapshot(codes=None):
+            raise ProviderUnavailable("providers down")
+
+        monkeypatch.setattr(get_registry(), "fetch_snapshot", failing_snapshot)
+        response = client.get("/api/v1/market/quotes", params={"codes": "600519.SH"})
+        assert response.status_code == 200, response.text
+        assert response.headers["X-StockMaster-Reason"] == "snapshot-unavailable"
+        body = response.json()
+        assert body["source"] == "daily"
+        assert body["items"][0]["source"] == "daily"
+        assert body["items"][0]["price"] is not None
+
+    def test_old_daily_row_is_flagged_stale(self, client, monkeypatch):
+        from stockmaster.db import session_scope
+        from stockmaster.sync import repository as repo
+
+        with session_scope() as session:
+            repo.upsert_instruments(
+                session,
+                [InstrumentInfo(code="300750.SZ", name="宁德时代", market="SZ", board="gem", status=1)],
+            )
+            repo.upsert_daily_bars(
+                session,
+                "300750.SZ",
+                [
+                    Bar(
+                        code="300750.SZ",
+                        trade_date=date(2025, 6, 2),
+                        open=100.0,
+                        high=101.0,
+                        low=99.0,
+                        close=100.5,
+                        volume=1e6,
+                        amount=1e8,
+                        preclose=100.0,
+                        pct_chg=0.5,
+                        adjust="raw",
+                        source="test",
+                    )
+                ],
+                "raw",
+            )
+
+        monkeypatch.setattr(get_registry(), "fetch_snapshot", lambda codes=None: [])
+        response = client.get("/api/v1/market/quotes", params={"codes": "300750.SZ"})
+        assert response.status_code == 200, response.text
+        item = response.json()["items"][0]
+        assert item["source"] == "daily"
+        assert item["trade_date"] == "2025-06-02"
+        assert item["stale"] is True
+
+    def test_missing_codes_and_all_unavailable(self, client, monkeypatch):
+        monkeypatch.setattr(get_registry(), "fetch_snapshot", lambda codes=None: [])
+        mixed = client.get("/api/v1/market/quotes", params={"codes": "600519.SH,601398.SH"})
+        assert mixed.status_code == 200, mixed.text
+        assert [item["code"] for item in mixed.json()["items"]] == ["600519.SH"]
+        assert mixed.json()["missing"] == ["601398.SH"]
+
+        unavailable = client.get("/api/v1/market/quotes", params={"codes": "601398.SH"})
+        assert unavailable.status_code == 503
+        assert unavailable.headers["X-StockMaster-Reason"] == "snapshot-unavailable"
+
+    def test_quotes_validation(self, client):
+        assert client.get("/api/v1/market/quotes", params={"codes": "bad"}).status_code == 422
+        assert client.get("/api/v1/market/quotes", params={"codes": ""}).status_code == 422
+        too_many = ",".join(f"600{index:03d}.SH" for index in range(201))
+        assert client.get("/api/v1/market/quotes", params={"codes": too_many}).status_code == 422
+
+
+class TestFactorBatch:
+    def test_empty_factor_table_returns_null_date(self, client):
+        response = client.get("/api/v1/analysis/factors", params={"codes": "600519.SH"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["trade_date"] is None
+        assert body["items"] == []
+        assert body["missing"] == ["600519.SH"]
+
+    def test_latest_factor_scores_and_missing(self, client):
+        from stockmaster.db import session_scope
+        from stockmaster.db.models import Factor
+
+        with session_scope() as session:
+            session.add(Factor(code="600519.SH", trade_date=date(2025, 6, 30), score=1.5))
+            session.add(Factor(code="000001.SZ", trade_date=date(2025, 6, 30), score=0.5))
+            session.add(Factor(code="600519.SH", trade_date=date(2025, 6, 29), score=9.0))
+
+        response = client.get(
+            "/api/v1/analysis/factors",
+            params={"codes": "600519.SH,000001.SZ,300750.SZ"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["trade_date"] == "2025-06-30"
+        assert body["missing"] == ["300750.SZ"]
+        by_code = {item["code"]: item for item in body["items"]}
+        assert by_code["600519.SH"]["score"] == 1.5
+        assert by_code["600519.SH"]["name"] == "贵州茅台"
+        assert by_code["000001.SZ"]["score"] == 0.5
+
+        assert client.get("/api/v1/analysis/factors", params={"codes": "bad"}).status_code == 422
 
 
 class TestSystem:

@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from stockmaster.core.deps import canonical_code, db_session, require_instrument
+from stockmaster.core.errors import DataError
 from stockmaster.core.logging import get_logger
 from stockmaster.core.market import DASHBOARD_INDICES, is_limit_down, is_limit_up
+from stockmaster.core.symbols import normalize
 from stockmaster.db.models import DailyBar, Instrument
+from stockmaster.providers.registry import get_registry
 from stockmaster.schemas import (
     BarOut,
     BarsResponse,
@@ -20,6 +24,8 @@ from stockmaster.schemas import (
     InstrumentOut,
     InstrumentPage,
     MarketOverview,
+    MarketQuoteOut,
+    MarketQuotesResponse,
 )
 from stockmaster.sync import repository as repo
 
@@ -28,6 +34,41 @@ router = APIRouter(tags=["market"])
 
 #: Indices shown on the dashboard (shared with the sync job so the two cannot drift).
 OVERVIEW_INDICES = DASHBOARD_INDICES
+
+#: Upper bound per batched quote request; keeps one external market fetch bounded.
+MAX_QUOTE_CODES = 200
+
+
+def _parse_code_list(raw: str, *, limit: int = MAX_QUOTE_CODES) -> list[str]:
+    """Validate/normalise a comma-separated code query parameter."""
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    if not parts:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="codes 不能为空",
+            headers={"X-Auth-Error": "invalid_codes"},
+        )
+    codes: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        try:
+            canon = normalize(part)
+        except DataError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"invalid code: {part}",
+                headers={"X-Auth-Error": "invalid_codes"},
+            ) from exc
+        if canon not in seen:
+            seen.add(canon)
+            codes.append(canon)
+    if len(codes) > limit:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"最多支持 {limit} 个代码",
+            headers={"X-Auth-Error": "too_many_codes"},
+        )
+    return codes
 
 
 @router.get("/stocks", response_model=InstrumentPage)
@@ -204,6 +245,123 @@ def market_overview(session: Session = Depends(db_session)):
         limit_down=limit_down,
         total=total,
         data_freshness=freshness,
+    )
+
+
+@router.get("/market/quotes", response_model=MarketQuotesResponse)
+def market_quotes(
+    response: Response,
+    codes: str = Query(description="逗号分隔的证券代码，最多 200 个"),
+    session: Session = Depends(db_session),
+):
+    """Batched quotes for a watchlist page: one snapshot fetch, daily fallback.
+
+    Calling ``GET /stocks/{code}/snapshot`` per symbol would trigger a **whole
+    market** fetch each time (and count failures against the circuit breaker), so
+    this endpoint fetches once and fills gaps from stored daily bars. It is shared
+    reference data and deliberately not workspace-scoped.
+    """
+    requested = _parse_code_list(codes)
+
+    instruments = {
+        instrument.code: instrument
+        for instrument in session.execute(select(Instrument).where(Instrument.code.in_(requested))).scalars()
+    }
+
+    snapshot_items: dict[str, MarketQuoteOut] = {}
+    snapshot_error = False
+    try:
+        snapshots = get_registry().fetch_snapshot(requested)
+    except Exception as exc:  # provider chain failed -> fall back to stored bars
+        snapshot_error = True
+        snapshots = []
+        log.warning("snapshot unavailable for quotes: %s", exc)
+
+    for snapshot in snapshots or []:
+        raw_code = str(getattr(snapshot, "code", "") or "")
+        try:
+            canon = normalize(raw_code)
+        except DataError:
+            continue
+        if canon not in requested or canon in snapshot_items:
+            continue
+        instrument = instruments.get(canon)
+        snapshot_items[canon] = MarketQuoteOut(
+            code=canon,
+            name=getattr(snapshot, "name", "") or (instrument.name if instrument else ""),
+            price=getattr(snapshot, "price", None),
+            preclose=getattr(snapshot, "preclose", None),
+            open=getattr(snapshot, "open", None),
+            high=getattr(snapshot, "high", None),
+            low=getattr(snapshot, "low", None),
+            volume=getattr(snapshot, "volume", None),
+            amount=getattr(snapshot, "amount", None),
+            pct_chg=getattr(snapshot, "pct_chg", None),
+            turnover=getattr(snapshot, "turnover", None),
+            trade_date=None,
+            quote_time=str(getattr(snapshot, "quote_time", "") or ""),
+            source="snapshot",
+            stale=False,
+        )
+
+    latest_qfq = session.execute(select(func.max(DailyBar.trade_date)).where(DailyBar.adjust == "qfq")).scalar()
+
+    items: list[MarketQuoteOut] = []
+    missing: list[str] = []
+    for code in requested:
+        if code in snapshot_items:
+            items.append(snapshot_items[code])
+            continue
+        # 优先原始价（展示口径），没有 raw 序列时退回前复权。
+        bars = repo.get_bars(session, code, "raw", limit=2)
+        if not bars:
+            bars = repo.get_bars(session, code, "qfq", limit=2)
+        if not bars:
+            missing.append(code)
+            continue
+        latest = bars[-1]
+        previous = bars[-2] if len(bars) > 1 else None
+        preclose = latest.preclose or (previous.close if previous else None)
+        pct_chg = latest.pct_chg
+        if pct_chg is None and preclose:
+            pct_chg = (latest.close / preclose - 1.0) * 100.0
+        instrument = instruments.get(code)
+        items.append(
+            MarketQuoteOut(
+                code=code,
+                name=instrument.name if instrument else "",
+                price=latest.close,
+                preclose=preclose,
+                open=latest.open,
+                high=latest.high,
+                low=latest.low,
+                volume=latest.volume,
+                amount=latest.amount,
+                pct_chg=pct_chg,
+                turnover=latest.turn,
+                trade_date=latest.trade_date,
+                quote_time="",
+                source="daily",
+                stale=bool(latest_qfq is not None and latest.trade_date < latest_qfq),
+            )
+        )
+
+    if snapshot_error:
+        # Surface the degradation without failing the request: daily rows are usable.
+        response.headers["X-StockMaster-Reason"] = "snapshot-unavailable"
+
+    if not items:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="行情暂不可用：快照与本地日线均无数据，请检查数据同步或数据源状态",
+            headers={"X-StockMaster-Reason": "snapshot-unavailable"},
+        )
+
+    return MarketQuotesResponse(
+        as_of=latest_qfq,
+        source="snapshot" if snapshot_items else "daily",
+        items=items,
+        missing=missing,
     )
 
 

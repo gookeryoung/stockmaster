@@ -90,6 +90,38 @@ class IndicatorSnapshot(BaseModel):
     values: dict[str, float | None]
 
 
+class MarketQuoteOut(BaseModel):
+    """One row of the batched quote endpoint.
+
+    ``source`` is per item because a single response can mix a live snapshot with
+    daily fallbacks; ``trade_date`` is only set for daily rows and ``quote_time``
+    only for snapshot rows.
+    """
+
+    code: str
+    name: str = ""
+    price: float | None = None
+    preclose: float | None = None
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    volume: float | None = None
+    amount: float | None = None
+    pct_chg: float | None = None
+    turnover: float | None = None
+    trade_date: date | None = None
+    quote_time: str = ""
+    source: str = ""
+    stale: bool = False
+
+
+class MarketQuotesResponse(BaseModel):
+    as_of: date | None = None
+    source: Literal["snapshot", "daily"]
+    items: list[MarketQuoteOut] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
+
+
 # --------------------------------------------------------------------------- #
 # Analysis
 # --------------------------------------------------------------------------- #
@@ -102,6 +134,19 @@ class FactorSnapshot(BaseModel):
     factors: dict[str, float | None]
     score: float | None = None
     percentiles: dict[str, float | None] = Field(default_factory=dict)
+
+
+class FactorScoreRow(BaseModel):
+    code: str
+    name: str = ""
+    score: float | None = None
+    trade_date: date | None = None
+
+
+class FactorBatchResponse(BaseModel):
+    trade_date: date | None = None
+    items: list[FactorScoreRow] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
 
 
 class ScreenRequest(BaseModel):
@@ -500,6 +545,77 @@ class WatchlistItemOut(BaseModel):
     code: str
     name: str = ""
     note: str = ""
+
+
+class WatchlistListOut(BaseModel):
+    """A derived list: watchlists are grouped by ``list_name``, not a table."""
+
+    list_name: str
+    count: int
+    last_added_at: datetime | None = None
+
+
+class WatchlistListRenameIn(BaseModel):
+    new_name: str
+
+
+class WatchlistListRenameOut(BaseModel):
+    old_name: str
+    new_name: str
+    updated: int
+
+
+class WatchlistListDeleteOut(BaseModel):
+    list_name: str
+    deleted: int
+
+
+class WatchlistBatchDeleteIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class WatchlistBatchDeleteOut(BaseModel):
+    deleted: int
+    missing: list[int] = Field(default_factory=list)
+
+
+class WatchlistImportInvalid(BaseModel):
+    index: int
+    code: str
+    reason: str
+    message: str = ""
+
+
+class WatchlistQuotaInfo(BaseModel):
+    resource: str
+    limit: int
+    used: int
+    remaining: int | None = None
+
+
+class WatchlistImportIn(BaseModel):
+    """Batch add/upsert used by the CSV importer and “选股结果 → 自选”.
+
+    Additive schema: the existing single-item ``POST /watchlist`` contract is
+    untouched, so old clients keep working.
+    """
+
+    list_name: str
+    codes: list[str] = Field(min_length=1, max_length=2000)
+    notes: dict[str, str] = Field(default_factory=dict)
+    create_list: bool = True
+    skip_existing: bool = True
+
+
+class WatchlistImportOut(BaseModel):
+    list_name: str
+    added: int
+    updated: int
+    skipped: int
+    invalid: list[WatchlistImportInvalid] = Field(default_factory=list)
+    list_created: bool = False
+    total_items: int = 0
+    quota: WatchlistQuotaInfo | None = None
 
 
 # --------------------------------------------------------------------------- #

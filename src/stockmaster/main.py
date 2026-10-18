@@ -123,6 +123,9 @@ def create_app() -> FastAPI:
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+        # 前端用 X-Auth-Error 稳定区分 read_only / quota_exceeded 等原因；
+        # 自定义响应头默认不暴露给跨端口（Vite 开发服务器）的 fetch。
+        expose_headers=["X-Auth-Error"],
     )
 
     # --- API routers: 由插件注册中心统一发现并挂到 /api/v1 ---

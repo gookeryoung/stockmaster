@@ -406,17 +406,21 @@ def test_channel_of_another_workspace_is_404(channels_client):
 
 
 def _patch_send_test(monkeypatch, outcome):
-    """把投递实现换成替身；``outcome`` 为异常实例时模拟网络故障。"""
+    """把投递实现换成替身；``outcome`` 为异常实例时模拟网络故障。
+
+    端点现在走 ``send_test_detail``（返回 ``(delivered, reason)``），替身也返回
+    二元组；``send_test`` 仍保留为兼容包装。
+    """
     channels = pytest.importorskip("stockmaster.plugins.alerts.services.channels")
     calls: list = []
 
-    def fake_send_test(row):
+    def fake_send_test_detail(row):
         calls.append(row)
         if isinstance(outcome, Exception):
             raise outcome
-        return outcome
+        return (outcome, "" if outcome else "delivery_failed")
 
-    monkeypatch.setattr(channels, "send_test", fake_send_test, raising=False)
+    monkeypatch.setattr(channels, "send_test_detail", fake_send_test_detail, raising=False)
     return calls
 
 
@@ -444,12 +448,14 @@ def test_test_endpoint_reports_failure_instead_of_500(channels_client, monkeypat
     res = client.post(url, headers=_h(client.alice))
     assert res.status_code == 200
     assert res.json()["delivered"] is False
+    assert res.json()["reason"] == "delivery_failed"
 
     # 投递函数意外抛异常：接口仍然 200 + delivered=false，而不是 500
     _patch_send_test(monkeypatch, RuntimeError("network down"))
     res = client.post(url, headers=_h(client.alice))
     assert res.status_code == 200
     assert res.json()["delivered"] is False
+    assert res.json()["reason"] == "exception"
 
 
 # --------------------------------------------------------------------------- #

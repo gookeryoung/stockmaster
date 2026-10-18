@@ -38,6 +38,7 @@ __all__ = [
     "get_channels",
     "notify",
     "send_test",
+    "send_test_detail",
 ]
 
 
@@ -257,27 +258,44 @@ def channels_for_workspace(session, workspace_id: int) -> list[Channel]:
     return channels
 
 
-def send_test(row) -> bool:
-    """Send one test notification through a ``workspace_channels`` row.
+def send_test_detail(row) -> tuple[bool, str]:
+    """Send one test notification and report a machine-readable failure reason.
 
-    Backs the workspace channel "test" endpoint. A misconfigured URL or a network
-    failure yields ``False`` (reported as ``delivered=false``) instead of a 500;
-    nothing is ever raised.
+    Reasons are deliberately coarse (``smtp_not_configured`` / ``no_recipients`` /
+    ``delivery_failed`` / ``unknown_channel`` / ``exception``) — enough for the UI
+    to point at the likely fix without leaking provider internals.
     """
     try:
         channel = build_channel(row)
         if channel is None:
             log.warning("test notification skipped: unknown channel kind %r", getattr(row, "kind", ""))
-            return False
+            return False, "unknown_channel"
+        if isinstance(channel, EmailChannel):
+            if not settings.smtp_host:
+                return False, "smtp_not_configured"
+            if not _split_recipients(getattr(row, "url", "") or ""):
+                return False, "no_recipients"
         notification = Notification(
             title=f"[测试] {getattr(row, 'name', '') or '通知通道'}",
             body="这是一条 StockMaster 测试通知，收到即表示通道配置可用。",
             workspace_id=int(getattr(row, "workspace_id", 0) or 0),
         )
-        return bool(channel.send(notification))
+        delivered = bool(channel.send(notification))
+        return (True, "") if delivered else (False, "delivery_failed")
     except Exception as exc:
         log.warning("test notification failed: %s", exc)
-        return False
+        return False, "exception"
+
+
+def send_test(row) -> bool:
+    """Send one test notification through a ``workspace_channels`` row.
+
+    Backs the workspace channel "test" endpoint. A misconfigured URL or a network
+    failure yields ``False`` (reported as ``delivered=false``) instead of a 500;
+    nothing is ever raised. Use :func:`send_test_detail` when the caller also needs
+    the failure reason.
+    """
+    return send_test_detail(row)[0]
 
 
 def _deliver(channels: list[Channel], notifications: list[Notification], prefix: str = "") -> dict[str, int]:

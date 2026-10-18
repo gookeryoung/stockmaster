@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from stockmaster.core.deps import canonical_code, db_session, require_instrument
+from stockmaster.core.errors import DataError
 from stockmaster.core.logging import get_logger
-from stockmaster.db.models import Factor
+from stockmaster.core.symbols import normalize
+from stockmaster.db.models import Factor, Instrument
 from stockmaster.schemas import (
     CorrelationResponse,
+    FactorBatchResponse,
+    FactorScoreRow,
     FactorSnapshot,
     ScreenRequest,
     ScreenRow,
@@ -19,6 +23,9 @@ from stockmaster.schemas import (
 
 log = get_logger(__name__)
 router = APIRouter(tags=["analysis"])
+
+MAX_FACTOR_CODES = 200
+
 
 #: Factor columns exposed to clients.
 FACTOR_FIELDS = (
@@ -43,6 +50,81 @@ FACTOR_FIELDS = (
     "z_rsi_14",
 )
 PERCENTILE_FIELDS = ("pct_mom_20", "pct_mom_60")
+
+
+def _parse_factor_codes(raw: str) -> list[str]:
+    """Validate/normalise ``codes`` for the batched score endpoint."""
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    if not parts:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="codes 不能为空",
+            headers={"X-Auth-Error": "invalid_codes"},
+        )
+    codes: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        try:
+            canon = normalize(part)
+        except DataError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"invalid code: {part}",
+                headers={"X-Auth-Error": "invalid_codes"},
+            ) from exc
+        if canon not in seen:
+            seen.add(canon)
+            codes.append(canon)
+    if len(codes) > MAX_FACTOR_CODES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"最多支持 {MAX_FACTOR_CODES} 个代码",
+            headers={"X-Auth-Error": "too_many_codes"},
+        )
+    return codes
+
+
+@router.get("/analysis/factors", response_model=FactorBatchResponse)
+def list_factor_scores(
+    codes: str = Query(description="逗号分隔的证券代码，最多 200 个"),
+    session: Session = Depends(db_session),
+):
+    """Batched composite scores for the latest stored factor date.
+
+    Factor data is shared reference data (like ``/analysis/screen``), so this is
+    not workspace-scoped. Missing symbols are reported instead of 404 so a
+    watchlist can render partial scores.
+    """
+    requested = _parse_factor_codes(codes)
+    latest = session.execute(select(func.max(Factor.trade_date))).scalar()
+    if latest is None:
+        return FactorBatchResponse(trade_date=None, items=[], missing=requested)
+
+    rows = list(
+        session.execute(select(Factor).where(Factor.trade_date == latest, Factor.code.in_(requested))).scalars().all()
+    )
+    by_code = {row.code: row for row in rows}
+    names = {
+        instrument.code: instrument.name
+        for instrument in session.execute(select(Instrument).where(Instrument.code.in_(requested))).scalars()
+    }
+
+    items: list[FactorScoreRow] = []
+    missing: list[str] = []
+    for code in requested:
+        row = by_code.get(code)
+        if row is None:
+            missing.append(code)
+            continue
+        items.append(
+            FactorScoreRow(
+                code=code,
+                name=names.get(code, ""),
+                score=row.score,
+                trade_date=row.trade_date,
+            )
+        )
+    return FactorBatchResponse(trade_date=latest, items=items, missing=missing)
 
 
 @router.get("/analysis/factors/{code}", response_model=FactorSnapshot)

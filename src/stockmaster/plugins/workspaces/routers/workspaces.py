@@ -334,21 +334,27 @@ def test_channel(
 ):
     """给通道发一条测试消息（仅 owner）。网络失败返回 ``delivered=false``，绝不 500。"""
     channel = service.channel_or_404(session, ctx.id, channel_id)
+    reason = ""
     try:
         # 惰性导入：投递实现属于 alerts 插件。放在函数内既避免工作区插件对投递实现的
         # 启动期依赖，也让两个插件可以各自独立演进（测试里也是 monkeypatch 这个符号）。
-        from stockmaster.plugins.alerts.services.channels import send_test
+        from stockmaster.plugins.alerts.services.channels import send_test_detail
     except Exception:
         log.warning("通知投递模块不可用，通道 #%s 的测试按未送达处理", channel.id)
         delivered = False
+        reason = "module_unavailable"
     else:
         try:
-            delivered = bool(send_test(channel))
+            delivered, reason = send_test_detail(channel)
         except Exception as exc:
             # 配错地址、网络不通都是「预期内的失败」，接口只回报结果，不抛 500。
             log.warning("通道 #%s 测试投递失败：%s", channel.id, exc)
             delivered = False
-    return {"delivered": delivered, "channel": channel.name, "kind": channel.kind}
+            reason = "exception"
+    result: dict[str, object] = {"delivered": delivered, "channel": channel.name, "kind": channel.kind}
+    if not delivered and reason:
+        result["reason"] = reason
+    return result
 
 
 # --------------------------------------------------------------------------- #
