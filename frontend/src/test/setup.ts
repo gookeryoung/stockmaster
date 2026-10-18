@@ -81,6 +81,10 @@ beforeEach(() => {
   sessionStorage.clear();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // 冲刷上一个用例遗留的 requestAnimationFrame 回调（如 Login 的 focusField）。
+  // 不冲刷的话，它会在下一个用例 user.type 输入中途触发并抢走焦点，
+  // 导致字符落错字段、校验失败。cleanup 后 DOM 已卸载，遗留回调安全落空。
+  await new Promise((resolve) => requestAnimationFrame(resolve));
 });
