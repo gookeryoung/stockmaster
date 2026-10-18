@@ -18,6 +18,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import AddToWatchlistDialog from "../components/AddToWatchlistDialog";
 import { formatDateTime, formatNumber } from "../format";
 import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
 import { useViewState } from "../view";
@@ -134,6 +135,10 @@ function ScreeningPanel() {
   const [runResult, setRunResult] = useState<{ name: string; data: ScreeningRunResult } | null>(
     null,
   );
+  const [watchTarget, setWatchTarget] = useState<{
+    codes: string[];
+    names: Record<string, string>;
+  } | null>(null);
 
   const configs = useQuery({
     queryKey: ["strategy", "screenings", workspace?.id],
@@ -473,12 +478,32 @@ function ScreeningPanel() {
       {/* 运行结果（本地派生数据，切走即丢弃） */}
       {runResult && (
         <div className="card">
-          <div className="mb-2 text-sm font-medium text-slate-300">
-            运行结果{" "}
-            <span className="text-xs text-slate-500">
-              「{runResult.name}」 · 交易日 {runResult.data.trade_date ?? "--"} · 命中{" "}
-              {runResult.data.count} 只
-            </span>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <div className="text-sm font-medium text-slate-300">
+              运行结果{" "}
+              <span className="text-xs text-slate-500">
+                「{runResult.name}」 · 交易日 {runResult.data.trade_date ?? "--"} · 命中{" "}
+                {runResult.data.count} 只
+              </span>
+            </div>
+            {runResult.data.items.length > 0 && (
+              <button
+                type="button"
+                className="btn ml-auto px-2 py-1 text-xs"
+                disabled={readOnly}
+                title={readOnly ? "查看者无法修改自选" : "把本次运行结果全部加入自选清单"}
+                onClick={() =>
+                  setWatchTarget({
+                    codes: runResult.data.items.map((row) => row.code),
+                    names: Object.fromEntries(
+                      runResult.data.items.map((row) => [row.code, row.name]),
+                    ),
+                  })
+                }
+              >
+                全部加入自选
+              </button>
+            )}
           </div>
           {runResult.data.items.length === 0 ? (
             <p className="text-xs text-slate-500">当前数据下没有命中的标的。</p>
@@ -494,11 +519,22 @@ function ScreeningPanel() {
                     <th className="th text-right">vol_20</th>
                     <th className="th text-right">turnover_20</th>
                     <th className="th text-right">rsi_14</th>
+                    <th className="th text-right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {runResult.data.items.map((row) => (
-                    <ScreeningResultRow key={row.code} row={row} />
+                    <ScreeningResultRow
+                      key={row.code}
+                      row={row}
+                      readOnly={readOnly}
+                      onAdd={(targetRow) =>
+                        setWatchTarget({
+                          codes: [targetRow.code],
+                          names: { [targetRow.code]: targetRow.name },
+                        })
+                      }
+                    />
                   ))}
                 </tbody>
               </table>
@@ -506,11 +542,28 @@ function ScreeningPanel() {
           )}
         </div>
       )}
+
+      {watchTarget && (
+        <AddToWatchlistDialog
+          open
+          codes={watchTarget.codes}
+          names={watchTarget.names}
+          onClose={() => setWatchTarget(null)}
+        />
+      )}
     </div>
   );
 }
 
-function ScreeningResultRow({ row }: { row: ScreenRow }) {
+function ScreeningResultRow({
+  row,
+  readOnly,
+  onAdd,
+}: {
+  row: ScreenRow;
+  readOnly: boolean;
+  onAdd: (row: ScreenRow) => void;
+}) {
   return (
     <tr className="border-t border-slate-800/60">
       <td className="td">{row.code}</td>
@@ -520,6 +573,17 @@ function ScreeningResultRow({ row }: { row: ScreenRow }) {
       <td className="td text-right">{formatNumber(row.vol_20, 3)}</td>
       <td className="td text-right">{formatNumber(row.turnover_20, 3)}</td>
       <td className="td text-right">{formatNumber(row.rsi_14, 2)}</td>
+      <td className="td text-right">
+        <button
+          type="button"
+          className="text-xs text-sky-400 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={readOnly}
+          title={readOnly ? "查看者无法修改自选" : "把该标的加入自选清单"}
+          onClick={() => onAdd(row)}
+        >
+          + 加入自选
+        </button>
+      </td>
     </tr>
   );
 }

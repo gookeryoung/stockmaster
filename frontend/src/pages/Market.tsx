@@ -1,14 +1,20 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import AddToWatchlistDialog from "../components/AddToWatchlistDialog";
 import KlineChart from "../components/KlineChart";
 import { formatCompact, formatNumber, formatPct, changeColor } from "../format";
+import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
 import { useViewState } from "../view";
 
 export default function Market() {
   const queryClient = useQueryClient();
   const { search, selected, adjust } = useViewState((state) => state.market);
   const setMarket = useViewState((state) => state.setMarket);
+  const workspace = useCurrentWorkspace();
+  const readOnly = !canWriteWorkspace(workspace);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [watchNotice, setWatchNotice] = useState("");
 
   const stocks = useQuery({
     queryKey: ["stocks", search],
@@ -31,7 +37,12 @@ export default function Market() {
 
   const addWatch = useMutation({
     mutationFn: (code: string) => api.addWatch(code),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["watchlist"] }),
+    onSuccess: (_item, code) => {
+      setWatchNotice(`已将 ${code} 加入自选`);
+      void queryClient.invalidateQueries({ queryKey: ["watchlist"] });
+      void queryClient.invalidateQueries({ queryKey: ["watchlist-lists"] });
+    },
+    onError: () => setWatchNotice(""),
   });
 
   const latest = bars.data?.bars?.[bars.data.bars.length - 1];
@@ -65,12 +76,32 @@ export default function Market() {
           </span>
         )}
         <button
+          type="button"
           className="btn"
-          disabled={!selected || watched.has(selected)}
-          onClick={() => addWatch.mutate(selected)}
+          disabled={!selected || watched.has(selected) || readOnly}
+          title={readOnly ? "查看者无法修改自选" : undefined}
+          onClick={() => {
+            setWatchNotice("");
+            addWatch.mutate(selected);
+          }}
         >
           {watched.has(selected) ? "已在自选" : "加入自选"}
         </button>
+        {!readOnly && (
+          <button
+            type="button"
+            className="btn"
+            disabled={!selected}
+            onClick={() => setPickerOpen(true)}
+          >
+            选择清单…
+          </button>
+        )}
+        {watchNotice && (
+          <span className="text-xs text-sky-300" role="status">
+            {watchNotice}
+          </span>
+        )}
         {addWatch.isError && (
           <span className="text-xs text-red-400">{(addWatch.error as Error).message}</span>
         )}
@@ -166,6 +197,15 @@ export default function Market() {
           )}
         </div>
       </div>
+
+      {pickerOpen && selected && (
+        <AddToWatchlistDialog
+          open
+          codes={[selected]}
+          names={bars.data?.name ? { [selected]: bars.data.name } : undefined}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }

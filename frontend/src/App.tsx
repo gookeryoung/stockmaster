@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import StatusBar from "./StatusBar";
 import { canManageUsers, requiresLogin, useAuth } from "./auth";
 import { ROLE_LABEL, useWorkspace } from "./workspace";
 import Dashboard from "./pages/Dashboard";
 import Market from "./pages/Market";
+import Watchlist from "./pages/Watchlist";
 import Analyze from "./pages/Analyze";
 import Predict from "./pages/Predict";
 import Backtest from "./pages/Backtest";
@@ -81,6 +82,7 @@ function Layout() {
   const nav = [
     { to: "/", label: "总览" },
     { to: "/market", label: "行情" },
+    { to: "/watchlist", label: "自选" },
     { to: "/analyze", label: "分析" },
     { to: "/strategy", label: "策略" },
     { to: "/predict", label: "预测" },
@@ -137,6 +139,7 @@ function Layout() {
         <Routes key={currentId ?? "local"}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/market" element={<Market />} />
+          <Route path="/watchlist" element={<Watchlist />} />
           <Route path="/analyze" element={<Analyze />} />
           <Route path="/predict" element={<Predict />} />
           <Route path="/backtest" element={<Backtest />} />
@@ -165,19 +168,24 @@ function WorkspaceBar() {
   const currentId = useWorkspace((state) => state.currentId);
   const select = useWorkspace((state) => state.select);
   const loading = useWorkspace((state) => state.loading);
+  const transient = useWorkspace((state) => state.transient);
+  const exitTransient = useWorkspace((state) => state.exitTransient);
 
   if (!config?.workspace_enabled || !user) return null;
 
   const current = list.find((row) => row.id === currentId) ?? null;
+  const isTransient = transient !== null && currentId === transient.id;
   const tone =
-    current?.role === "viewer"
+    isTransient
       ? "bg-amber-900/50 text-amber-300"
-      : current?.role === "owner"
-        ? "bg-emerald-900/50 text-emerald-300"
-        : "bg-sky-900/50 text-sky-300";
+      : current?.role === "viewer"
+        ? "bg-amber-900/50 text-amber-300"
+        : current?.role === "owner"
+          ? "bg-emerald-900/50 text-emerald-300"
+          : "bg-sky-900/50 text-sky-300";
 
   return (
-    <div className="flex items-center gap-2 border-t border-slate-800/60 px-3 py-1.5 text-xs sm:px-4">
+    <div className="flex flex-wrap items-center gap-2 border-t border-slate-800/60 px-3 py-1.5 text-xs sm:px-4">
       <span className="shrink-0 text-slate-500">工作区</span>
       <select
         className="input max-w-[12rem] py-1 text-xs"
@@ -190,11 +198,29 @@ function WorkspaceBar() {
           <option key={row.id} value={row.id}>
             {row.name}
             {row.kind === "personal" ? "（个人）" : ""}
+            {transient?.id === row.id ? "（管理员查看）" : ""}
           </option>
         ))}
       </select>
-      {current && <span className={`badge shrink-0 ${tone}`}>{ROLE_LABEL[current.role] ?? current.role}</span>}
-      {current?.role === "viewer" && <span className="shrink-0 text-amber-400/90">只读</span>}
+      {isTransient ? (
+        <>
+          <span className={`badge shrink-0 ${tone}`}>管理员查看</span>
+          <span className="shrink-0 text-amber-400/90">只读</span>
+          <button
+            className="shrink-0 text-amber-300 hover:text-amber-200 disabled:opacity-40"
+            disabled={loading}
+            onClick={() => void exitTransient()}
+            title="退出查看并回到你的个人工作区"
+          >
+            退出查看
+          </button>
+        </>
+      ) : (
+        <>
+          {current && <span className={`badge shrink-0 ${tone}`}>{ROLE_LABEL[current.role] ?? current.role}</span>}
+          {current?.role === "viewer" && <span className="shrink-0 text-amber-400/90">只读</span>}
+        </>
+      )}
       <Link to="/workspace" className="ml-auto shrink-0 text-sky-400 hover:text-sky-300">
         成员与设置
       </Link>
@@ -206,11 +232,29 @@ function WorkspaceBar() {
 function UserMenu() {
   const { user, config, logout } = useAuth();
   const showUsers = canManageUsers(config, user);
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
 
   if (!user) {
     if (!config?.auth_enabled) {
       return (
-        <Link to="/login" className="btn px-2 py-1 text-xs text-slate-400">
+        <Link to="/login" className="btn px-2 py-1 text-xs text-slate-400" title="本机模式：登录后可使用账号相关功能">
           账号入口
         </Link>
       );
@@ -223,36 +267,64 @@ function UserMenu() {
   }
 
   return (
-    <details className="group relative">
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md border border-slate-800 px-2 py-1 text-xs text-slate-300 hover:border-slate-600">
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        className="flex items-center gap-2 rounded-md border border-slate-800 px-2 py-1 text-xs text-slate-300 transition hover:border-slate-600"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="账号菜单"
+        onClick={() => setOpen((value) => !value)}
+      >
         <span className="flex h-5 w-5 items-center justify-center rounded-full bg-sky-900/60 text-[10px] text-sky-300">
           {(user.nickname || user.username).slice(0, 1).toUpperCase()}
         </span>
         <span className="max-w-[8rem] truncate">{user.nickname || user.username}</span>
-        <span className="text-slate-600">▾</span>
-      </summary>
-      <div className="absolute right-0 z-30 mt-1 w-40 overflow-hidden rounded-md border border-slate-800 bg-slate-900 py-1 shadow-xl">
-        <div className="px-3 pb-1 pt-0.5 text-[11px] text-slate-500">
-          {user.role === "admin" ? "管理员" : "普通用户"}
-        </div>
-        <Link to="/account" className="block px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
-          账号设置
-        </Link>
-        {showUsers && (
-          <Link to="/users" className="block px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
-            用户管理
-          </Link>
-        )}
-        <button
-          className="block w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-slate-800"
-          onClick={async () => {
-            await logout();
-            window.location.assign("/login");
-          }}
+        <span className="text-slate-600" aria-hidden="true">
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="账号菜单"
+          className="absolute right-0 z-30 mt-1 w-44 overflow-hidden rounded-md border border-slate-800 bg-slate-900 py-1 shadow-xl"
         >
-          退出登录
-        </button>
-      </div>
-    </details>
+          <div className="px-3 pb-1 pt-0.5 text-[11px] text-slate-500">
+            {user.role === "admin" ? "管理员" : "普通用户"}
+          </div>
+          <Link
+            to="/account"
+            role="menuitem"
+            className="block px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+            onClick={() => setOpen(false)}
+          >
+            账号设置
+          </Link>
+          {showUsers && (
+            <Link
+              to="/users"
+              role="menuitem"
+              className="block px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+              onClick={() => setOpen(false)}
+            >
+              用户管理
+            </Link>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            className="block w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-slate-800"
+            onClick={async () => {
+              setOpen(false);
+              await logout();
+              window.location.assign("/login");
+            }}
+          >
+            退出登录
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

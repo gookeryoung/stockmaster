@@ -21,11 +21,13 @@ import type {
   BackupList,
   BarsResponse,
   FactorSnapshot,
+  FactorScoresResponse,
   IndicatorSnapshot,
   Instrument,
   MarketOverview,
   ModelCard,
   PredictionOut,
+  QuotesResponse,
   RestoreInspection,
   RuleTypeInfo,
   SampleConfig,
@@ -39,7 +41,12 @@ import type {
   TokenResponse,
   TradeOut,
   UserPage,
+  WatchlistBatchDeleteResult,
+  WatchlistDeleteResult,
+  WatchlistImportResult,
   WatchlistItem,
+  WatchlistList,
+  WatchlistRenameResult,
   Workspace,
   WorkspaceChannel,
   WorkspaceChannelKind,
@@ -53,12 +60,22 @@ import type {
 export class ApiError extends Error {
   status: number;
   detail: string;
+  /** 后端 `X-Auth-Error`（或中间件 body 的 `code`），用于稳定区分 403/409 的原因。 */
+  code: string;
+  /** 422 校验错误按字段名聚合，便于表单就地展示。 */
+  fieldErrors: Record<string, string>;
 
-  constructor(status: number, detail: string) {
+  constructor(
+    status: number,
+    detail: string,
+    options: { code?: string; fieldErrors?: Record<string, string> } = {},
+  ) {
     super(detail);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
+    this.code = options.code ?? "";
+    this.fieldErrors = options.fieldErrors ?? {};
   }
 }
 
@@ -127,6 +144,39 @@ export function setAuthToken(next: string | null): void {
   }
 }
 
+/** Build a typed error from a failed response.
+ *
+ * `X-Auth-Error` is the stable machine-readable discriminator (read_only,
+ * quota_exceeded, ...), while `detail` stays the human message. The auth gate
+ * middleware instead puts `code` in the JSON body, so both are honoured.
+ */
+async function buildApiError(response: Response): Promise<ApiError> {
+  const headerCode = response.headers.get("X-Auth-Error") ?? "";
+  let detail = `请求失败 (HTTP ${response.status})`;
+  let bodyCode = "";
+  const fieldErrors: Record<string, string> = {};
+  try {
+    const body = await response.json();
+    if (typeof body?.detail === "string") {
+      detail = body.detail;
+    } else if (Array.isArray(body?.detail)) {
+      // FastAPI validation errors arrive as a list of objects.
+      const parts = body.detail.map((item: { loc?: string[]; msg?: string }) => {
+        const field = item.loc?.length ? String(item.loc[item.loc.length - 1] ?? "") : "";
+        const message = String(item.msg ?? "");
+        if (field) fieldErrors[field] = message;
+        return `${item.loc?.slice(1).join(".") ?? ""}: ${message}`.trim();
+      });
+      const text = parts.join("; ");
+      if (text) detail = text;
+    }
+    if (typeof body?.code === "string") bodyCode = body.code;
+  } catch {
+    // Body was not JSON (e.g. an HTML error page from a proxy); keep the generic text.
+  }
+  return new ApiError(response.status, detail, { code: headerCode || bodyCode, fieldErrors });
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json", ...workspaceHeader() };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -143,23 +193,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    let detail = `请求失败 (HTTP ${response.status})`;
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") {
-        detail = body.detail;
-      } else if (Array.isArray(body?.detail)) {
-        // FastAPI validation errors arrive as a list of objects.
-        detail = body.detail
-          .map((item: { loc?: string[]; msg?: string }) =>
-            `${item.loc?.slice(1).join(".") ?? ""}: ${item.msg ?? ""}`.trim(),
-          )
-          .join("; ");
-      }
-    } catch {
-      // Body was not JSON; keep the generic message.
-    }
-    throw new ApiError(response.status, detail);
+    throw await buildApiError(response);
   }
 
   if (response.status === 204) {
@@ -189,14 +223,7 @@ async function requestRaw(path: string, init?: RequestInit): Promise<Response> {
   }
 
   if (!response.ok) {
-    let detail = `请求失败 (HTTP ${response.status})`;
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      // Not JSON (e.g. an HTML error page from a proxy); keep the generic text.
-    }
-    throw new ApiError(response.status, detail);
+    throw await buildApiError(response);
   }
   return response;
 }
@@ -249,7 +276,11 @@ export const api = {
       body: JSON.stringify({ new_password: newPassword }),
     }),
   deleteUser: (id: number) => request<void>(`/users/${id}`, { method: "DELETE" }),
-  auditLogs: (limit = 100) => request<AuditLog[]>(`/users/audit-logs?limit=${limit}`),
+  auditLogs: (limit = 100, action = "") => {
+    const search = new URLSearchParams({ limit: String(limit) });
+    if (action) search.set("action", action);
+    return request<AuditLog[]>(`/users/audit-logs?${search}`);
+  },
 
   // --- workspaces (isolation boundary + roles) ---
   workspaces: (all = false) => request<Workspace[]>(`/workspaces${all ? "?all=true" : ""}`),
@@ -266,10 +297,21 @@ export const api = {
     request<WorkspaceUsagePoint[]>(`/workspaces/${id}/stats/history?days=${days}`),
   downloadWorkspaceUsage: async (id: number) => {
     const response = await requestRaw(`/workspaces/${id}/stats/export`);
+    // 文件名以后端 Content-Disposition 为准（含导出日期），取不到再回退本地命名。
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+    let filename = `workspace-${id}-usage.csv`;
+    if (match?.[1]) {
+      try {
+        filename = decodeURIComponent(match[1]);
+      } catch {
+        filename = match[1];
+      }
+    }
     const url = URL.createObjectURL(await response.blob());
     const link = document.createElement("a");
     link.href = url;
-    link.download = `workspace-${id}-usage.csv`;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -466,13 +508,45 @@ export const api = {
 
   // --- watchlist ---
   watchlist: (listName = "default") =>
-    request<WatchlistItem[]>(`/watchlist?list_name=${listName}`),
+    request<WatchlistItem[]>(`/watchlist?list_name=${encodeURIComponent(listName)}`),
   addWatch: (code: string, listName = "default", note = "") =>
     request<WatchlistItem>("/watchlist", {
       method: "POST",
       body: JSON.stringify({ code, list_name: listName, note }),
     }),
   removeWatch: (id: number) => request<void>(`/watchlist/${id}`, { method: "DELETE" }),
+  watchlistLists: () => request<WatchlistList[]>("/watchlist/lists"),
+  renameWatchlistList: (listName: string, newName: string) =>
+    request<WatchlistRenameResult>(`/watchlist/lists/${encodeURIComponent(listName)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ new_name: newName }),
+    }),
+  deleteWatchlistList: (listName: string) =>
+    request<WatchlistDeleteResult>(`/watchlist/lists/${encodeURIComponent(listName)}`, {
+      method: "DELETE",
+    }),
+  batchRemoveWatch: (ids: number[]) =>
+    request<WatchlistBatchDeleteResult>("/watchlist/batch-delete", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+  importWatchlist: (payload: {
+    list_name?: string;
+    codes: string[];
+    notes?: Record<string, string>;
+    create_list?: boolean;
+    skip_existing?: boolean;
+  }) =>
+    request<WatchlistImportResult>("/watchlist/import", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  /** 批量行情：一次请求取多只（快照优先，失败回退日线）。 */
+  quotes: (codes: string[]) =>
+    request<QuotesResponse>(`/market/quotes?codes=${encodeURIComponent(codes.join(","))}`),
+  /** 批量因子评分：取最新因子日的 score。 */
+  factorScores: (codes: string[]) =>
+    request<FactorScoresResponse>(`/analysis/factors?codes=${encodeURIComponent(codes.join(","))}`),
 
   // --- strategy configuration (workspace-scoped 选股 / 样本 / 算法) ---
   screeningConfigs: () => request<ScreeningConfig[]>("/strategy/screenings"),

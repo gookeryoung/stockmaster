@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { changeColor, formatCompact, formatPct } from "../format";
+import { changeColor, formatCompact, formatNumber, formatPct } from "../format";
 
 export default function Dashboard() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
@@ -14,6 +14,15 @@ export default function Dashboard() {
     queryFn: () => api.triggers(),
   });
   const watchlist = useQuery({ queryKey: ["watchlist"], queryFn: () => api.watchlist() });
+  const previewCodes = (watchlist.data ?? []).slice(0, 8).map((item) => item.code);
+  const watchlistQuotes = useQuery({
+    queryKey: ["dashboard-watchlist-quotes", previewCodes.join(",")],
+    queryFn: () => api.quotes(previewCodes),
+    enabled: previewCodes.length > 0,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const quoteByCode = new Map((watchlistQuotes.data?.items ?? []).map((row) => [row.code, row]));
 
   const data = overview.data;
 
@@ -97,27 +106,55 @@ export default function Dashboard() {
 
         {/* Watchlist */}
         <div className="card">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="text-sm font-medium text-slate-300">自选股</div>
-            <Link to="/market" className="text-xs text-sky-400 hover:underline">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-baseline gap-2">
+              <div className="text-sm font-medium text-slate-300">自选股</div>
+              {watchlist.data?.length ? (
+                <span className="text-xs text-slate-500">共 {watchlist.data.length} 只</span>
+              ) : null}
+            </div>
+            <Link to="/watchlist" className="text-xs text-sky-400 hover:underline">
               管理
             </Link>
           </div>
           {watchlist.data?.length ? (
             <div className="table-wrap">
               <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-800">
+                    <th className="th">代码</th>
+                    <th className="th">名称</th>
+                    <th className="th text-right">最新价</th>
+                    <th className="th text-right">涨跌幅</th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {watchlist.data.slice(0, 8).map((item) => (
-                    <tr key={item.id} className="border-t border-slate-800/60">
-                      <td className="td">{item.code}</td>
-                      <td className="td text-slate-400">{item.name}</td>
-                    </tr>
-                  ))}
+                  {watchlist.data.slice(0, 8).map((item) => {
+                    const quote = quoteByCode.get(item.code);
+                    return (
+                      <tr key={item.id} className="border-t border-slate-800/60">
+                        <td className="td">{item.code}</td>
+                        <td className="td text-slate-400">{item.name || "--"}</td>
+                        <td className="td text-right text-slate-200">
+                          {formatNumber(quote?.price, 2)}
+                        </td>
+                        <td className={`td text-right ${changeColor(quote?.pct_chg)}`}>
+                          {formatPct(quote?.pct_chg)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           ) : (
-            <p className="text-xs text-slate-500">自选股为空，可在“行情”页添加。</p>
+            <p className="text-xs text-slate-500">
+              自选股为空，去{" "}
+              <Link to="/watchlist" className="text-sky-400 hover:underline">
+                自选页
+              </Link>{" "}
+              添加。
+            </p>
           )}
         </div>
       </section>

@@ -212,6 +212,95 @@ export interface WatchlistItem {
   note: string;
 }
 
+/** 自选清单（由 `watchlist_items.list_name` 汇总而来，不是独立实体）。 */
+export interface WatchlistList {
+  list_name: string;
+  count: number;
+  last_added_at: string | null;
+}
+
+export interface WatchlistRenameResult {
+  old_name: string;
+  new_name: string;
+  updated: number;
+}
+
+export interface WatchlistDeleteResult {
+  list_name: string;
+  deleted: number;
+}
+
+export interface WatchlistBatchDeleteResult {
+  deleted: number;
+  /** 不存在或属于其他工作区的 id（刻意不区分）。 */
+  missing: number[];
+}
+
+export interface WatchlistImportInvalid {
+  index: number;
+  code: string;
+  reason: string;
+  message: string;
+}
+
+export interface WatchlistImportQuota {
+  resource: string;
+  limit: number;
+  used: number;
+  remaining: number;
+}
+
+export interface WatchlistImportResult {
+  list_name: string;
+  added: number;
+  updated: number;
+  skipped: number;
+  invalid: WatchlistImportInvalid[];
+  list_created: boolean;
+  total_items: number;
+  quota: WatchlistImportQuota | null;
+}
+
+/** 自选页批量行情的一行（快照优先，失败回退已存日线）。 */
+export interface QuoteRow {
+  code: string;
+  name: string;
+  price: number | null;
+  preclose: number | null;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  volume: number | null;
+  amount: number | null;
+  pct_chg: number | null;
+  turnover: number | null;
+  trade_date: string | null;
+  quote_time: string;
+  source: string;
+  stale: boolean;
+}
+
+export interface QuotesResponse {
+  as_of: string | null;
+  source: string;
+  items: QuoteRow[];
+  missing: string[];
+}
+
+/** 批量因子评分（取最新因子日）。 */
+export interface FactorScoreRow {
+  code: string;
+  name: string;
+  score: number | null;
+  trade_date: string | null;
+}
+
+export interface FactorScoresResponse {
+  trade_date: string | null;
+  items: FactorScoreRow[];
+  missing: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Accounts / authentication
 // ---------------------------------------------------------------------------
@@ -316,6 +405,8 @@ export interface WorkspaceChannelTestResult {
   delivered: boolean;
   channel: string;
   kind: string;
+  /** 失败原因（仅 delivered=false 时可能返回）：smtp_not_configured/no_recipients/delivery_failed/unknown_channel/exception。 */
+  reason?: string;
 }
 
 /** 工作区用量与配额。

@@ -1,13 +1,22 @@
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import AddToWatchlistDialog from "../components/AddToWatchlistDialog";
 import EChart from "../components/EChart";
 import { formatNumber, formatPct, changeColor } from "../format";
+import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
 import { useViewState } from "../view";
 import type { EChartsOption } from "echarts";
 
 export default function Analyze() {
   const { code, correlationInput, screenMinScore } = useViewState((state) => state.analyze);
   const setAnalyze = useViewState((state) => state.setAnalyze);
+  const workspace = useCurrentWorkspace();
+  const readOnly = !canWriteWorkspace(workspace);
+  const [watchTarget, setWatchTarget] = useState<{
+    codes: string[];
+    names: Record<string, string>;
+  } | null>(null);
 
   const factors = useQuery({
     queryKey: ["factors", code],
@@ -109,6 +118,11 @@ export default function Analyze() {
       }
     : null;
 
+  const screenRows = screen.data ?? [];
+  const screenNames: Record<string, string> = Object.fromEntries(
+    screenRows.map((row) => [row.code, row.name]),
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -188,6 +202,22 @@ export default function Analyze() {
           >
             {screen.isPending ? "筛选中…" : "运行筛选"}
           </button>
+          {screenRows.length > 0 && (
+            <button
+              type="button"
+              className="btn ml-auto"
+              disabled={readOnly}
+              title={readOnly ? "查看者无法修改自选" : "把本次筛选结果全部加入自选清单"}
+              onClick={() =>
+                setWatchTarget({
+                  codes: screenRows.map((row) => row.code),
+                  names: screenNames,
+                })
+              }
+            >
+              全部加入自选（{screenRows.length}）
+            </button>
+          )}
         </div>
 
         {screen.isError && (
@@ -207,10 +237,11 @@ export default function Analyze() {
                   <th className="th text-right">波动20</th>
                   <th className="th text-right">换手20</th>
                   <th className="th text-right">RSI14</th>
+                  <th className="th text-right">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {screen.data.map((row) => (
+                {screenRows.map((row) => (
                   <tr key={`${row.code}-${row.trade_date}`} className="border-t border-slate-800/60">
                     <td className="td">{row.code}</td>
                     <td className="td text-slate-400">{row.name}</td>
@@ -224,11 +255,22 @@ export default function Analyze() {
                     <td className="td text-right">{formatNumber(row.vol_20, 3)}</td>
                     <td className="td text-right">{formatNumber(row.turnover_20, 4)}</td>
                     <td className="td text-right">{formatNumber(row.rsi_14, 2)}</td>
+                    <td className="td text-right">
+                      <button
+                        type="button"
+                        className="text-xs text-sky-400 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={readOnly}
+                        title={readOnly ? "查看者无法修改自选" : "把该标的加入自选清单"}
+                        onClick={() => setWatchTarget({ codes: [row.code], names: { [row.code]: row.name } })}
+                      >
+                        + 加入自选
+                      </button>
+                    </td>
                   </tr>
                 ))}
-                {screen.data.length === 0 && (
+                {screenRows.length === 0 && (
                   <tr>
-                    <td className="td text-slate-500" colSpan={8}>
+                    <td className="td text-slate-500" colSpan={9}>
                       无匹配结果
                     </td>
                   </tr>
@@ -268,6 +310,15 @@ export default function Analyze() {
           <EChart option={heatmapOption} height={Math.max(320, 60 * correlation.data!.codes.length)} />
         )}
       </div>
+
+      {watchTarget && (
+        <AddToWatchlistDialog
+          open
+          codes={watchTarget.codes}
+          names={watchTarget.names}
+          onClose={() => setWatchTarget(null)}
+        />
+      )}
     </div>
   );
 }
