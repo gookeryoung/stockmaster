@@ -1,6 +1,7 @@
 [run]
 branch = true
-concurrency = multiprocessing
+# 注意：不要设置 concurrency = multiprocessing —— 它与 pytest-cov 的
+# xdist 数据收集冲突，子进程会覆盖同一份 .coverage 文件，导致覆盖率大幅虚低。
 omit = src/stockmaster/*.py
 source = stockmaster
 
