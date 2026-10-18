@@ -1,7 +1,7 @@
-# Makefile - cndb 项目快捷命令
+# Makefile - stockmaster 项目快捷命令
 # 运行 `make help` 查看所有可用命令
 
-PACKAGE := cndb
+PACKAGE := stockmaster
 COV_THRESHOLD := 95
 
 # dev 目标绑定地址/端口，可在命令行覆盖：make dev DEV_HOST=127.0.0.1 DEV_PORT=8000
@@ -39,10 +39,10 @@ print('[frontend] node_modules not exist, start pnpm install...'),\
 subprocess.run(['pnpm','install','--frozen-lockfile'],cwd='frontend',check=True))"
 
 dev: | frontend-sync ## 开发模式：同时启动前后端（后端 uvicorn + 前端 Vite，Ctrl+C 一起停）
-	uv run cndb dev --host $(DEV_HOST) --port $(DEV_PORT)
+	uv run stockmaster dev --host $(DEV_HOST) --port $(DEV_PORT)
 
 seed: ## 注入演示数据（幂等：重建工作区/表/视图/文档并创建演示账号）
-	uv run cndb seed
+	uv run stockmaster seed
 
 frontend-lint fl: | frontend-sync ## 前端 ESLint 检查
 	cd frontend && pnpm lint
@@ -63,7 +63,7 @@ frontend-coverage-html fcov-html: | frontend-sync ## 同上，额外生成 html 
 
 frontend-check fc: frontend-static frontend-coverage ## 前端门禁（静态检查 + 覆盖率测试）
 
-frontend-build fb: | frontend-sync ## 构建前端（Vite，产物输出到 src/cndb/static/）
+frontend-build fb: | frontend-sync ## 构建前端（Vite，产物输出到 src/stockmaster/static/）
 	cd frontend && pnpm build
 
 build b: frontend-build ## 构建分发包 (前端 → wheel + sdist)
@@ -125,7 +125,7 @@ pack: frontend-build ## 本地当前平台打包（fspack build + package + 冒�
 	uv run python -c "import sys,platform; sys.stdout.reconfigure(encoding='utf-8'); p='windows' if platform.system()=='Windows' else ('macos' if platform.system()=='Darwin' else 'linux'); print(f'[pack] 目标平台: {p}')"
 	uv run fspack b . --target $$(uv run python -c "import platform; print('windows' if platform.system()=='Windows' else ('macos' if platform.system()=='Darwin' else 'linux'))")
 	uv run fspack p . --target $$(uv run python -c "import platform; print('windows' if platform.system()=='Windows' else ('macos' if platform.system()=='Darwin' else 'linux'))") --format all --no-build
-	@uv run python -c "import sys,subprocess,platform; sys.stdout.reconfigure(encoding='utf-8'); exe='dist/cndb.exe' if platform.system()=='Windows' else 'dist/cndb'; r=subprocess.run([exe,'info'],capture_output=True,text=True); print(r.stdout); print(f'[pack] 冒烟测试: OK' if r.returncode==0 else f'[pack] 冒烟测试 FAILED (rc={r.returncode})', file=sys.stderr if r.returncode!=0 else sys.stdout); sys.exit(r.returncode)"
+	@uv run python -c "import sys,subprocess,platform; sys.stdout.reconfigure(encoding='utf-8'); exe='dist/stockmaster.exe' if platform.system()=='Windows' else 'dist/stockmaster'; r=subprocess.run([exe,'info'],capture_output=True,text=True); print(r.stdout); print(f'[pack] 冒烟测试: OK' if r.returncode==0 else f'[pack] 冒烟测试 FAILED (rc={r.returncode})', file=sys.stderr if r.returncode!=0 else sys.stdout); sys.exit(r.returncode)"
 
 pack-cache-clean: ## 清理 fspack 缓存（wheels + nuitka）
 	uv run fspack cache clean
