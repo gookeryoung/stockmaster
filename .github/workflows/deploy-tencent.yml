@@ -42,9 +42,10 @@ on:
 permissions:
   contents: read
 
-# 并发部署会导致镜像与 .env 相互覆盖，排队而不取消
+# 所有部署串行排队：tag 触发的 ref 是 tag、手动触发的 ref 是分支，
+# 用 github.ref 分组会让两者各排一队、并发改同一台机器的镜像与 .env。
 concurrency:
-  group: deploy-tencent-${{ github.ref }}
+  group: deploy-tencent
   cancel-in-progress: false
 
 jobs:
@@ -55,7 +56,11 @@ jobs:
     # 之后走 Docker 层缓存通常 5 分钟内。
     timeout-minutes: 70
     steps:
+      # 必须全量取标签：手动触发时要用 git describe 兜底选版本，
+      # 默认 fetch-depth=1 且不取标签会让这一步直接失败。
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Resolve version
         id: meta
@@ -72,6 +77,11 @@ jobs:
             v*) ;;
             *) echo "::error::版本号必须形如 v0.2.0，当前为 ${VERSION}"; exit 1 ;;
           esac
+          # 版本必须真实存在（本地或远程），否则下游 checkout 会在服务器上失败
+          if ! git rev-parse --verify --quiet "refs/tags/${VERSION}" >/dev/null; then
+            echo "::error::找不到 tag ${VERSION}，请先 push 该 tag：git push <remote> ${VERSION}"
+            exit 1
+          fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "部署版本: ${VERSION}"
 
