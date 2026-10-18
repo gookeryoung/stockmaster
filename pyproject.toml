@@ -84,6 +84,12 @@ exclude = [
     "*.egg-info/**",
 ]
 
+[dependency-groups]
+dev = [
+    "stockmaster[dev]",
+    "prek>=0.5.5",
+]
+
 [tool.bumpversion]
 current_version = "0.3.0"
 commit = true
