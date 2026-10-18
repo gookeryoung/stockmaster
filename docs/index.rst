@@ -11,6 +11,10 @@ A 股日线量化分析工作台：数据获取 · 指标与因子 · 预测 · 
 
    api
    changelog
+   UI_DESIGN
+   UI_AUTH
+   UI_WORKSPACE
+   UI_WATCHLIST
 
 安装
 ====
