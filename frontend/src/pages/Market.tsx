@@ -65,7 +65,7 @@ export default function Market() {
           value={search}
           onChange={(event) => setMarket({ search: event.target.value })}
         />
-        <select className="input" value={adjust} onChange={(e) => setMarket({ adjust: e.target.value })}>
+        <select className="input" aria-label="复权方式" value={adjust} onChange={(e) => setMarket({ adjust: e.target.value })}>
           <option value="qfq">前复权 (qfq)</option>
           <option value="raw">不复权 (raw)</option>
         </select>

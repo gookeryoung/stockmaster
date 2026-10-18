@@ -1,6 +1,7 @@
 name: CI
 
-# Runs on every push and PR; the release job only runs for version tags.
+# 每次 push / PR 都跑：静态检查 → 单元与集成测试 → 前端测试与构建 → 浏览器 e2e。
+# tag 触发时额外发布 GitHub Release。
 on:
   push:
     branches: [main]
@@ -9,29 +10,27 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Cancel superseded runs for the same ref, so pushes do not queue up.
+# 同一 ref 的新提交会取消旧运行，避免排队浪费 runner。
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # Keep output predictable across runners (the app also detects the console code
-  # page, but CI logs are UTF-8).
   SM_CONSOLE_ENCODING: utf-8
   PYTHON_VERSION: "3.13"
   NODE_VERSION: "22"
+  # 后端覆盖率门槛，与 Makefile 的 COV_THRESHOLD 保持一致
+  COV_THRESHOLD: "80"
 
 jobs:
   backend:
-    name: 后端 · lint + 测试
-    # 固定 24.04：ubuntu-latest 将于 2026-10 起迁移到 Ubuntu 26，避免构建环境漂移
+    name: 后端 · lint + 测试 + 覆盖率
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
       - name: 安装 uv
-        # setup-uv 无浮动主版本 tag，只能精确 pin
         uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
@@ -48,16 +47,24 @@ jobs:
           uv run ruff check src tests scripts --cache-dir .ruff_cache
           uv run ruff format --check src tests scripts --cache-dir .ruff_cache
 
-      - name: 单元与集成测试
-        # Network-marked contract tests are excluded: they depend on live public
-        # data sources, which would make CI flaky and slow. SM_PROVIDER_OFFLINE
-        # makes any *other* accidental live fetch fail in milliseconds instead of
-        # waiting for provider timeouts — the suite must stay hermetic.
-        # Slow-marked tests (real subprocess/server spawn, full-chain e2e) are also
-        # excluded to keep push/PR feedback fast; they run locally via `make test-slow`.
+      - name: 单元与集成测试（含覆盖率门槛）
+        # network 标记的契约测试依赖公网数据源，会让 CI 抖动，故排除；
+        # SM_PROVIDER_OFFLINE 让任何漏网的实盘调用毫秒级失败，保证用例全离线。
+        # slow 标记（真实子进程/全链路 e2e）本地用 `make test-slow` 跑。
         env:
           SM_PROVIDER_OFFLINE: "true"
-        run: uv run pytest -n auto -m "not network and not slow" --cov=stockmaster --cov-report=term --cov-fail-under=75
+        run: |
+          uv run pytest -n auto -m "not network and not slow" \
+            --cov=stockmaster --cov-report=term-missing \
+            --cov-report=xml:coverage.xml --cov-report=html:htmlcov \
+            --cov-fail-under=${{ env.COV_THRESHOLD }} \
+            --junitxml=reports/junit.xml
+
+      - name: 覆盖率摘要（Job Summary）
+        if: always()
+        run: |
+          uv run python scripts/ci/coverage_summary.py --backend coverage.xml --output coverage-comment.md
+          cat coverage-comment.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: 构建 wheel 与 sdist
         run: uv build
@@ -69,8 +76,19 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+      - name: 上传覆盖率与测试报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage
+          path: |
+            coverage.xml
+            htmlcov/
+            reports/junit.xml
+          if-no-files-found: warn
+
   frontend:
-    name: 前端 · 类型检查 + 构建
+    name: 前端 · 类型检查 + 单测 + 构建
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -78,7 +96,6 @@ jobs:
 
       - uses: pnpm/action-setup@v6
         with:
-          # Lockfile is v9.0; pnpm 10 handles that format.
           version: 10
 
       - uses: actions/setup-node@v7
@@ -95,6 +112,10 @@ jobs:
         run: pnpm typecheck
         working-directory: frontend
 
+      - name: 单元测试（vitest + 覆盖率门槛）
+        run: pnpm test:coverage
+        working-directory: frontend
+
       - name: 构建
         run: pnpm build
         working-directory: frontend
@@ -106,15 +127,138 @@ jobs:
           path: frontend/dist/
           if-no-files-found: error
 
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          if-no-files-found: warn
+
+  e2e:
+    name: 端到端 · Playwright（真实后端 + 真实浏览器）
+    needs: [backend, frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: 安装 Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: 安装后端依赖
+        run: uv sync --extra dev --frozen
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      - name: 构建前端产物（后端直接托管 dist）
+        run: pnpm build
+        working-directory: frontend
+
+      - name: 安装 Chromium
+        run: pnpm exec playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: 运行 e2e
+        # scripts/e2e_server.py 会自己灌一份确定性数据（MockProvider → 真实同步/指标链路），
+        # 因此这里不需要数据库服务或外部数据源。
+        env:
+          # webServer 会以仓库根目录为 cwd 执行该命令；--frozen 保证不在此刻解析依赖
+          E2E_PYTHON: uv run --frozen python
+          CI: "true"
+        run: pnpm e2e
+        working-directory: frontend
+
+      - name: 上传 e2e 报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report
+          path: |
+            frontend/playwright-report/
+            frontend/e2e-report/
+            frontend/test-results/
+          if-no-files-found: warn
+
+  coverage-comment:
+    name: 覆盖率 · PR 评论
+    needs: [backend, frontend]
+    # 只有同仓库的 PR 才评论：fork 来的 PR 上 GITHUB_TOKEN 是只读的，写评论会失败。
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: backend-coverage
+          path: artifacts/backend
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-coverage
+          path: artifacts/frontend
+
+      - name: 生成覆盖率评论
+        # 只读产物、拼接 Markdown，不需要额外依赖
+        run: |
+          python3 scripts/ci/coverage_summary.py \
+            --backend artifacts/backend/coverage.xml \
+            --frontend artifacts/frontend/coverage-summary.json \
+            --output coverage-comment.md
+          cat coverage-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 发布/更新 sticky 评论
+        # 同一条评论反复更新，避免每次 push 都刷屏；评论以 HTML 标记开头作为身份。
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          BODY="$(cat coverage-comment.md)"
+          EXISTING="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- coverage-report -->")) | .id' | head -1)"
+          if [ -n "${EXISTING}" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${EXISTING}" -f body="${BODY}" >/dev/null
+            echo "已更新评论 #${EXISTING}"
+          else
+            gh api -X POST "repos/${REPO}/issues/${PR_NUMBER}/comments" -f body="${BODY}" >/dev/null
+            echo "已创建覆盖率评论"
+          fi
+
   release:
     name: 发布 · GitHub Release
-    # Only for version tags, and only when both build jobs passed.
+    # 只在版本 tag 上发布，且三个门禁全绿
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [backend, frontend]
+    needs: [backend, frontend, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      # Required to create the release; scoped to this job only.
       contents: write
     steps:
       - uses: actions/checkout@v7
@@ -144,7 +288,6 @@ jobs:
       - name: 创建 Release
         uses: softprops/action-gh-release@v3
         with:
-          # Tag name is taken from the ref, e.g. v0.1.0.
           name: StockMaster ${{ github.ref_name }}
           generate_release_notes: true
           files: |
@@ -158,5 +301,7 @@ jobs:
             - `stockmaster-*.whl` / `*.tar.gz` — Python 分发包
             - `stockmaster-frontend.zip` — 前端构建产物（由后端托管）
             - `SHA256SUMS.txt` — 校验和
+
+            本版本已通过：后端单测与覆盖率门槛、前端单测与构建、Playwright 端到端。
 
             > 本工具仅供量化研究参考，不构成投资建议。

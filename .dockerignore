@@ -28,7 +28,11 @@ frontend/dist
 frontend/.vite
 frontend/coverage
 frontend/.eslintcache
+frontend/test-results
+frontend/playwright-report
 *.tsbuildinfo
+.e2e
+reports
 
 # 本地研究数据与模型产物（体积可达数百 MB，绝不进入镜像）
 data

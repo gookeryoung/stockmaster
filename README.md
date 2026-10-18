@@ -1,5 +1,10 @@
 # StockMaster · A股日线量化分析工作台
 
+[![CI](https://github.com/gookeryoung/stockmaster/actions/workflows/ci.yml/badge.svg)](https://github.com/gookeryoung/stockmaster/actions/workflows/ci.yml)
+[![Deploy main](https://github.com/gookeryoung/stockmaster/actions/workflows/deploy-main.yml/badge.svg)](https://github.com/gookeryoung/stockmaster/actions/workflows/deploy-main.yml)
+[![Deploy (tag)](https://github.com/gookeryoung/stockmaster/actions/workflows/deploy-tencent.yml/badge.svg)](https://github.com/gookeryoung/stockmaster/actions/workflows/deploy-tencent.yml)
+![coverage](https://img.shields.io/badge/coverage-%E2%89%A580%25-brightgreen)
+
 基于 **Python (FastAPI) + React (TypeScript/Vite/ECharts)** 的单机量化研究工作台，
 闭环覆盖 **数据获取 → 分析 → 预测 → 预警**，并内置 **回测验证**。
 
@@ -236,10 +241,18 @@ stockmaster/
 │  ├─ db/           # ORM 模型、会话、迁移桥接
 │  ├─ alembic/      # 数据库迁移（随包发布）
 │  └─ cli.py        # 命令行（回补/体检/训练等）
-├─ .github/workflows/ci.yml  # CI（后端+前端）与 tag 触发的 Release
-├─ frontend/src/    # React + ECharts 工作台
-├─ tests/           # 448 项测试（含 12 项网络契约测试，默认跳过）
-└─ scripts/         # 启动、开发、清理、验收脚本
+├─ .github/workflows/
+│  ├─ ci.yml        # 提交/PR：lint → 后端测试与覆盖率 → 前端测试构建 → Playwright e2e
+│  ├─ deploy-main.yml   # main 合并后自动部署（仓库变量 SM_AUTO_DEPLOY_MAIN 控制）
+│  ├─ deploy-tencent.yml# tag 部署（TAT 下发，失败自动回滚）
+│  └─ release.yml   # 手动 PyPI 发布通道
+├─ frontend/
+│  ├─ src/          # React + ECharts 工作台
+│  └─ e2e/          # Playwright 用例（真实后端 + 真实浏览器）
+├─ tests/           # 后端测试（751 项快速集 + slow/network 标记用例）
+├─ scripts/
+│  ├─ e2e_server.py # e2e 用的「临时库 + 确定性数据 + 生产同构托管」服务
+│  └─ ci/           # CI 辅助脚本（覆盖率汇总）
 ```
 
 ---
@@ -262,34 +275,51 @@ stockmaster/
 ## 6. 测试与验收
 
 ```bash
-make test            # 快速离线测试（并行；排除 slow 与 network）
+make test            # 后端快速离线测试（并行；排除 slow 与 network）
 make test-slow       # 慢测试集（真实子进程/服务器、全链路 e2e）
 make test-all        # 全部离线测试（快 + 慢）
-make cov             # 快速集 + 覆盖率报告（当前 79.6%，门槛 75%）
+make cov             # 快速集 + 后端覆盖率报告（门槛 80%）
+make frontend-test   # 前端单元测试（vitest + Testing Library）
+make frontend-cov    # 前端单测 + 覆盖率（核心模块有独立门槛）
+make e2e             # 端到端测试（Playwright + 真实后端 + 真实浏览器）
 make test-network    # 网络契约测试（验证真实数据源与跨源一致性）
 make acceptance      # 端到端实盘验收（真实数据走完整链路）
 make lint            # ruff check + format 校验
 make check-fast      # 轻量静态门禁（lint + 前端类型检查，不含测试）
-make check           # 全套门禁（lint + 前端类型检查 + 快速测试 + 覆盖率）
+make check           # 全套门禁（lint + 前端类型检查 + 后端覆盖率 + 前端单测）
 ```
+
+**三层测试的分工**（避免「为了覆盖率写测试」的空转）：
+
+| 层 | 工具 | 覆盖对象 | 运行成本 |
+|---|---|---|---|
+| 单元 / 集成 | pytest（751 项） | 领域逻辑、仓储、路由与鉴权、迁移、数据质量、调度器、微信 OAuth 客户端 | ~40s（8 进程并行） |
+| 前端单元 | vitest + Testing Library（86 项） | `api` 客户端错误映射、会话/工作区 store、视图状态持久化、表单校验、确认弹层 | ~8s |
+| 端到端 | Playwright（21 项） | 登录/登出/会话失效、总览与九页导航、行情切换、自选增删、回测、预测、预警扫描 | ~30s |
 
 **快 / 慢分离（参考 cndb）**：真实子进程/服务器（`test_dev_server`、`test_console_bytes`）
 与全链路 e2e（`test_pipeline_e2e`）等重用例以 `@pytest.mark.slow` 标记，默认 `make test` /
 `make cov` 与 CI 用 `-m "not slow"` 排除，让提交时的门禁保持快速反馈；需要完整覆盖时显式
 运行 `make test-slow`（或 `make test-all`）。
 
-等价的手动命令：
+**e2e 的数据从哪来**：`scripts/e2e_server.py` 在临时目录建库，用 `MockProvider` 走**真实的**
+同步 → 指标 → 因子 → 训练 → 预测链路灌入确定性数据，再以生产同构方式托管 `frontend/dist`。
+因此 e2e 断言的仍是真实接口与真实页面，而不是被 mock 掉的假前端。
+
+等价的命令行（不经 Makefile）：
 
 ```powershell
-.venv\Scripts\python.exe -m pytest tests -q -m "not slow"   # 快速离线
-.venv\Scripts\python.exe -m pytest tests -q -m slow         # 慢测试集
-.venv\Scripts\python.exe -m pytest tests -q -m network      # 网络契约
-.venv\Scripts\python.exe -u scripts\acceptance_live.py
-cd frontend; pnpm exec tsc --noEmit; pnpm build
+.venv\Scripts\python.exe -m pytest tests -q -m "not slow"          # 后端快速离线
+.venv\Scripts\python.exe -m pytest tests -q -m slow                # 慢测试集
+.venv\Scripts\python.exe -m pytest tests -q -m network             # 网络契约
+.venv\Scripts\python.exe -u scripts\acceptance_live.py             # 实盘验收
+cd frontend; pnpm test                                             # 前端单测
+cd frontend; pnpm test:coverage                                    # 前端覆盖率
+cd frontend; pnpm build; pnpm exec playwright test                 # 端到端
 ```
 
-当前状态：**快速集 586 项通过**（另有 19 项 slow、12 项网络契约默认不跑），网络契约测试可实盘通过，
-覆盖率 **79.60%**（门槛 75%），实盘端到端验收全部通过。
+当前状态：**后端快速集 751 项通过**（另有 slow/network 用例默认不跑），覆盖率 **82%**
+（门槛 80%）；**前端 86 项单测 + 21 项 e2e 通过**；实盘端到端验收通过。
 
 ### 6.1 全部 Make 命令
 
@@ -307,7 +337,9 @@ cd frontend; pnpm exec tsc --noEmit; pnpm build
 | `make stats` | 数据库概况（证券数、日线行数、最新行情日、模型数） |
 | `make data-quality` | **数据质量体检**：覆盖率、缺口、陈旧、异常、复权一致性 |
 | `make test` / `make test-slow` / `make test-all` | 快速离线测试 / 慢测试集 / 全部离线测试 |
-| `make cov` / `make test-network` | 快速集 + 覆盖率报告 / 网络契约测试 |
+| `make cov` / `make test-network` | 快速集 + 后端覆盖率报告 / 网络契约测试 |
+| `make frontend-test` / `make frontend-cov` | 前端单元测试 / 前端单测 + 覆盖率 |
+| `make e2e` | 端到端测试（Playwright，真实后端 + 真实浏览器） |
 | `make acceptance` | 端到端实盘验收（真实数据源，需联网） |
 | `make lint` / `make format` | ruff 检查 / 自动格式化 |
 | `make check-fast` / `make check` | 轻量静态门禁 / 全套门禁 |
@@ -338,7 +370,48 @@ uv run stockmaster data-quality --min-usable-share 0.5       # 作为门禁（�
 
 也可通过 `GET /api/v1/system/data-quality` 获取（`only_problems=true` 便于轮询）。
 
-### 6.3 中文乱码说明（Windows）
+### 6.3 持续集成与持续交付
+
+流水线定义在 `.github/workflows/`，触发关系如下：
+
+| 事件 | 工作流 | 做什么 |
+|---|---|---|
+| push / PR 到 `main` | `ci.yml` | lint → 后端测试与覆盖率 → 前端类型检查/单测/构建 → Playwright e2e |
+| PR 到 `main` | `ci.yml`（`coverage-comment` job） | 生成覆盖率摘要，**在同一条 sticky 评论里更新**（不刷屏） |
+| push tag `v*` | `ci.yml`（`release`） | 三关全绿后打包 wheel/sdist + 前端产物，发布 GitHub Release |
+| push tag `v*` | `deploy-tencent.yml` | 通过 TAT 下发到服务器执行 `deploy/deploy.sh`（失败自动回滚） |
+| CI 在 `main` 上成功 | `deploy-main.yml` | **合并即部署**（需把仓库变量 `SM_AUTO_DEPLOY_MAIN` 设为 `true`） |
+| 手动 | `release.yml` | 构建并（可选）发布到 PyPI 的 OIDC 通道 |
+
+**质量门禁（都写死在流水线里，不靠人记）**
+
+- 后端：`ruff check` + `ruff format --check`，`--cov-fail-under=80`
+- 前端：`tsc --noEmit`，`vitest --coverage`，且 `format.ts` / `auth.ts` / `view.ts` /
+  `workspace.ts` / `ConfirmDialog.tsx` 有各自更高的行/分支门槛（见 `frontend/vitest.config.ts`）
+- e2e：真实浏览器跑关键流程，失败上传 trace/video 与 JUnit 报告
+
+**反馈落点**
+
+| 反馈 | 位置 |
+|---|---|
+| 红/绿状态 | README 徽章 + Actions 页面 |
+| 覆盖率（后端 + 前端同表） | PR 的 sticky 评论 + 每次运行的 Job Summary |
+| 可下载报告 | `backend-coverage`（HTML/XML/JUnit）、`frontend-coverage`（lcov/json）、`e2e-report`（HTML/trace） |
+| 失败定位 | GitHub 注解（vitest `github` reporter）+ Playwright 失败截图/trace |
+
+**合并自动部署的开关**：`Settings → Secrets and variables → Actions → Variables`
+把 `SM_AUTO_DEPLOY_MAIN` 设为 `true` 即开启；未设置时该 workflow 只打一条 skip 提示。
+部署命令由 `scripts/deploy_via_tat.py` 经腾讯云 TAT 下发（不在 runner 上直连 SSH），
+服务器侧 `deploy/deploy.sh` 负责构建、健康探测与回滚。
+
+本地复现 CI 的核心步骤：
+
+```bash
+make check        # lint + 前端类型 + 后端覆盖率 + 前端单测
+make e2e          # 浏览器端到端（首次会自动灌数据并起服务）
+```
+
+### 6.4 中文乱码说明（Windows）
 
 中文 Windows 控制台默认代码页为 **936(GBK)**，而现代终端（Windows Terminal / VS Code）
 多为 **65001(UTF-8)**。同一段字节在其中一边必然乱码。
@@ -362,27 +435,6 @@ UTF-8（这也是现代终端/编辑器/CI 日志的通行假设），行为在�
   改为调用 `stockmaster` CLI 与 `scripts/*.py`；
 - 回归保护见 `tests/test_console_bytes.py`：直接断言 CLI 子进程的
   **原始字节是合法 UTF-8**（仅断言编码名无法发现问题）。
-
-### 6.4 CI / CD
-
-`.github/workflows/ci.yml` 在 push / PR 时运行，tag 触发发布：
-
-| Job | 内容 |
-|---|---|
-| `backend` | `uv sync --frozen` → ruff check + format → `pytest -m "not network and not slow"`（覆盖率门槛 75%）→ `uv build` |
-| `frontend` | `pnpm install --frozen-lockfile` → `tsc --noEmit` → `vite build` |
-| `release` | 仅 `v*` tag：汇总 wheel/sdist + 前端 zip + `SHA256SUMS.txt`，创建 GitHub Release |
-
-设计取舍：
-
-- **网络契约测试不进 CI**。它们依赖公开数据源（baostock/腾讯/新浪），在 CI 上会带来
-  不确定性；需要时用 `make test-network` 本地手动运行。
-- **慢测试（`slow`）不进 CI**。真实子进程/服务器启动与全链路 e2e 占用 CI 主要时长，
-  且与并行不友好；本地用 `make test-slow` 显式运行，CI 只跑快速集以缩短 push / PR 反馈。
-- **发布只用仓库自带的 `GITHUB_TOKEN`**，`permissions: contents: write` 仅授予
-  release job，不依赖任何外部密钥。
-- 版本号由 `make bump` 维护（同步 `pyproject.toml` 与 `app/__init__.py`），
-  打出的 tag 形如 `v0.1.1`，即触发发布。
 
 ### 6.5 Git 钩子（可选）
 

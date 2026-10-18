@@ -69,6 +69,13 @@ logs/
 .claude/
 .workbuddy/
 
+# --- E2E（Playwright）---
+.e2e/
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e-report/
+reports/
+
 # --- OS / editor ---
 Thumbs.db
 desktop.ini

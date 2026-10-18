@@ -2,7 +2,8 @@
 
 export function formatPct(value: number | null | undefined, digits = 2): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "--";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
+  // 0 不加正号：平盘显示 "0.00%" 比 "+0.00%" 更易读。
+  return `${value > 0 ? "+" : ""}${value.toFixed(digits)}%`;
 }
 
 export function formatNumber(value: number | null | undefined, digits = 2): string {

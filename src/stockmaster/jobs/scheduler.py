@@ -234,13 +234,16 @@ def scheduler_status() -> dict:
         schedule = meta["schedule"] or str(job.trigger)
         if job.id == "snapshot":
             schedule = f"每 {max(60, settings.alert_poll_seconds)} 秒（交易日）"
+        # 未启动的调度器里 job 处于 pending 状态，APScheduler 不会挂 next_run_time，
+        # 直接访问会 AttributeError（例如启动失败后仍被状态接口读到）。
+        next_run = getattr(job, "next_run_time", None)
         jobs.append(
             {
                 "id": job.id,
                 "label": meta["label"],
                 "description": meta["description"],
                 "schedule": schedule,
-                "next_run": str(job.next_run_time) if job.next_run_time else None,
+                "next_run": str(next_run) if next_run else None,
                 "trigger": str(job.trigger),
             }
         )

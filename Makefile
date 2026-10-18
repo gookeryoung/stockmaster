@@ -5,7 +5,7 @@
 # 且不引入额外脚本（help/clean/push 等均内联实现）。
 
 PACKAGE := stockmaster
-COV_THRESHOLD := 75
+COV_THRESHOLD := 80
 
 # dev/serve 目标绑定地址与端口，可在命令行覆盖：make serve DEV_PORT=9000
 DEV_HOST ?= 127.0.0.1
@@ -21,9 +21,9 @@ endif
 PYTEST_JOBS := $(if $(filter 0 1,$(CPUS)),2,$(if $(filter 2 3,$(CPUS)),4,8))
 
 .PHONY: help sync serve backend frontend-dev dev dev-stop init frontend-sync fs frontend-typecheck ft \
-        frontend-build fb build b clean c test test-slow test-all cov test-network lint format \
-        typecheck check-fast check bump patch minor major stats doctor data-quality acceptance \
-        pub push pack-cache-clean
+        frontend-build fb frontend-test frontend-cov e2e build b clean c test test-slow test-all cov \
+        test-network lint format typecheck check-fast check bump patch minor major stats doctor \
+        data-quality acceptance pub push pack-cache-clean
 
 # help 文本按控制台代码页选择输出编码（GBK=936 / UTF-8=65001），
 # 因此中文控制台与 UTF-8 终端都不会乱码；中文注释见下，无需额外脚本。
@@ -87,6 +87,18 @@ frontend-typecheck ft: | frontend-sync ## 前端 TypeScript 类型检查
 frontend-build fb: | frontend-sync ## 构建前端（Vite 产物输出到 frontend/dist，由后端托管）
 	cd frontend && pnpm build
 
+frontend-test: | frontend-sync ## 前端单元测试（vitest + Testing Library，不含覆盖率）
+	cd frontend && pnpm test
+
+frontend-cov: | frontend-sync ## 前端单测 + 覆盖率（核心模块门槛见 vitest.config.ts）
+	cd frontend && pnpm test:coverage
+
+# e2e 自行准备数据与服务：scripts/e2e_server.py 建临时库 → 走真实同步/指标/训练链路
+# → 以生产同构方式托管 frontend/dist；Playwright 的 webServer 负责启停。
+# 先 build 是因为后端托管的是构建产物（不是 Vite dev server）。
+e2e: frontend-build ## 端到端测试（Playwright + 真实后端 + 真实浏览器）
+	cd frontend && pnpm exec playwright test
+
 build b: frontend-build ## 构建分发包（前端产物 + wheel/sdist）
 	uv build
 
@@ -127,14 +139,15 @@ test-network: ## 运行网络契约测试（实盘数据源，需联网）
 acceptance: ## 端到端实盘验收（真实数据走完整链路：同步→指标→预测→回测→预警）
 	uv run python -u scripts/acceptance_live.py
 
-check: ## 运行全套门禁（lint + 前端类型检查 + 测试 + 覆盖率）
-	@$(MAKE) -j3 lint frontend-typecheck cov
+check: ## 运行全套门禁（lint + 前端类型检查 + 后端覆盖率 + 前端单测）
+	@$(MAKE) -j4 lint frontend-typecheck cov frontend-test
 
 # ── 清理与发布 ───────────────────────────────────────────────
 
 clean c: ## 清理构建产物与缓存（.venv / data / node_modules 始终保留）
 	rm -rf build/ dist/ wheels/ *.egg-info htmlcov/ .coverage .coverage.* coverage.xml docs/_build/ .tox/
 	rm -rf .ruff_cache/ .pyrefly_cache/ .mypy_cache/ .pytest_cache/
+	rm -rf reports/ .e2e/ frontend/coverage/ frontend/test-results/ frontend/playwright-report/ frontend/e2e-report/
 	find src tests -type d -name __pycache__ -exec rm -rf {} +
 	find src tests -type f -name "*.py[oc]" -delete
 
