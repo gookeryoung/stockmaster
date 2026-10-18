@@ -38,6 +38,44 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
+// Node 25+ 默认暴露一个无方法的原生 globalThis.localStorage 桩（未配置
+// --localstorage-file 时只有空对象），会遮蔽 jsdom 的实现，导致
+// localStorage.clear() 抛 TypeError。检测到破损实现时换成纯内存 Storage。
+class MemoryStorage {
+  private map = new Map<string, string>();
+  get length(): number {
+    return this.map.size;
+  }
+  clear(): void {
+    this.map.clear();
+  }
+  getItem(key: string): string | null {
+    return this.map.get(key) ?? null;
+  }
+  key(index: number): string | null {
+    return [...this.map.keys()][index] ?? null;
+  }
+  removeItem(key: string): void {
+    this.map.delete(key);
+  }
+  setItem(key: string, value: string): void {
+    this.map.set(key, String(value));
+  }
+}
+
+// 用 defineProperty 而不是 vi.stubGlobal：测试文件里的 vi.unstubAllGlobals()
+// 会把 stub 还原成 Node 原生坏桩，而直接覆盖属性不受其影响。
+if (typeof globalThis.localStorage?.clear !== "function") {
+  for (const key of ["localStorage", "sessionStorage"] as const) {
+    Object.defineProperty(globalThis, key, {
+      value: new MemoryStorage(),
+      configurable: true,
+      enumerable: true,
+      writable: true,
+    });
+  }
+}
+
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
