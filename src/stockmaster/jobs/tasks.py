@@ -33,6 +33,7 @@ __all__ = [
     "job_sync_daily",
     "job_sync_instruments",
     "job_train_models",
+    "job_turning_scan",
     "run_pipeline",
 ]
 
@@ -428,6 +429,47 @@ def job_scan_alerts(notify_channels: bool = True) -> dict:
     }
 
 
+def job_turning_scan() -> dict:
+    """A 类债核心顶底识别扫描（口径见 core/tpcore）。
+
+    对默认标的池做七维分位最短板扫描，命中「当日候选 / 当日右侧确认」时经
+    通知通道推送。信号是共享参考数据，走全局通道（与预警的工作区路由无关）。
+    """
+    from stockmaster.plugins.turning.services import tp_service
+
+    codes = _default_universe()[: tp_service.MAX_CODES]
+    if not codes:
+        return {"job": "turning", "scanned": 0}
+
+    with session_scope() as session:
+        items, _missing = tp_service.scan_codes(session, codes)
+    signals = [item for item in items if item["candidate"] or item["entry"]]
+    if not signals:
+        return {"job": "turning", "scanned": len(items), "signals": 0}
+
+    notifications = []
+    for item in signals:
+        kind = "右侧确认买入" if item["entry"] else "底部候选"
+        notifications.append(
+            Notification(
+                title=f"{item['code']} 顶底信号·{kind}",
+                body=(
+                    f"底部综合分 {item['bottom']}（阈值 {item['hold_thr']}），"
+                    f"闸门状态 {item['gate']}，顶部共振 {item['top_count']}"
+                ),
+                code=item["code"],
+            )
+        )
+    delivered = notify(notifications)
+    return {
+        "job": "turning",
+        "scanned": len(items),
+        "signals": len(signals),
+        "codes": [item["code"] for item in signals][:50],
+        "delivered": delivered,
+    }
+
+
 def job_snapshot_poll() -> dict:
     """Light intraday snapshot poll for watchlist names (alert support)."""
     from stockmaster.providers.registry import get_registry
@@ -484,6 +526,7 @@ def run_pipeline(*, train: bool = False, predict: bool = True) -> dict:
     if predict:
         steps.append(("predict", job_predict))
     steps.append(("alerts", job_scan_alerts))
+    steps.append(("turning", job_turning_scan))
 
     for name, func in steps:
         try:

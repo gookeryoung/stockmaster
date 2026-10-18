@@ -50,6 +50,11 @@ JOB_META: dict[str, dict[str, str]] = {
         "description": "收盘后评估全部启用规则，按标的与当日去重",
         "schedule": "交易日 17:00",
     },
+    "turning": {
+        "label": "顶底识别扫描",
+        "description": "A 类债核心模型（七维分位最短板）对标的池做顶底信号扫描",
+        "schedule": "交易日 17:15",
+    },
     "workspace_usage": {
         "label": "快照工作区用量",
         "description": "记录每个工作区当天的数据量/成员数，供趋势图与 CSV 导出使用",
@@ -160,6 +165,14 @@ def build_scheduler():
         _guarded("alerts", tasks.job_scan_alerts),
         CronTrigger(hour=17, minute=0, day_of_week="mon-fri"),
         id="alerts",
+        replace_existing=True,
+    )
+    # Turning-point scan after alerts: it reads the same landed bars and pushes
+    # its signals through the notification channels the alert scan just used.
+    scheduler.add_job(
+        _guarded("turning", tasks.job_turning_scan),
+        CronTrigger(hour=17, minute=15, day_of_week="mon-fri"),
+        id="turning",
         replace_existing=True,
     )
     # Usage snapshot after the alert scan: the day's write activity is over, so the
