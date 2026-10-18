@@ -58,6 +58,10 @@ test.describe("authentication", () => {
     await page.getByRole("menuitem", { name: "退出登录" }).click();
 
     await expect(page).toHaveURL(/\/login/);
+    // URL 先变、文档后换：此时 page.evaluate 会撞上
+    // "Execution context was destroyed, most likely because of a navigation"。
+    // 先等登录页真正渲染，再读 localStorage。
+    await expect(page.getByRole("form", { name: "登录" })).toBeVisible();
     const token = await page.evaluate(() => window.localStorage.getItem("sm.auth.token"));
     expect(token).toBeNull();
   });
