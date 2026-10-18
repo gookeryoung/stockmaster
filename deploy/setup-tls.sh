@@ -107,19 +107,25 @@ log "证书已安装：$CERTS/${CERT_PREFIX}-{fullchain,privkey}.pem"
 openssl x509 -in "$CERTS/${CERT_PREFIX}-fullchain.pem" -noout -subject -dates 2>/dev/null \
   | sed 's/^/      /' || true
 
-# ── 3. 安装 nginx 配置（带网关自动纠正 + 失败回滚）───────────────────
+# ── 3. 安装 nginx 配置（网络校验 + 失败回滚）─────────────────────────
 DEST="$EXTRA/stockmaster.conf"
 TMP="$(mktemp)"
 
-# 上游网关从 cndb-nginx 实际网络里取，避免硬编码网段失效
-GW="$(docker inspect "$NGINX_CONTAINER" \
-  --format '{{range $k,$v := .NetworkSettings.Networks}}{{$v.Gateway}}{{"\n"}}{{end}}' \
-  | head -1)"
-[ -n "$GW" ] || die "取不到 $NGINX_CONTAINER 的网关地址"
-GATEWAY_FILE="$CNDB_DIR/stockmaster-gateway"
-log "反代上游 = $GW:$APP_PORT（网关取自 $NGINX_CONTAINER 的网络）"
-sed -E "s|^([[:space:]]*server[[:space:]]+)[0-9.]+:${APP_PORT};|\1${GW}:${APP_PORT};|" \
-  "$SRC_CONF" > "$TMP"
+# 上游用容器名回源（见模板注释），前提是 app 容器与 nginx 在同一条 docker 网络上。
+# 曾经的做法是把上游改写成网关 IP（GW:8770），但 compose 默认只把 8770 发布到
+# 宿主 127.0.0.1，从容器经网关回连会稳定 502 —— 整站不可访问。这里改为直接在
+# 装机时校验网络关系，用容器名 + resolve，容器重建换 IP 也能自愈。
+APP_CONTAINER="${APP_CONTAINER:-stockmaster}"
+APP_NET="$(docker inspect "$APP_CONTAINER" \
+  --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null | head -1 || true)"
+NGINX_NETS="$(docker inspect "$NGINX_CONTAINER" \
+  --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null || true)"
+[ -n "$APP_NET" ] || die "取不到 $APP_CONTAINER 的 docker 网络（容器是否在运行？）"
+if ! printf '%s\n' "$NGINX_NETS" | grep -qx "$APP_NET"; then
+  die "$APP_CONTAINER 与 $NGINX_CONTAINER 不在同一 docker 网络（app 在 $APP_NET）——容器名无法解析，请先让 compose 的 cndb_net 指向该网络"
+fi
+log "反代上游 = ${APP_CONTAINER}:${APP_PORT}（容器名回源，nginx 会自动重解析）"
+cp "$SRC_CONF" "$TMP"
 
 BACKUP=""
 if [ -f "$DEST" ]; then
@@ -128,7 +134,6 @@ if [ -f "$DEST" ]; then
 fi
 install -m 644 "$TMP" "$DEST"
 rm -f "$TMP"
-printf '%s\n' "$GW" > "$GATEWAY_FILE"
 
 log "校验 nginx 配置"
 if ! docker exec "$NGINX_CONTAINER" nginx -t; then

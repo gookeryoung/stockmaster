@@ -5,6 +5,7 @@
 #   ./deploy/deploy.sh [版本号]      # 版本号缺省用 git describe --tags --always
 #
 # 流程：构建镜像（服务器本地）→ 预备份数据卷 → 重建容器 → 轮询健康检查
+#       → 重载同机 nginx 反代 → 公网自检
 #       失败时打印容器日志并自动回滚到上一个镜像。
 #
 # 环境变量（一般不用传）：
@@ -13,6 +14,9 @@
 #   HEALTH_TIMEOUT          健康探测上限秒数，默认 180
 #   HEALTH_PORT             健康探测端口，默认 8770
 #   IMAGE_REPO_OVERRIDE     镜像仓库名前缀，默认 stockmaster
+#   PUBLIC_URL              公网地址（如 https://stock.gookeryoung.cn），设置后部署末尾做一次公网自检
+#   NGINX_CONTAINER         承载 80/443 的 nginx 容器名，默认 cndb-nginx
+#   NGINX_EXTRA_CONF        借道反代配置路径，默认 /opt/cndb/deploy/nginx/extra/stockmaster.conf
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -139,6 +143,36 @@ if [ "$ok" != "1" ]; then
 fi
 
 log "部署成功：$(curl -fsS "$HEALTH_URL")"
-log "对外地址：http://<域名或公网IP>:${HEALTH_PORT}"
+
+# ── 5. 同机反代热更新 + 公网自检 ────────────────────────────────────
+# 本机 80/443 由 cndb 的 nginx 容器独占，StockMaster 的 HTTPS 借道它的
+# /etc/nginx/extra/stockmaster.conf。容器重建后必须让 nginx 重新加载，
+# 否则站点会一直 502（nginx 只在启动/reload 时读取配置与解析上游）。
+NGINX_CONTAINER="${NGINX_CONTAINER:-cndb-nginx}"
+NGINX_EXTRA_CONF="${NGINX_EXTRA_CONF:-/opt/cndb/deploy/nginx/extra/stockmaster.conf}"
+PUBLIC_URL="${PUBLIC_URL:-}"
+
+if [ -f "$NGINX_EXTRA_CONF" ] && docker inspect "$NGINX_CONTAINER" >/dev/null 2>&1; then
+  if grep -qE '^[[:space:]]*server[[:space:]]+([0-9]{1,3}\.){3}[0-9]{1,3}:' "$NGINX_EXTRA_CONF"; then
+    warn "$NGINX_EXTRA_CONF 仍在用固定 IP 回源：容器重建换 IP 后会 502，建议改用容器名 + resolve"
+  fi
+  if docker exec "$NGINX_CONTAINER" nginx -t >/dev/null 2>&1; then
+    docker exec "$NGINX_CONTAINER" nginx -s reload >/dev/null 2>&1 \
+      && log "已重载 $NGINX_CONTAINER 的 nginx 配置" \
+      || warn "nginx reload 失败，站点可能仍是旧配置"
+  else
+    warn "nginx 配置语法检查未通过，已跳过重载（站点可能仍是旧配置）"
+  fi
+fi
+
+if [ -n "$PUBLIC_URL" ]; then
+  if curl -fsSk -m 10 "${PUBLIC_URL%/}/api/v1/health" >/dev/null 2>&1; then
+    log "公网自检通过：${PUBLIC_URL}"
+  else
+    warn "公网自检失败：${PUBLIC_URL} 不可达（检查 nginx 反代 / 证书 / DNS）"
+  fi
+fi
+
+log "对外地址：http://<域名或公网IP>:${HEALTH_PORT}${PUBLIC_URL:+ 或 ${PUBLIC_URL}}"
 log "容器状态："
 "${DC[@]}" ps
