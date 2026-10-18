@@ -157,7 +157,10 @@ pub: ## 上传 dist/* 到 PyPI（需先 make build，并配置 PyPI 凭证）
 	uvx twine upload dist/*
 
 push: ## 推送当前分支到所有远程（含 tags）
-	@uv run python -c "import sys; sys.stdout.reconfigure(errors='replace'); import subprocess as sp; [print(f'Push to {r}...',flush=True) or (sp.run(['git','push',r],check=True) and sp.run(['git','push',r,'--tags'],check=True)) for r in sp.check_output(['git','remote'],text=True).split()]"
+	@uv run python scripts/push.py
+
+push-dry: ## 演练推送（git push --dry-run，不改远程）
+	@uv run python scripts/push.py --dry-run
 
 pack-cache-clean: ## 清理 uv 缓存（uv cache clean）
 	uv cache clean
