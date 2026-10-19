@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import BackupPanel from "../components/BackupPanel";
 import { formatCompact } from "../format";
+import { SYNC_STEPS, initialStepStates, runOneClickSync, type StepState } from "../oneClickSync";
 import { useViewState } from "../view";
 
 interface JobDef {
@@ -14,12 +15,23 @@ interface JobDef {
 }
 
 const CORE_JOBS: JobDef[] = [
-  { key: "calendar", label: "同步交易日历", hint: "刷新未来一年的开市日" },
-  { key: "instruments", label: "同步证券主数据", hint: "代码、名称、指数成分" },
-  { key: "index_daily", label: "同步指数日线", hint: "沪深300、中证500、上证指数" },
-  { key: "daily", label: "同步个股日线", hint: "按自选股/指数成分增量同步" },
+  ...SYNC_STEPS,
   { key: "analytics", label: "计算指标与因子", hint: "写入指标表与因子表（含横截面标准化）" },
 ];
+
+const STEP_STATUS_LABEL: Record<StepState["status"], string> = {
+  pending: "等待中",
+  running: "进行中",
+  done: "完成",
+  failed: "失败",
+};
+
+const STEP_STATUS_CLASS: Record<StepState["status"], string> = {
+  pending: "text-slate-500",
+  running: "text-sky-400",
+  done: "text-emerald-400",
+  failed: "text-red-400",
+};
 
 const AI_JOBS: JobDef[] = [
   { key: "train", label: "训练预测模型", hint: "默认梯度提升，1 日周期", params: { horizon: 1 } },
@@ -37,11 +49,14 @@ export default function Settings() {
   // hide the buttons instead of letting people click into a 403.
   const isAdmin = authUser?.role === "admin" || Boolean(authConfig && !authConfig.auth_enabled);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  const [oneClick, setOneClick] = useState<StepState[] | null>(null);
   const newWatchCode = useViewState((state) => state.settings.newWatchCode);
   const setSettings = useViewState((state) => state.setSettings);
 
   const status = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 20_000 });
   const watchlist = useQuery({ queryKey: ["watchlist"], queryFn: () => api.watchlist() });
+
+  const runningOneClick = Boolean(oneClick?.some((step) => step.status === "running"));
 
   const runJob = useMutation({
     mutationFn: ({ key, params }: { key: string; params?: Record<string, string | number | boolean> }) =>
@@ -52,6 +67,20 @@ export default function Settings() {
     },
     onError: (error) => setLastResult(`失败：${(error as Error).message}`),
   });
+
+  // 一键拉取：按依赖顺序逐个调用现有 job 接口，每步的进行中/完成/失败都实时刷新。
+  const startOneClick = async () => {
+    setLastResult(null);
+    setOneClick(initialStepStates());
+    const final = await runOneClickSync(api.runJob, setOneClick);
+    const failed = final.filter((step) => step.status === "failed");
+    setLastResult(
+      failed.length
+        ? `一键拉取结束，${failed.length} 个环节失败：${failed.map((s) => s.label).join("、")}`
+        : "一键拉取完成。",
+    );
+    queryClient.invalidateQueries();
+  };
 
   const addWatch = useMutation({
     mutationFn: (code: string) => api.addWatch(code),
@@ -86,6 +115,31 @@ export default function Settings() {
           任务为同步执行，完成后会返回结果。首次使用建议按顺序：交易日历 →
           证券主数据 → 日线 → 指标与因子。
         </p>
+
+        <div className="space-y-2 rounded-md border border-sky-900/50 bg-sky-950/20 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="btn" disabled={runningOneClick} onClick={startOneClick}>
+              {runningOneClick ? "拉取中…" : "一键拉取日线数据"}
+            </button>
+            <span className="text-xs text-slate-400">
+              按顺序执行「日历 → 主数据 → 指数日线 → 个股日线」，并逐步显示每一步的执行结果。
+            </span>
+          </div>
+          {oneClick && (
+            <ol className="space-y-1">
+              {oneClick.map((step, index) => (
+                <li key={step.key} className="flex items-start gap-2 text-xs">
+                  <span className="w-4 shrink-0 text-slate-500">{index + 1}.</span>
+                  <span className="w-28 shrink-0 text-slate-300">{step.label}</span>
+                  <span className={`w-12 shrink-0 ${STEP_STATUS_CLASS[step.status]}`}>
+                    {STEP_STATUS_LABEL[step.status]}
+                  </span>
+                  <span className="text-slate-400">{step.message}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
 
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
           {CORE_JOBS.map((job) => (

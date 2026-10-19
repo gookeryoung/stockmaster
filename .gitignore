@@ -36,6 +36,8 @@ frontend/.vite/
 frontend/coverage/
 frontend/.eslintcache
 *.tsbuildinfo
+# pnpm 本地内容寻址缓存（体积大、可再生）
+.pnpm-store/
 # 已使用 pnpm，不再使用 npm 的冗余 lock 文件
 frontend/package-lock.json
 package-lock.json
