@@ -422,10 +422,12 @@ export const api = {
     if (params.include_indices) search.set("include_indices", "true");
     return request<{ total: number; items: Instrument[] }>(`/stocks?${search}`);
   },
-  bars: (code: string, params: { adjust?: string; limit?: number } = {}) => {
+  bars: (code: string, params: { adjust?: string; limit?: number; start?: string; end?: string } = {}) => {
     const search = new URLSearchParams();
     search.set("adjust", params.adjust ?? "qfq");
     search.set("limit", String(params.limit ?? 500));
+    if (params.start) search.set("start", params.start);
+    if (params.end) search.set("end", params.end);
     return request<BarsResponse>(`/stocks/${code}/bars?${search}`);
   },
   overview: () => request<MarketOverview>("/market/overview"),

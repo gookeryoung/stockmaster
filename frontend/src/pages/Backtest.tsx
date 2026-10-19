@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { EChartsOption } from "echarts";
 import { api } from "../api";
 import EChart from "../components/EChart";
+import KlineChart, { type KlineMarker } from "../components/KlineChart";
 import { formatNumber, formatPct, sideColor } from "../format";
 import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
 import { useViewState } from "../view";
@@ -24,6 +25,48 @@ export default function Backtest() {
   const [result, setResult] = useState<BacktestResponse | null>(null);
 
   const history = useQuery({ queryKey: ["backtests"], queryFn: api.backtests });
+
+  // 回测结果的买卖点 K 线图：只在成交过的标的中选择，区间取自净值曲线。
+  const tradedCodes = useMemo(() => {
+    const seen: string[] = [];
+    for (const trade of result?.trades ?? []) {
+      if (trade.shares > 0 && !seen.includes(trade.code)) seen.push(trade.code);
+    }
+    return seen;
+  }, [result]);
+
+  const [chartCode, setChartCode] = useState("");
+  useEffect(() => {
+    if (!tradedCodes.length) {
+      setChartCode("");
+      return;
+    }
+    setChartCode((current) => (tradedCodes.includes(current) ? current : tradedCodes[0]));
+  }, [tradedCodes]);
+
+  const chartWindow =
+    result && result.equity.length
+      ? { start: result.equity[0].trade_date, end: result.equity[result.equity.length - 1].trade_date }
+      : null;
+
+  const chartBars = useQuery({
+    queryKey: ["backtest-bars", chartCode, chartWindow?.start, chartWindow?.end],
+    queryFn: () =>
+      api.bars(chartCode, {
+        adjust: "qfq",
+        limit: 20000,
+        start: chartWindow?.start,
+        end: chartWindow?.end,
+      }),
+    enabled: Boolean(chartCode) && Boolean(chartWindow),
+  });
+
+  const chartMarkers = useMemo<KlineMarker[]>(() => {
+    if (!chartCode) return [];
+    return (result?.trades ?? [])
+      .filter((trade) => trade.code === chartCode && trade.shares > 0 && trade.price > 0)
+      .map((trade) => ({ trade_date: trade.trade_date, price: trade.price, side: trade.side }));
+  }, [result, chartCode]);
 
   const run = useMutation({
     mutationFn: () =>
@@ -249,6 +292,41 @@ export default function Backtest() {
             <div className="card">
               <div className="mb-2 text-sm font-medium text-slate-300">净值与回撤曲线</div>
               <EChart option={equityOption} height="clamp(320px, 58vh, 520px)" />
+            </div>
+          )}
+
+          {tradedCodes.length > 0 && (
+            <div className="card">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-medium text-slate-300">买卖点 K 线图</div>
+                <select
+                  className="input"
+                  aria-label="K线图标的"
+                  value={chartCode}
+                  onChange={(e) => setChartCode(e.target.value)}
+                >
+                  {tradedCodes.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {chartBars.isError ? (
+                <div className="text-sm text-amber-300">{(chartBars.error as Error).message}</div>
+              ) : chartBars.data?.bars?.length ? (
+                <KlineChart
+                  bars={chartBars.data.bars}
+                  markers={chartMarkers}
+                  showMacd={false}
+                  height="clamp(340px, 60vh, 540px)"
+                />
+              ) : (
+                !chartBars.isLoading && <div className="text-sm text-slate-500">暂无该标的的日线数据。</div>
+              )}
+              <p className="mt-2 text-xs text-slate-500">
+                红三角为买入、绿三角为卖出（前复权价），仅标注回测区间内该标的的成交点。
+              </p>
             </div>
           )}
 

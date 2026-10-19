@@ -16,6 +16,8 @@ test.describe("backtest", () => {
     await expect(page.getByText("最大回撤")).toBeVisible();
     await expect(page.getByText("夏普")).toBeVisible();
     await expect(page.getByText("成交笔数")).toBeVisible();
+    // 买卖点 K 线图：成交过标的时应在结果区渲染出来
+    await expect(page.getByText("买卖点 K 线图")).toBeVisible();
     // 净值曲线渲染为 canvas
     await expect(page.locator("canvas").first()).toBeVisible();
   });

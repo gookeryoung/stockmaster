@@ -6,9 +6,17 @@
  */
 
 import { useMemo } from "react";
-import type { EChartsOption } from "echarts";
+import type { EChartsOption, SeriesOption } from "echarts";
 import EChart from "./EChart";
 import type { Bar, IndicatorSnapshot } from "../types";
+
+/** 叠加在 K 线上的买卖点（回测成交明细）。 */
+export interface KlineMarker {
+  /** `YYYY-MM-DD`，需与某根 bar 的日期一致才会落点。 */
+  trade_date: string;
+  price: number;
+  side: string;
+}
 
 interface Props {
   bars: Bar[];
@@ -16,9 +24,11 @@ interface Props {
   /** 数字按 px 处理；也接受 clamp()/vh 等 CSS 长度，便于手机端自适应。 */
   height?: number | string;
   showMacd?: boolean;
+  /** 标注买卖点：买为红三角（上），卖为绿三角（下）。 */
+  markers?: KlineMarker[];
 }
 
-export default function KlineChart({ bars, indicators, height = 460, showMacd = true }: Props) {
+export default function KlineChart({ bars, indicators, height = 460, showMacd = true, markers }: Props) {
   const option = useMemo<EChartsOption>(() => {
     const dates = bars.map((b) => b.trade_date);
     // ECharts candlestick expects [open, close, low, high].
@@ -32,7 +42,7 @@ export default function KlineChart({ bars, indicators, height = 460, showMacd = 
       },
     }));
 
-    const series: NonNullable<EChartsOption["series"]> = [
+    const series: SeriesOption[] = [
       {
         name: "K线",
         type: "candlestick",
@@ -152,14 +162,22 @@ export default function KlineChart({ bars, indicators, height = 460, showMacd = 
       });
     }
 
+    // Buy/sell markers land on the candle grid; a marker whose date is not in the
+    // visible bars is skipped rather than drawn at a bogus index.
+    const markerSeries = splitMarkerSeries(dates, markers ?? []);
+    series.push(...markerSeries);
+
     const start = bars.length > 150 ? Math.round((1 - 150 / bars.length) * 100) : 0;
+
+    const legendData = showMacd ? ["K线", "MA20", "MA60", "DIF"] : ["K线", "MA20", "MA60"];
+    if (markerSeries.length) legendData.push("买点", "卖点");
 
     return {
       backgroundColor: "transparent",
       animation: false,
       tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
       legend: {
-        data: showMacd ? ["K线", "MA20", "MA60", "DIF"] : ["K线", "MA20", "MA60"],
+        data: legendData,
         textStyle: { color: "#94a3b8" },
         top: 0,
       },
@@ -180,9 +198,49 @@ export default function KlineChart({ bars, indicators, height = 460, showMacd = 
       ],
       series,
     };
-  }, [bars, indicators, showMacd]);
+  }, [bars, indicators, showMacd, markers]);
 
   return <EChart option={option} height={height} />;
+}
+
+/** Build the buy/sell scatter series, skipping markers with no matching bar. */
+function splitMarkerSeries(dates: string[], markers: KlineMarker[]): SeriesOption[] {
+  const buy: Array<[number, number]> = [];
+  const sell: Array<[number, number]> = [];
+  for (const marker of markers) {
+    const index = dates.indexOf(marker.trade_date);
+    if (index < 0 || !Number.isFinite(marker.price)) continue;
+    (marker.side === "sell" ? sell : buy).push([index, marker.price]);
+  }
+  const result: SeriesOption[] = [];
+  if (buy.length) {
+    result.push({
+      name: "买点",
+      type: "scatter",
+      data: buy,
+      symbol: "triangle",
+      symbolSize: 12,
+      itemStyle: { color: "#ef4444" },
+      xAxisIndex: 0,
+      yAxisIndex: 0,
+      z: 10,
+    });
+  }
+  if (sell.length) {
+    result.push({
+      name: "卖点",
+      type: "scatter",
+      data: sell,
+      symbol: "triangle",
+      symbolRotate: 180,
+      symbolSize: 12,
+      itemStyle: { color: "#22c55e" },
+      xAxisIndex: 0,
+      yAxisIndex: 0,
+      z: 10,
+    });
+  }
+  return result;
 }
 
 function movingAverage(values: number[], window: number): Array<number | null> {
