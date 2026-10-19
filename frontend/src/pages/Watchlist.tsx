@@ -269,12 +269,6 @@ export default function Watchlist() {
     enabled: referenceChecksEnabled,
     staleTime: 0,
   });
-  const sampleConfigsQuery = useQuery({
-    queryKey: ["watchlist-ref-samples"],
-    queryFn: () => api.sampleConfigs(),
-    enabled: referenceChecksEnabled,
-    staleTime: 0,
-  });
   const alertRefs = useMemo(
     () =>
       (alertRulesQuery.data ?? []).filter(
@@ -282,15 +276,8 @@ export default function Watchlist() {
       ),
     [alertRulesQuery.data, listName],
   );
-  const sampleRefs = useMemo(
-    () =>
-      (sampleConfigsQuery.data ?? []).filter(
-        (sample) => sample.universe_type === "watchlist" && sample.universe_value === listName,
-      ),
-    [sampleConfigsQuery.data, listName],
-  );
-  const refCheckLoading = referenceChecksEnabled && (alertRulesQuery.isFetching || sampleConfigsQuery.isFetching);
-  const refCheckFailed = alertRulesQuery.isError || sampleConfigsQuery.isError;
+  const refCheckLoading = referenceChecksEnabled && alertRulesQuery.isFetching;
+  const refCheckFailed = alertRulesQuery.isError;
 
   const quoteMap = useMemo(() => {
     const map = new Map<string, QuoteRow>();
@@ -1403,19 +1390,19 @@ export default function Watchlist() {
               <p className="mt-1 text-[11px] text-slate-500">
                 {listDialogMode === "new"
                   ? "空清单只保存在本地，加入第一只股票后才落库。"
-                  : "引用旧清单名的预警规则/样本配置不会自动跟随。"}
+                  : "引用旧清单名的预警规则不会自动跟随。"}
               </p>
               {listDialogMode === "rename" && (
                 <div className="mt-2 rounded-md border border-amber-900/60 bg-amber-950/40 px-2 py-2 text-[11px] leading-relaxed text-amber-300">
                   {refCheckLoading ? (
-                    "正在检查预警规则/样本配置引用…"
-                  ) : refCheckFailed && alertRefs.length === 0 && sampleRefs.length === 0 ? (
-                    "引用检查失败，无法确认是否存在预警/样本引用；重命名后请手动检查。"
+                    "正在检查预警规则引用…"
+                  ) : refCheckFailed && alertRefs.length === 0 ? (
+                    "引用检查失败，无法确认是否存在预警引用；重命名后请手动检查。"
                   ) : (
                     <>
-                      {alertRefs.length > 0 || sampleRefs.length > 0
-                        ? `有 ${alertRefs.length} 条预警规则 / ${sampleRefs.length} 个样本配置引用该清单，重命名不会自动更新它们，请记得手动修改。`
-                        : "未发现预警规则或样本配置引用该清单。"}
+                      {alertRefs.length > 0
+                        ? `有 ${alertRefs.length} 条预警规则引用该清单，重命名不会自动更新它们，请记得手动修改。`
+                        : "未发现预警规则引用该清单。"}
                       {refCheckFailed && " 引用检查失败，无法确认是否存在引用。"}
                     </>
                   )}
@@ -1703,7 +1690,7 @@ export default function Watchlist() {
             </h2>
             <div className="mt-2 space-y-1 text-xs leading-relaxed text-slate-400">
               {refCheckLoading ? (
-                <p>正在检查预警规则与样本配置引用，请稍候…</p>
+                <p>正在检查预警规则引用，请稍候…</p>
               ) : (
                 <>
                   <p>
@@ -1717,9 +1704,6 @@ export default function Watchlist() {
                   <p className="text-amber-300">
                     请先到预警页把这些规则的清单范围改到其他清单，或删除/停用规则后再删除本清单。
                   </p>
-                  {sampleRefs.length > 0 && (
-                    <p className="text-amber-300">另有 {sampleRefs.length} 个样本配置引用该清单。</p>
-                  )}
                   {refCheckFailed && (
                     <p className="text-amber-300">引用检查失败，无法确认完整引用情况。</p>
                   )}
@@ -1757,22 +1741,15 @@ export default function Watchlist() {
                 ? "该草稿清单还没有落库，删除只影响本地，不会改动服务端数据。"
                 : `将删除「${listName}」并移出 ${items.length} 只自选（备注一并删除）；行情、预警规则、回测历史不受影响。`}
             </p>
-            {refCheckLoading && <p className="mt-1">正在检查预警规则/样本配置引用…</p>}
-            {sampleRefs.length > 0 && (
-              <p className="mt-1 text-amber-300">
-                有 {sampleRefs.length} 个样本配置引用该清单；删除后它们的标的池会为空。
-              </p>
-            )}
+            {refCheckLoading && <p className="mt-1">正在检查预警规则引用…</p>}
             {refCheckFailed && (
-              <p className="mt-1 text-amber-300">引用检查失败，无法确认是否被预警/样本引用；可稍后重试。</p>
+              <p className="mt-1 text-amber-300">引用检查失败，无法确认是否被预警引用；可稍后重试。</p>
             )}
           </>
         }
         confirmLabel="删除清单"
         danger
         busy={deleteBusy}
-        requireAcknowledge={sampleRefs.length > 0}
-        acknowledgeLabel="我已了解上述引用影响，继续删除"
         onCancel={() => {
           if (!deleteBusy) setDeleteDialogOpen(false);
         }}

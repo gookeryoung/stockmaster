@@ -32,7 +32,6 @@ test.describe("dashboard and navigation", () => {
       ["行情", /\/market$/],
       ["自选", /\/watchlist$/],
       ["分析", /\/analyze$/],
-      ["策略", /\/strategy$/],
       ["预测", /\/predict$/],
       ["回测", /\/backtest$/],
       ["预警", /\/alerts$/],

@@ -25,10 +25,7 @@ from sqlalchemy.orm import Session
 from stockmaster.config import settings
 from stockmaster.db.models import (
     AlertRule,
-    AlgorithmConfig,
     BacktestRun,
-    SampleConfig,
-    ScreeningConfig,
     WatchlistItem,
     WorkspaceChannel,
     WorkspaceMember,
@@ -43,9 +40,6 @@ USAGE_COUNTERS: dict[str, type] = {
     "watchlist_items": WatchlistItem,
     "alert_rules": AlertRule,
     "backtest_runs": BacktestRun,
-    "screening_configs": ScreeningConfig,
-    "sample_configs": SampleConfig,
-    "algorithm_configs": AlgorithmConfig,
     "channels": WorkspaceChannel,
 }
 
@@ -54,9 +48,6 @@ USAGE_LABELS: dict[str, str] = {
     "watchlist_items": "自选股",
     "alert_rules": "预警规则",
     "backtest_runs": "回测记录",
-    "screening_configs": "选股配置",
-    "sample_configs": "样本配置",
-    "algorithm_configs": "算法配置",
     "channels": "通知通道",
 }
 
@@ -70,20 +61,12 @@ DATA_COUNTERS: dict[str, type] = {
 
 
 def limits() -> dict[str, int]:
-    """Current per-workspace limits (``0`` = unlimited).
-
-    三类策略配置共用一个 ``workspace_max_strategy_configs``：它们在界面上是并列的
-    「命名资源」，分开配六个变量只会让运维多记三个名字，收益很小。
-    """
-    strategy_limit = int(settings.workspace_max_strategy_configs)
+    """Current per-workspace limits (``0`` = unlimited)."""
     return {
         "members": int(settings.workspace_max_members),
         "watchlist_items": int(settings.workspace_max_watchlist_items),
         "alert_rules": int(settings.workspace_max_alert_rules),
         "backtest_runs": int(settings.workspace_max_backtest_runs),
-        "screening_configs": strategy_limit,
-        "sample_configs": strategy_limit,
-        "algorithm_configs": strategy_limit,
         "channels": int(settings.workspace_max_channels),
     }
 
@@ -100,7 +83,7 @@ def usage(session: Session, workspace_id: int) -> dict[str, int]:
 
 
 def data_total(session: Session, workspace_id: int) -> int:
-    """单个工作区的「数据量」：自选/规则/回测/三类策略配置，不含成员与通道。"""
+    """单个工作区的「数据量」：自选/规则/回测，不含成员与通道。"""
     return sum(_count(session, model, workspace_id) for model in DATA_COUNTERS.values())
 
 

@@ -79,14 +79,10 @@ API 参考
    :members:
    :undoc-members:
 
-预警与策略
-~~~~~~~~~~
+预警
+~~~~
 
 .. automodule:: stockmaster.plugins.alerts
-   :members:
-   :undoc-members:
-
-.. automodule:: stockmaster.plugins.strategy
    :members:
    :undoc-members:
 

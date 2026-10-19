@@ -10,7 +10,7 @@ const SECTIONS = [
   { id: "overview", label: "概览" },
   { id: "members", label: "成员" },
   { id: "notifications", label: "通知" },
-  { id: "usage", label: "用量与策略" },
+  { id: "usage", label: "用量" },
 ] as const;
 
 export default function WorkspaceSectionNav() {

@@ -112,8 +112,6 @@ class Settings(BaseSettings):
     workspace_max_watchlist_items: int = 0
     workspace_max_alert_rules: int = 0
     workspace_max_backtest_runs: int = 0
-    # 选股 / 样本 / 算法三类策略配置共用此上限（每类分别计数）。
-    workspace_max_strategy_configs: int = 0
     workspace_max_channels: int = 0
     # --- Maintenance ---
     # 启动时自动把库结构带到最新（create_all + Alembic）。生产若要求「先显式迁移
@@ -155,7 +153,6 @@ class Settings(BaseSettings):
         "workspace_max_watchlist_items",
         "workspace_max_alert_rules",
         "workspace_max_backtest_runs",
-        "workspace_max_strategy_configs",
         "workspace_max_channels",
     )
     @classmethod

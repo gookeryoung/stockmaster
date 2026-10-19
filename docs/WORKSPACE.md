@@ -72,10 +72,6 @@ workspace_id: Mapped[int] = mapped_column(Integer, default=WORKSPACE_UNASSIGNED,
 
 同名清单同一只股票，现在允许在不同工作区各存一份（之前按用户也各存一份）。
 
-选股 / 样本 / 算法三类策略配置同样是工作区私有数据（`workspace_id` 归属同上、工作区内
-`name` 唯一），它们如何被命名复用、谁能运行与训练见
-[`docs/STRATEGY_CONFIGS.md`](STRATEGY_CONFIGS.md)。
-
 ### 共享参考数据不动
 
 行情/指标/模型（类别 A）与同步任务/审计（类别 B）仍然全局一份。
@@ -175,10 +171,10 @@ def require_editor(...) -> WorkspaceCtx:
 
 | 字段 | 说明 |
 |---|---|
-| `usage` | 8 类用量：成员、自选股、预警规则、回测记录、选股/样本/算法配置、通知通道 |
+| `usage` | 5 类用量：成员、自选股、预警规则、回测记录、通知通道 |
 | `limits` | 与 `usage` 同键的当前上限；`0` = 不限 |
 | `labels` | 资源的中文名，前端直接展示，避免在 TS 里维护第二份字典 |
-| `total` | 上述 8 类用量之和（注意包含成员与通道，不是「数据行数」） |
+| `total` | 上述 5 类用量之和（注意包含成员与通道，不是「数据行数」） |
 
 只统计工作区私有数据 + 成员 + 通道；行情、指标、因子、模型是全站共享参考数据，不计入任何工作区的用量。前端「工作区」页新增「用量与配额」卡片，所有成员可见（只读）。
 
@@ -190,7 +186,6 @@ def require_editor(...) -> WorkspaceCtx:
 | `watchlist_items` | 新增自选前（**幂等更新已有条目不占额度**） |
 | `alert_rules` | 新建规则前（参数 422 校验优先） |
 | `backtest_runs` | 回测请求进入 CPU 计算前 |
-| `screening_configs` / `sample_configs` / `algorithm_configs` | 三类配置共用 `SM_WORKSPACE_MAX_STRATEGY_CONFIGS`，**按表分别计数**（各可建 N 条） |
 | `channels` | owner 新建通知通道前 |
 
 拒写行为：`409` + 响应头 `X-Auth-Error: quota_exceeded`，`detail` 含资源名与上限。关键语义：
@@ -205,7 +200,7 @@ def require_editor(...) -> WorkspaceCtx:
 
 **用户页与管理员统计列**（同一数据口径，无新表/新端点）：
 
-- `WorkspaceOut.data_total`：每个工作区的「数据量」——自选 + 预警规则 + 回测 + 三类策略配置，**不含成员与通知通道**。`GET /workspaces` 会把「我参与的工作区」连同 data_total 一次返回（批量 GROUP BY，不做 N×6 查询），用户页据此展示「参与工作区数 / 个人工作区数据量 / 可访问数据合计」。
+- `WorkspaceOut.data_total`：每个工作区的「数据量」——自选 + 预警规则 + 回测，**不含成员与通知通道**。`GET /workspaces` 会把「我参与的工作区」连同 data_total 一次返回（批量 GROUP BY，不做 N×6 查询），用户页据此展示「参与工作区数 / 个人工作区数据量 / 可访问数据合计」。
 - 管理员 `GET /users` 的每条用户额外返回：`workspace_count`（参与工作区数）、`owned_workspace_count`（`workspaces.owner_id` 计数，含个人工作区）、`personal_data_total`（其 personal 工作区的 data_total）。管理员用户列表直接渲染为统计列。
 - 共享工作区的数据计入「可访问数据合计」，但不计入任何用户的 `personal_data_total` —— 它属于工作区，不属于某个账号。
 - 隔离关闭时 `/workspaces` 为空、用户页不展示概览；管理员列退化为 0。
@@ -348,7 +343,7 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
   两个工作区各收各的通知；停用/无通道/`SM_ALERT_GLOBAL_FALLBACK` 的三种分支；
   `workspace_id=0` 走全局；`job_scan_alerts` 把触发所属工作区透传到 Notification。
 - `tests/test_workspace_stats_quota.py`：用量统计（usage/limits/labels/total、成员可读、
-  非成员 404）与超限矩阵 —— 自选/规则/通道/成员/策略配置超限均 409 +
+  非成员 404）与超限矩阵 —— 自选/规则/通道/成员超限均 409 +
   `X-Auth-Error: quota_exceeded`；删除后释放额度；`SM_WORKSPACE_MAX_*=0` 或隔离关闭时不限制。
 - `tests/test_user_stats.py`：用户页/管理员统计 —— `GET /workspaces` 的 data_total 口径
   （不含成员/通道）、`GET /users` 三个统计字段、权限（非管理员 403）、`q` 过滤后统计正确、
@@ -381,7 +376,6 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
 | `SM_WORKSPACE_MAX_WATCHLIST_ITEMS` | `0` | 工作区自选股条数上限；`0` = 不限 |
 | `SM_WORKSPACE_MAX_ALERT_RULES` | `0` | 工作区预警规则上限；`0` = 不限 |
 | `SM_WORKSPACE_MAX_BACKTEST_RUNS` | `0` | 工作区回测记录上限；`0` = 不限 |
-| `SM_WORKSPACE_MAX_STRATEGY_CONFIGS` | `0` | 选股/样本/算法配置各自的上限（按表分别计数）；`0` = 不限 |
 | `SM_WORKSPACE_MAX_CHANNELS` | `0` | 工作区通知通道上限；`0` = 不限 |
 
 配额变量在隔离关闭时一律不生效；超限返回 409 + `X-Auth-Error: quota_exceeded`。
@@ -404,7 +398,7 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
   webhook/Bark 通道、按工作区路由投递、`SM_ALERT_GLOBAL_FALLBACK` 兜底开关）；
 - **配额与统计**：~~工作区级用量统计与可选配额、用户页数据概览、管理员用户统计列、
   管理员工作区总览页~~ **已实现** —— 见 §5.2（`GET /workspaces/{id}/stats`、
-  6 个 `SM_WORKSPACE_MAX_*`、`WorkspaceOut.data_total`、管理员 `GET /users` 的 3 个
+  5 个 `SM_WORKSPACE_MAX_*`、`WorkspaceOut.data_total`、管理员 `GET /users` 的 3 个
   统计字段、`/workspace` 页的「全部工作区」总览）；
 - ~~工作区级预警参数覆盖~~：**已实现** —— 见 §5.3（`0006_workspace_alert_policies`、
   只收紧语义、owner 配置、引擎扫描与去重生效）；
@@ -412,11 +406,6 @@ stockmaster workspace claim --id 2 --dry-run     # 把 workspace_id=0 的数据�
   「同一工作区成员全量共享、角色只分读写」的语义，不引入清单级 private/shared 可见性；
   也不引入回测 `visibility`/`share_token`，回测结果只在所属工作区内可见（跨工作区 404
   的隔离语义不放宽）。`USER_ISOLATION.md` 中的对应待确认项仅保留为历史记录。
-- ~~工作区级策略配置~~：**已实现** —— 选股 / 样本 / 算法三类命名配置随工作区隔离与角色权限，
-  支持 `viewer` 只读运行；详见 [`docs/STRATEGY_CONFIGS.md`](STRATEGY_CONFIGS.md)。三张新表
-  （`screening_configs` / `sample_configs` / `algorithm_configs`）已加入 `DATA_MODELS`：
-  删除工作区时计入 `data_counts()` 与 `purge` 清理，`workspace claim` 也能认领
-  `workspace_id = 0` 的未归属配置（同名冲突计入 `duplicates_skipped`）。
 
 ### P3 可选增强（已实现，2026-10-17，见 §5.4）
 

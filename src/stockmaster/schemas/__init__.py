@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Adjust = Literal["raw", "qfq", "hfq"]
 
@@ -236,8 +236,6 @@ class TrainResponse(BaseModel):
 class BacktestRequest(BaseModel):
     strategy: Literal["buy_hold", "score_top_n", "prediction_top_n", "ma_cross"] = "buy_hold"
     codes: list[str] = Field(default_factory=list)
-    # 选股配置：codes 为空时用它解析标的池（工作区作用域，跨工作区 404）。
-    screening_id: int | None = None
     start: date | None = None
     end: date | None = None
     initial_cash: float = Field(default=1_000_000.0, gt=0)
@@ -304,176 +302,6 @@ class BacktestSummary(BaseModel):
     status: str
     created_at: datetime | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
-
-
-# --------------------------------------------------------------------------- #
-# Strategy configuration (workspace-scoped presets: 选股 / 样本 / 算法)
-# --------------------------------------------------------------------------- #
-
-
-ScreeningOp = Literal[">=", "<=", ">", "<", "=="]
-
-
-class ScreeningCondition(BaseModel):
-    """一条逐字段筛选条件，如 ``mom_20 >= 0.5``。"""
-
-    field: str = Field(min_length=1, max_length=32)
-    op: ScreeningOp = ">="
-    value: float
-
-
-class ScreeningParams(BaseModel):
-    """选股参数。字段全部可缺省，缺省值就是「不过滤」。"""
-
-    min_score: float | None = None
-    max_vol: float | None = Field(default=None, ge=0)
-    min_amount_log: float | None = None
-    exclude_st: bool = True
-    boards: list[str] = Field(default_factory=list)
-    conditions: list[ScreeningCondition] = Field(default_factory=list)
-    order_by: str = "score"
-    direction: Literal["asc", "desc"] = "desc"
-    limit: int = Field(default=50, ge=1, le=500)
-
-
-class ScreeningConfigIn(BaseModel):
-    name: str = Field(min_length=1, max_length=64)
-    description: str = Field(default="", max_length=256)
-    params: ScreeningParams = Field(default_factory=ScreeningParams)
-
-
-class ScreeningConfigPatch(BaseModel):
-    """PATCH 语义：只改传了的字段；``params`` 若传则整体替换（不做深合并）。"""
-
-    name: str | None = Field(default=None, min_length=1, max_length=64)
-    description: str | None = Field(default=None, max_length=256)
-    params: ScreeningParams | None = None
-
-
-class ScreeningConfigOut(BaseModel):
-    id: int
-    workspace_id: int
-    name: str
-    description: str = ""
-    params: ScreeningParams
-    created_by: int | None = None
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-
-
-class ScreeningRunResult(BaseModel):
-    trade_date: date | None = None
-    count: int = 0
-    items: list[ScreenRow] = Field(default_factory=list)
-
-
-SampleUniverseType = Literal["watchlist", "screening", "codes", "default"]
-
-
-class SampleConfigIn(BaseModel):
-    name: str = Field(min_length=1, max_length=64)
-    description: str = Field(default="", max_length=256)
-    universe_type: SampleUniverseType = "default"
-    universe_value: str = Field(default="", max_length=512)
-    start_date: date | None = None
-    end_date: date | None = None
-    lookback_days: int | None = Field(default=None, ge=1, le=365 * 20)
-    horizon: int = Field(default=5, ge=1, le=60)
-    min_bars: int = Field(default=60, ge=10, le=2500)
-
-    @model_validator(mode="after")
-    def _one_window(self):
-        # 显式日期与「相对回看天数」是两套互斥语义：同时给会让「以哪个为准」变成
-        # 隐式约定，宁可现在 422 也不让两边算出不同样本。
-        if self.lookback_days is not None and (self.start_date is not None or self.end_date is not None):
-            raise ValueError("lookback_days 不能与 start_date/end_date 同时设置")
-        if self.end_date is not None and self.start_date is not None and self.end_date < self.start_date:
-            raise ValueError("end_date 不能早于 start_date")
-        return self
-
-
-class SampleConfigPatch(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=64)
-    description: str | None = Field(default=None, max_length=256)
-    universe_type: SampleUniverseType | None = None
-    universe_value: str | None = Field(default=None, max_length=512)
-    start_date: date | None = None
-    end_date: date | None = None
-    lookback_days: int | None = Field(default=None, ge=1, le=365 * 20)
-    horizon: int | None = Field(default=None, ge=1, le=60)
-    min_bars: int | None = Field(default=None, ge=10, le=2500)
-
-
-class SampleConfigOut(BaseModel):
-    id: int
-    workspace_id: int
-    name: str
-    description: str = ""
-    universe_type: SampleUniverseType
-    universe_value: str = ""
-    start_date: date | None = None
-    end_date: date | None = None
-    lookback_days: int | None = None
-    horizon: int = 5
-    min_bars: int = 60
-    created_by: int | None = None
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-
-
-class SampleResolveResult(BaseModel):
-    codes: list[str] = Field(default_factory=list)
-    count: int = 0
-    start: date | None = None
-    end: date | None = None
-    horizon: int = 5
-
-
-AlgorithmName = Literal["hist_gbdt", "random_forest", "logistic"]
-
-
-class AlgorithmConfigIn(BaseModel):
-    name: str = Field(min_length=1, max_length=64)
-    description: str = Field(default="", max_length=256)
-    algo: AlgorithmName = "hist_gbdt"
-    params: dict[str, float | int | bool] = Field(default_factory=dict)
-    sample_id: int | None = None
-    horizon: int = Field(default=5, ge=1, le=60)
-    test_fraction: float | None = Field(default=None, gt=0.0, lt=1.0)
-
-
-class AlgorithmConfigPatch(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=64)
-    description: str | None = Field(default=None, max_length=256)
-    algo: AlgorithmName | None = None
-    params: dict[str, float | int | bool] | None = None
-    sample_id: int | None = None
-    horizon: int | None = Field(default=None, ge=1, le=60)
-    test_fraction: float | None = Field(default=None, gt=0.0, lt=1.0)
-
-
-class AlgorithmConfigOut(BaseModel):
-    id: int
-    workspace_id: int
-    name: str
-    description: str = ""
-    algo: AlgorithmName
-    params: dict[str, float | int | bool] = Field(default_factory=dict)
-    sample_id: int | None = None
-    horizon: int = 5
-    test_fraction: float | None = None
-    created_by: int | None = None
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-
-
-class AlgorithmTrainResult(BaseModel):
-    model_id: str
-    algo: str
-    horizon: int
-    metrics: dict[str, Any] = Field(default_factory=dict)
-    n_train: int = 0
-    n_test: int = 0
 
 
 # --------------------------------------------------------------------------- #

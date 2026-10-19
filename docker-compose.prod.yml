@@ -83,7 +83,6 @@ services:
       - SM_WORKSPACE_MAX_WATCHLIST_ITEMS=${SM_WORKSPACE_MAX_WATCHLIST_ITEMS:-0}
       - SM_WORKSPACE_MAX_ALERT_RULES=${SM_WORKSPACE_MAX_ALERT_RULES:-0}
       - SM_WORKSPACE_MAX_BACKTEST_RUNS=${SM_WORKSPACE_MAX_BACKTEST_RUNS:-0}
-      - SM_WORKSPACE_MAX_STRATEGY_CONFIGS=${SM_WORKSPACE_MAX_STRATEGY_CONFIGS:-0}
       - SM_WORKSPACE_MAX_CHANNELS=${SM_WORKSPACE_MAX_CHANNELS:-0}
       # ── 数据库迁移与备份 ──────────────────────────────────────
       # 启动自动迁移；设 false 则要求先执行 `python -m stockmaster.cli db upgrade`

@@ -1,4 +1,4 @@
-/** 用量与配额：8 类资源表 + 合计、30 天趋势（图 + 数据表替代）、CSV 导出、
+/** 用量与配额：5 类资源表 + 合计、30 天趋势（图 + 数据表替代）、CSV 导出、
  * 以及工作区预警策略（独立卡片）。
  *
  * 用量只读，所有成员可见；配额默认不限（limits=0），真正拦截在服务端写路径。
@@ -203,7 +203,6 @@ export default function UsageSection({
                         <th className="th text-right">自选</th>
                         <th className="th text-right">规则</th>
                         <th className="th text-right">回测</th>
-                        <th className="th text-right">配置合计</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -215,7 +214,6 @@ export default function UsageSection({
                           <td className="td text-right text-slate-300">{point.watchlist_items}</td>
                           <td className="td text-right text-slate-300">{point.alert_rules}</td>
                           <td className="td text-right text-slate-300">{point.backtest_runs}</td>
-                          <td className="td text-right text-slate-300">{point.config_total}</td>
                         </tr>
                       ))}
                     </tbody>

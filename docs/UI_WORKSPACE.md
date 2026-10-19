@@ -9,7 +9,7 @@
 > - [界面设计总纲](UI_DESIGN.md) —— 设计原则、tokens、线框图规范、跨分册约定
 > - [用户注册与登录设计](UI_AUTH.md) —— 登录后如何进入工作台
 > - [自选等功能设计](UI_WATCHLIST.md) —— 工作区内的数据页面（自选/行情）
-> - 现行后端设计：[工作区与角色权限设计](WORKSPACE.md)、[策略配置](STRATEGY_CONFIGS.md)、
+> - 现行后端设计：[工作区与角色权限设计](WORKSPACE.md)、
 >   [实施计划](IMPLEMENTATION_PLAN.md)、[API 文档](api.rst)
 >
 > 范围：工作区切换器、`/workspace` 页（概览 / 成员 / 通知 / 消息模板 / 用量与配额 / 预警策略 /
@@ -121,7 +121,7 @@
 | 0 | viewer 只读提示 | 574-578 | amber 横幅，显示当前工作区名 |
 | 1 | 我的工作区（列表 + 新建） | 581-673 | 表格列：名称/类型/我的角色/成员/切换；下方内联新建表单 |
 | 2 | 全部工作区（管理员） | 676-731 | 只读表格：名称/类型/所有者 ID/成员/数据量/创建时间 |
-| 3 | 用量与配额 | 734-773 | 8 类资源表 + 合计 + 近 30 天趋势（ECharts） |
+| 3 | 用量与配额 | 734-773 | 5 类资源表 + 合计 + 近 30 天趋势（ECharts） |
 | 4 | 成员 | 776-889 | 表格：账号/昵称/角色/操作；内联“按用户名添加” |
 | 5 | 通知通道 | 892-1045 | 表格：名称/类型/脱敏地址/状态/操作；内联添加表单 |
 | 6 | 预警策略 | 98-297 / 1048-1050 | 生效值表 + owner 覆盖表单（独立组件） |
@@ -187,7 +187,7 @@ alert-policy）、父组件 13 个 `useMutation` + 策略子组件 2 个，状�
 | PUT | `/workspaces/{id}/alert-policy` | owner | 200；四字段全 null = 删除策略行 | 403；404；422（`min_amount` 0..1e9、`cooldown_seconds` 0..2 592 000） |
 
 依赖端点：`GET /api/v1/auth/config` 的 `workspace_enabled`（= `settings.data_isolation`）决定入口显隐。
-数据端点（自选/预警/回测/策略）由 `X-Workspace-Id` 决定作用域；viewer 写 → 403 `read_only`；
+数据端点（自选/预警/回测）由 `X-Workspace-Id` 决定作用域；viewer 写 → 403 `read_only`；
 配额超限 → 409 `quota_exceeded`（`core/quota.py`）。
 
 ### 2.6 前端数据类型【现状】
@@ -273,7 +273,7 @@ WorkspaceUsagePoint / AlertPolicy` 等类型，字段与 §2.5 响应形状一�
 ```text
 ┌ /workspace ──────────────────────────────────────────────────────────────────┐
 │ 工作区设置 · 投研小组                                    （页面标题 + 当前区）│
-│ [概览] [成员] [通知] [用量与策略]                    （锚点子导航，sticky）   │
+│ [概览] [成员] [通知] [用量]                    （锚点子导航，sticky）   │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ #overview 概览+危险区      #members 成员+邀请      #notifications 通道+模板   │
 │ #usage 用量/趋势/导出+预警策略                 #all-workspaces 全部工作区     │
@@ -281,7 +281,7 @@ WorkspaceUsagePoint / AlertPolicy` 等类型，字段与 §2.5 响应形状一�
 ```
 
 > 消息模板放在「通知」区末尾：它只影响外发消息，与通道是同一任务的两步。
-> 预警策略放在「用量与策略」区：两者都是“团队治理/只读看板”，避免 owner 表单堆叠。
+> 预警策略放在「用量」区：两者都是“团队治理/只读看板”，避免 owner 表单堆叠。
 
 ---
 
@@ -295,7 +295,7 @@ WorkspaceUsagePoint / AlertPolicy` 等类型，字段与 §2.5 响应形状一�
 ```text
 ┌ 概览 · 顶部工作区条 ────────────────────────────────────────────────────────┐
 │ 工作区 [ 投研小组 ▾ ] [所有者]                           成员与设置 →      │
-│ 提示：切换后全站数据随之切换（自选 / 预警 / 回测 / 策略）                   │
+│ 提示：切换后全站数据随之切换（自选 / 预警 / 回测）                   │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -334,7 +334,7 @@ WorkspaceUsagePoint / AlertPolicy` 等类型，字段与 §2.5 响应形状一�
 │ 描述：A 股短线研究小组的自选与预警                                          │
 │ ─────────────────────────────────────────────────────────────────────────── │
 │ 危险区（仅 owner，共享工作区）                                              │
-│ 删除会同时清空本工作区的自选、预警规则、回测、策略配置与通知通道。         │
+│ 删除会同时清空本工作区的自选、预警规则、回测与通知通道。                   │
 │ 删除后不可恢复，数据不会并入个人工作区。                     [删除工作区]   │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -359,7 +359,7 @@ WorkspaceUsagePoint / AlertPolicy` 等类型，字段与 §2.5 响应形状一�
 | 我的角色 | `role` | 色值同切换器 |
 | 所有者 | `members` 中 `role=owner` 的 username（无需新接口） | 多个 owner 时显示“陈晓 等 2 人” |
 | 成员数 | `member_count` | 数字；点击跳到 `#members` |
-| 数据量 | `data_total` | 文案“N 条”，口径=自选+规则+回测+三类策略配置（不含成员/通道） |
+| 数据量 | `data_total` | 文案“N 条”，口径=自选+规则+回测（不含成员/通道） |
 | 创建时间 | `created_at` | `formatDateTime` |
 | 描述 | `description` | 单行截断，`title` 全文；owner 可编辑 |
 
@@ -819,7 +819,7 @@ store 支持，P0 只展示不跳转；非管理员不渲染该卡片，`?all=tr
 | `GET /workspaces/{id}/alert-policy` | `alertPolicy()` | `Workspace.tsx:110` | 策略生效值 |
 | `PUT /workspaces/{id}/alert-policy` | `updateAlertPolicy()` | `Workspace.tsx:139,154` | 保存/重置策略 |
 | `GET /auth/config` | `config()`（`auth.ts`） | `App.tsx`、`Workspace.tsx:551` | `workspace_enabled` 显隐 |
-| 数据端点（自选/预警/回测/策略） | 各业务函数 | 各页面 | 依赖 `X-Workspace-Id`；写操作 403/409 |
+| 数据端点（自选/预警/回测） | 各业务函数 | 各页面 | 依赖 `X-Workspace-Id`；写操作 403/409 |
 
 ### 7.2 缺口与最小契约
 
@@ -870,7 +870,7 @@ store 支持，P0 只展示不跳转；非管理员不渲染该卡片，`?all=tr
 | **S4** 概览 + 危险区 | `OverviewSection.tsx` | 身份字段 + 改名 + 删除二次确认 | 改名成功/失败可见；删除取消不删；personal 无删除按钮；删除后回退 personal |
 | **S5** 成员管理 | `MembersSection.tsx`、`api.ts`（复用 `workspaceCandidates`） | 候选搜索、加入时间列、角色仅 editor/viewer | 候选搜索 300ms 防抖、空候选文案；最后 owner 400 文案正确；转让后当前角色变 editor 且按钮收窄 |
 | **S6** 通知与模板 | `ChannelsSection.tsx`（含模板子块或 `MessageTemplateSection.tsx`） | 通道编辑（掩码+勾选改址）、模板预览 | editor/viewer 无操作；测试失败行内 amber；模板 422/恢复默认可见；`maxLength=2000` |
-| **S7** 用量与策略 | `UsageSection.tsx`、`AlertPolicySection.tsx` | 用量表/趋势数据表/策略覆盖合并 | 用量 8 行、`0` 显示“不限”、达上限 badge；`<2` 点不画图；CSV 导出成功 |
+| **S7** 用量（含预警策略） | `UsageSection.tsx`、`AlertPolicySection.tsx` | 用量表/趋势数据表/策略覆盖合并 | 用量 5 行、`0` 显示“不限”、达上限 badge；`<2` 点不画图；CSV 导出成功 |
 | **S8** 管理员总览 + 状态文案 | `AdminOverviewSection.tsx`、各 Section + `api.ts` | 管理员总览 + 统一错误文案映射 | 仅 admin 渲染且非管理员无请求；403/404/409/400 文案与 §6 一致；错别字修正 |
 
 **每步共同验收**

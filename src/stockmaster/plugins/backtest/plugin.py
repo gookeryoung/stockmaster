@@ -8,7 +8,7 @@ from stockmaster.plugins.base import PluginBase
 
 
 class BacktestPlugin(PluginBase):
-    """回测插件：信号生成、收益统计与历史记录（单向依赖 strategy / predict）。"""
+    """回测插件：信号生成、收益统计与历史记录（可复用 predict 的预测信号）。"""
 
     name = "backtest"
     version = "0.1.0"

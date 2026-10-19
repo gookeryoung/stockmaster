@@ -25,9 +25,6 @@ DATA_COUNTER_KEYS = (
     "watchlist_items",
     "alert_rules",
     "backtest_runs",
-    "screening_configs",
-    "sample_configs",
-    "algorithm_configs",
 )
 
 
@@ -136,15 +133,14 @@ def test_export_csv_is_member_readable_with_bom_and_limits(usage_client):
     # Excel 靠 BOM 识别 UTF-8，否则中文表头会乱码。
     assert res.content.startswith(b"\xef\xbb\xbf")
     text = res.content.decode("utf-8-sig")
-    # 元信息 + 表头 + 8 类资源 + 合计。
+    # 元信息 + 表头 + 5 类资源 + 合计。
     assert "导出组" in text
     assert f"工作区 ID,{ws_id}" in text
     assert "资源,名称,用量,上限" in text
     assert "watchlist_items,自选股,1,不限" in text
     assert "members,成员,2,不限" in text
-    assert "screening_configs,选股配置,0,不限" in text
     assert "channels,通知通道,0,不限" in text
-    # 合计行 = 全部 8 类资源之和（成员 2 + 自选 1），不是「不限」。
+    # 合计行 = 全部 5 类资源之和（成员 2 + 自选 1），不是「不限」。
     assert "合计,,3," in text
     # 文件名带工作区 id 与导出日期，下载多份时能区分来源。
     disposition = res.headers["content-disposition"]
@@ -184,7 +180,6 @@ def test_history_empty_then_job_snapshot_matches_stats(usage_client):
     assert point["member_count"] == stats["usage"]["members"] == 2
     assert point["watchlist_items"] == stats["usage"]["watchlist_items"] == 1
     assert point["data_total"] == _data_total(stats) == 1
-    assert point["config_total"] == 0
 
     # 同一天再跑一次：只有更新，没有第二个点。
     assert _add_watchlist(client, client.alice, ws_id, "000001.SZ").status_code == 201

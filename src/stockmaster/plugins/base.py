@@ -18,7 +18,7 @@
 反之共享基础设施不得 import 某个插件的 ``services``。本仓库有两处刻意例外：
 ``core/auth_deps.py`` 与 ``core/workspace_deps.py`` 引用了 auth / workspaces 插件的服务模块，
 因为「账号」与「工作区」这两个领域的所有者就是对应插件，把它们的服务再复制一份到 core
-反而会造成双份真相。插件之间也可以单向引用（如 backtest→strategy、strategy→predict）。
+反而会造成双份真相。插件之间也可以单向引用（如 backtest→predict）。
 
 模型注册
 --------

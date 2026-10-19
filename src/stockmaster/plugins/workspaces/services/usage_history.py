@@ -35,7 +35,6 @@ def capture_snapshot(session: Session, workspace_id: int, *, on: date | None = N
     """
     day = on or date.today()
     current = quota.usage(session, workspace_id)
-    config_total = current["screening_configs"] + current["sample_configs"] + current["algorithm_configs"]
 
     row = session.execute(
         select(WorkspaceUsageSnapshot).where(
@@ -52,7 +51,6 @@ def capture_snapshot(session: Session, workspace_id: int, *, on: date | None = N
     row.watchlist_items = current["watchlist_items"]
     row.alert_rules = current["alert_rules"]
     row.backtest_runs = current["backtest_runs"]
-    row.config_total = config_total
     session.flush()
     return row
 
