@@ -37,3 +37,7 @@ class InsufficientData(StockMasterError):
 
 class ModelNotTrained(StockMasterError):
     """No trained model is available for the requested task."""
+
+
+class InvalidAlgoParams(StockMasterError):
+    """Hyperparameters are unknown, mistyped, or outside the supported range."""

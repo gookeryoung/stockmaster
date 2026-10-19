@@ -7,6 +7,11 @@ https://github.com/gookeryoung/stockmaster/releases
 v0.4.0
 ------
 
+- 修复移除策略配置后预测页「即时自定义」链路中断：超参白名单校验
+  （``PARAM_SPECS`` / ``validate_algo_params``）迁回
+  ``plugins/predict/services/models.py``，``/predict/train`` 对未知或越界超参仍返回
+  422；前端 view store 补回 ``features`` / ``params`` / ``testFraction`` 草稿字段，
+  旧本地草稿缺字段时回落默认值。
 - 修复日线数据拉取失败的两个根因：``job_sync_daily`` 默认宇宙不再要求「已有日线」
   （``_default_universe(require_bars=False)``），全新安装不再因空宇宙而永远拉不到
   第一根日线；日线任务固定 ``resume=False``，增量保持按标的自身最新日期续拉，

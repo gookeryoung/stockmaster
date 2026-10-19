@@ -6,7 +6,7 @@
  *
  * 数据来源约定：
  * - 特征名与分组需覆盖 `plugins/predict/services/dataset.py::FEATURE_COLUMNS`；
- * - 超参范围与 `plugins/strategy/services/algorithm.py::PARAM_SPECS` 一致——前端据此
+ * - 超参范围与 `plugins/predict/services/models.py::PARAM_SPECS` 一致——前端据此
  *   提前给出输入约束与默认值，最终仍由后端白名单校验。
  */
 

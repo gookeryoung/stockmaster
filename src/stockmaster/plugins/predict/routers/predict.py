@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from stockmaster.core.deps import canonical_code, db_session
-from stockmaster.core.errors import InsufficientData, ModelNotTrained
+from stockmaster.core.errors import InsufficientData, InvalidAlgoParams, ModelNotTrained
 from stockmaster.core.logging import get_logger
 from stockmaster.db.models import Instrument, ModelRegistry, Prediction
 from stockmaster.db.session import session_scope
@@ -19,6 +19,7 @@ from stockmaster.plugins.predict.services.dataset import (
     MIN_FEATURES_PRESENT,
     load_bars_by_symbol,
 )
+from stockmaster.plugins.predict.services.models import validate_algo_params
 from stockmaster.plugins.predict.services.train import load_active_model, score_symbols
 from stockmaster.schemas import (
     ModelCard,
@@ -107,7 +108,6 @@ def train(payload: TrainRequest, session: Session = Depends(db_session)):
     校验并透传；三者都不传时行为与从前完全一致。
     """
     from stockmaster.jobs.tasks import _default_universe
-    from stockmaster.plugins.strategy.services.algorithm import validate_algo_params
 
     codes = payload.codes or _default_universe()
     if not codes:
@@ -124,8 +124,11 @@ def train(payload: TrainRequest, session: Session = Depends(db_session)):
         )
 
     feature_columns, min_features_present = _resolve_features(payload.features)
-    # 复用算法超参白名单：未知键/越界/类型错误在训练前就以 422 拒绝。
-    algo_params = validate_algo_params(payload.algo, payload.algo_params or {})
+    # 算法超参白名单：未知键/越界/类型错误在训练前就以 422 拒绝。
+    try:
+        algo_params = validate_algo_params(payload.algo, payload.algo_params)
+    except InvalidAlgoParams as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     try:
         if payload.horizon is not None:

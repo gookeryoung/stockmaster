@@ -22,14 +22,69 @@ import numpy as np
 import pandas as pd
 
 from stockmaster.config import settings
-from stockmaster.core.errors import ModelNotTrained
+from stockmaster.core.errors import InvalidAlgoParams, ModelNotTrained
 from stockmaster.core.logging import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["AVAILABLE_ALGOS", "TrainedModel", "build_estimator", "fit_model", "predict_proba"]
+__all__ = [
+    "AVAILABLE_ALGOS",
+    "PARAM_SPECS",
+    "TrainedModel",
+    "build_estimator",
+    "fit_model",
+    "predict_proba",
+    "validate_algo_params",
+]
 
 AVAILABLE_ALGOS = ("hist_gbdt", "random_forest", "logistic")
+
+#: (类型, 最小值, 最大值) 白名单。`int` 不接受 bool（Python 里 bool 是 int 的子类）。
+#: 只开放数值型超参，避免把「配置校验」变成「替用户校验 sklearn 的合法取值」。
+PARAM_SPECS: dict[str, dict[str, tuple[type, float, float]]] = {
+    "hist_gbdt": {
+        "max_iter": (int, 10, 5000),
+        "learning_rate": (float, 0.0001, 1.0),
+        "max_depth": (int, 1, 32),
+        "min_samples_leaf": (int, 1, 10000),
+        "l2_regularization": (float, 0.0, 100.0),
+    },
+    "random_forest": {
+        "n_estimators": (int, 10, 2000),
+        "max_depth": (int, 1, 64),
+        "min_samples_leaf": (int, 1, 10000),
+    },
+    "logistic": {
+        "C": (float, 0.000001, 1000.0),
+        "max_iter": (int, 100, 20000),
+    },
+}
+
+
+def validate_algo_params(algo: str, params: dict[str, int | float] | None) -> dict[str, float | int]:
+    """校验并归一化超参；未知键、越界、类型错误一律抛 :class:`InvalidAlgoParams`。"""
+    if algo not in AVAILABLE_ALGOS:
+        raise InvalidAlgoParams(f"未知算法 {algo!r}；可选：{', '.join(AVAILABLE_ALGOS)}")
+    spec = PARAM_SPECS[algo]
+    cleaned: dict[str, float | int] = {}
+    for key, raw in (params or {}).items():
+        if key not in spec:
+            raise InvalidAlgoParams(f"算法 {algo} 不支持超参 {key!r}；可用：{', '.join(spec)}")
+        expected, low, high = spec[key]
+        if isinstance(raw, bool):
+            raise InvalidAlgoParams(f"超参 {key} 需要数值，收到布尔值")
+        if expected is int:
+            if not isinstance(raw, int):
+                raise InvalidAlgoParams(f"超参 {key} 需要整数")
+            value: float | int = raw
+        else:
+            if not isinstance(raw, int | float):
+                raise InvalidAlgoParams(f"超参 {key} 需要数字")
+            value = float(raw)
+        if not (low <= float(value) <= high):
+            raise InvalidAlgoParams(f"超参 {key} 应在 [{low}, {high}] 内，收到 {value}")
+        cleaned[key] = value
+    return cleaned
 
 
 class Estimator(Protocol):
