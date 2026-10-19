@@ -103,7 +103,7 @@ format: ## 后端代码自动格式化（ruff format + check --fix）
 
 typecheck: doctor ## doctor 的别名（本项目未引入独立类型检查器）
 
-check-fast: lint frontend-typecheck ## 轻量静态门禁（不含测试，适合实现阶段快速反馈）
+check-fast cf: lint frontend-typecheck ## 轻量静态门禁（不含测试，适合实现阶段快速反馈）
 
 test: ## 运行快速测试集（排除 slow；网络契约测试默认跳过；不含覆盖率）
 	uv run pytest -m "not slow" -n $(PYTEST_JOBS)
