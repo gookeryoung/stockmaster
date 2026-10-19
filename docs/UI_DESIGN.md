@@ -6,9 +6,9 @@
 >
 > 关联文档：
 > - [用户注册与登录设计](UI_AUTH.md) —— 登录、注册、微信扫码、回调、账号设置
-> - [工作区 UI 设计](UI_WORKSPACE.md) —— 切换器、成员与角色、通知通道、用量与策略
+> - [工作区 UI 设计](UI_WORKSPACE.md) —— 切换器、成员与角色、通知通道、用量与预警策略
 > - [自选等功能设计](UI_WATCHLIST.md) —— 自选清单管理页、行情看板、选股入自选
-> - 现行后端设计：[工作区与角色权限设计](WORKSPACE.md)、[策略配置](STRATEGY_CONFIGS.md)、
+> - 现行后端设计：[工作区与角色权限设计](WORKSPACE.md)、
 >   [用户数据隔离设计（历史）](USER_ISOLATION.md)、[实施计划](IMPLEMENTATION_PLAN.md)
 >
 > 范围：**前端界面与交互**，附带设计所需的后端接口缺口契约（见各分册 §“API 映射”）。
@@ -50,7 +50,7 @@ StockMaster 是单机可部署的 A 股日线量化研究工作台，闭环是
    首次部署（首个账号自动成为管理员）、强制登录关闭、微信 mock 三种情形只靠零散提示；
    账号设置页信息密度高但与“我的数据”混排。
 2. **工作区**：`frontend/src/pages/Workspace.tsx` 已 1100+ 行，成员、通道、模板、用量、
-   趋势、策略、管理员总览全部竖向堆叠；owner 与 viewer 看到的是同一张长页，只是按钮隐显，
+   趋势、管理员总览全部竖向堆叠；owner 与 viewer 看到的是同一张长页，只是按钮隐显，
    高风险操作（转让、删除、清空）缺少统一确认模式。
 3. **自选**：只有 `Market` 页的“加入自选”和 `Dashboard` 的一张只读卡片，没有独立管理页；
    后端 `GET/POST/DELETE /watchlist` 的能力（多清单、备注、幂等更新）大部分没有入口，
@@ -98,7 +98,6 @@ StockMaster 是单机可部署的 A 股日线量化研究工作台，闭环是
 | `/` | 总览 | `frontend/src/pages/Dashboard.tsx` | 登录态或门禁关闭 | 指数、宽度、预测、自选、预警 |
 | `/market` | 行情 | `frontend/src/pages/Market.tsx` | 同上 | K 线 + 指标 + 加入自选 |
 | `/analyze` | 分析 | `frontend/src/pages/Analyze.tsx` | 同上 | 因子、选股、相关性 |
-| `/strategy` | 策略 | `frontend/src/pages/StrategyConfigs.tsx` | 同上 | 选股/样本/算法配置 |
 | `/predict` | 预测 | `frontend/src/pages/Predict.tsx` | 同上 | 模型与批量预测 |
 | `/backtest` | 回测 | `frontend/src/pages/Backtest.tsx` | 同上 | 运行与历史 |
 | `/alerts` | 预警 | `frontend/src/pages/Alerts.tsx` | 同上 | 规则、触发、扫描 |
@@ -161,7 +160,7 @@ StockMaster 是单机可部署的 A 股日线量化研究工作台，闭环是
 
 ```text
 ┌ StockMaster  A股日线量化分析工作台 ─────────────── [头像▾ 账号设置/用户管理/退出] ┐
-│ 总览  行情  分析  策略  预测  回测  预警  设置  [工作区]  [用户]                    │
+│ 总览  行情  分析  预测  回测  预警  设置  [工作区]  [用户]                    │
 ├ 工作区 [个人工作区 ▾] [所有者/编辑者/查看者] [只读]              成员与设置 →      ┤
 ├ 版本 x.y.z · 日线 N 行 · 调度器运行中 · [数据源状态]                               ┤
 └──────────────────────────────────────────────────────────────────────────────────┘
@@ -177,13 +176,12 @@ StockMaster 是单机可部署的 A 股日线量化研究工作台，闭环是
 | 2 | 行情 | `/market` | 门禁通过 | 保留单只 K 线；“加入自选”改为选清单 |
 | 3 | **自选** | `/watchlist` | 门禁通过 | **新增页**，见 WATCHLIST 分册 |
 | 4 | 分析 | `/analyze` | 门禁通过 | 选股结果加“加入自选” |
-| 5 | 策略 | `/strategy` | 门禁通过 | 选股运行结果加“加入自选” |
-| 6 | 预测 | `/predict` | 门禁通过 | 不变 |
-| 7 | 回测 | `/backtest` | 门禁通过 | 不变 |
-| 8 | 预警 | `/alerts` | 门禁通过 | 不变 |
-| 9 | 设置 | `/settings` | 门禁通过 | 不变 |
-| 10 | 工作区 | `/workspace` | 隔离开启 + 登录 | 改分区布局 |
-| 11 | 用户 | `/users` | 管理员 | 不变 |
+| 5 | 预测 | `/predict` | 门禁通过 | 不变 |
+| 6 | 回测 | `/backtest` | 门禁通过 | 不变 |
+| 7 | 预警 | `/alerts` | 门禁通过 | 不变 |
+| 8 | 设置 | `/settings` | 门禁通过 | 不变 |
+| 9 | 工作区 | `/workspace` | 隔离开启 + 登录 | 改分区布局 |
+| 10 | 用户 | `/users` | 管理员 | 不变 |
 
 **导航规则**
 
@@ -200,7 +198,7 @@ StockMaster 是单机可部署的 A 股日线量化研究工作台，闭环是
                           └──────┬───────┘
                                  │ 进入工作台
         ┌────────────────────────▼─────────────────────────┐
-        │  总览 / 行情 / 自选 / 分析 / 策略 / 预测 / 回测 / 预警  │
+        │  总览 / 行情 / 自选 / 分析 / 预测 / 回测 / 预警  │
         │                  ↑ 自选页：UI_WATCHLIST              │
         └───────┬───────────────────────────┬──────────────┘
                 │ 右上角用户菜单              │ 顶部工作区切换器
@@ -480,7 +478,6 @@ StockMaster 是单机可部署的 A 股日线量化研究工作台，闭环是
 | 自选清单/看板/选股入自选 | [UI_WATCHLIST.md](UI_WATCHLIST.md) §4–§5 |
 | 角色权限后端语义 | [WORKSPACE.md](WORKSPACE.md) §2–§4 |
 | 自选数据模型与唯一约束 | [WORKSPACE.md](WORKSPACE.md) §3，`db/models.py::WatchlistItem` |
-| 选股/样本/算法配置语义 | [STRATEGY_CONFIGS.md](STRATEGY_CONFIGS.md) |
 | 迁移与验收流程 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) |
 | 配置项总表 | `README.md` §7，`src/stockmaster/config.py` |
 
@@ -494,9 +491,9 @@ StockMaster 是单机可部署的 A 股日线量化研究工作台，闭环是
 |---|---|---|---|---|
 | **P0-1** | 自选页最小可用：新增 `/watchlist` 与导航项，复用现有 `GET/POST/DELETE /watchlist`，单清单 + 增删 + 跳转行情/预警/回测 | 无 | `App.tsx`、`pages/Watchlist.tsx`、`Dashboard.tsx` | ✅ 已实现（`pnpm build` 通过） |
 | **P0-2** | 登录页信息架构：登录/注册分视图、字段级错误、开关提示、微信模式提示 | 无 | `Login.tsx` | ✅ 已实现（`pnpm build` 通过） |
-| **P0-3** | 工作区页分区（概览/成员/通知/用量与策略），危险操作统一确认 | 无 | `Workspace.tsx` 拆分子组件 | ✅ 已实现（`pnpm build` 通过） |
+| **P0-3** | 工作区页分区（概览/成员/通知/用量），危险操作统一确认 | 无 | `Workspace.tsx` 拆分子组件 | ✅ 已实现（`pnpm build` 通过） |
 | **P1-1** | 自选清单能力：`GET /watchlist/lists`、重命名/整单删除、`POST /watchlist/batch-delete`、`POST /watchlist/import` | P0-1 | `plugins/system/routers/system.py`、`tests/` | ✅ 已实现（后端测试 + 隔离测试通过） |
-| **P1-2** | 选股结果 → 自选（分析页 + 策略页） | P1-1 | `Analyze.tsx`、`StrategyConfigs.tsx`、`AddToWatchlistDialog.tsx` | ✅ 已实现（`pnpm build` 通过） |
+| **P1-2** | 选股结果 → 自选（分析页） | P1-1 | `Analyze.tsx`、`AddToWatchlistDialog.tsx` | ✅ 已实现（`pnpm build` 通过） |
 | **P1-3** | 账号页信息架构与用户管理页增量 | P0-2 | `Account.tsx`、`Users.tsx`、`App.tsx` 用户菜单 | ✅ 已实现（`pnpm build` 通过） |
 | **P2** | 自选批量行情（`GET /market/quotes`）、批量评分、CSV 导入/导出、Dashboard 自选卡片升级、工作区用量分页 | P1 | `plugins/market/routers/market.py`、`plugins/analysis/routers/analysis.py`、对应页面 | 批量行情/评分/CSV/Dashboard ✅ 已实现；工作区用量分页未做 |
 | **P2 增强（追加）** | 统一 ConfirmDialog、通道测试失败原因、导出文件名取 Content-Disposition、管理员跨区只读查看、自选清单引用检查、CSV 目标清单选择、自动刷新开关 | P1/P2 | `components/ConfirmDialog.tsx`、`workspace.ts`、`pages/workspace/`、`Watchlist.tsx`、`channels.py`、`workspaces.py` | ✅ 已实现（`pnpm build` + 后端离线套件通过） |

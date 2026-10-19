@@ -9,7 +9,7 @@
 > 关联文档：
 > - [界面设计总纲](UI_DESIGN.md) —— 设计原则、视觉 tokens、信息架构、线框图规范
 > - [用户注册与登录设计](UI_AUTH.md) / [工作区 UI 设计](UI_WORKSPACE.md) —— 同一批设计稿
-> - 现行后端设计：[工作区与角色权限设计](WORKSPACE.md)、[策略配置](STRATEGY_CONFIGS.md)、
+> - 现行后端设计：[工作区与角色权限设计](WORKSPACE.md)、
 >   [用户数据隔离设计（历史）](USER_ISOLATION.md)、[实施计划](IMPLEMENTATION_PLAN.md)
 > - 代码索引：`src/stockmaster/plugins/system/routers/system.py`、
 >   `src/stockmaster/plugins/market/routers/market.py`、`frontend/src/pages/Market.tsx`
@@ -57,7 +57,7 @@
 | # | 用户任务 | 当前摩擦 | 设计后的关键路径 | 成功标准（可验收） |
 |---|---|---|---|---|
 | 1 | **盘后复盘看自选** | 只有行情页逐只搜代码；Dashboard 卡片只读；无法备注/排序/批量清理 | 总览 → `自选` → 切清单 → 按涨跌幅排序 → 看 K 线 → 写备注 | 从总览进入“看到某只自选的最新价与涨跌幅”≤ 2 次点击；清单内备注可原地改 |
-| 2 | **把选股结果变成观察池** | 分析页/策略页运行结果只能看，代码要手工抄 | 运行选股 → 勾选/全部 → 弹层选清单（可新建）→ 反馈 added/skipped → 跳自选页 | 从“选股运行完成”到“观察池里出现全部命中标的”≤ 3 次点击；重复加入不产生重复行 |
+| 2 | **把选股结果变成观察池** | 分析页运行结果只能看，代码要手工抄 | 运行选股 → 勾选/全部 → 弹层选清单（可新建）→ 反馈 added/skipped → 跳自选页 | 从“选股运行完成”到“观察池里出现全部命中标的”≤ 3 次点击；重复加入不产生重复行 |
 | 3 | **从自选直接挂预警/回测** | 需要去预警页手填代码、去回测页手填代码 | 自选行 `⋯` → 加预警（预填范围与代码）/ 去回测（预填标的） | 预填后用户只需确认参数；无预填时平均需要 4 个以上字段输入 |
 
 关联指标（研究工具不追求点击率，只看路径是否可达）：自选页周活跃工作区数、从自选发起的预警规则数、
@@ -77,7 +77,7 @@
 ### 1.3 旅程 B：选股结果 → 观察池
 
 ```text
-分析页选股 / 策略页「选股运行」结果
+分析页选股结果
   → 勾选 N 只（或「全部加入自选」） → 弹层选目标清单（可现场新建）
   → POST /watchlist/import【拟新增】 → 反馈「新增 3 · 跳过 1 · 非法 0」
   → [查看观察池 →] 跳自选页并选中该清单
@@ -112,7 +112,6 @@
 | 设置页 `/settings` | `frontend/src/pages/Settings.tsx:40-66,124-177` | 输入代码加入 `default`；列表可逐条“移除” | 只是运维式管理，不是研究动线；无多清单 |
 | 独立自选页 | — | **不存在** | 本次新增 `/watchlist`【增量】 |
 | 分析页选股结果 | `frontend/src/pages/Analyze.tsx:197-239` | 表格展示 `ScreenRow`（评分/动量/波动/换手/RSI） | 无“加入自选”动作；结果不持久化，刷新即丢 |
-| 策略页选股运行结果 | `frontend/src/pages/StrategyConfigs.tsx:473-525` | 运行后展示 `ScreeningRunResult.items` | 同上；且结果只在组件 state，切走 tab 即丢 |
 | 预警页 | `frontend/src/pages/Alerts.tsx:158-184` | `scope_type` 下拉 + 自由文本 `scope_value` | 只能手填清单名/代码，不能从自选带入 |
 | 回测页 | `frontend/src/pages/Backtest.tsx:21-50,141` | 代码文本框（逗号分隔）+ 策略/区间 | 不能从自选带入代码 |
 
@@ -182,8 +181,7 @@
 | 快照 | `GET /stocks/{code}/snapshot` | 只用 provider 链，单只；`503` 表示取不到；返回体**不含换手率**（`market.py:251-281`） | 仅作 P2 批量行情的底层能力，不建议逐只调用 |
 | 因子（单只） | `GET /analysis/factors/{code}` | 读 `factors` 表最新一行；无数据 404 | 评分列 P1 可逐只取（N 次往返），P2 改批量 |
 | 选股 | `POST /analysis/screen` | `ScreenRow[]`；`limit` 1..500；默认最近因子日；`close` 恒为 null | 选股结果入自选的输入源 |
-| 策略选股 | `POST /strategy/screenings/{id}/run` | `ScreeningRunResult{trade_date,count,items}`；viewer 可运行（只读求值） | 选股结果入自选的输入源 |
-| 回测 | `POST /backtest/run` | `require_editor`；先查配额；`codes` 优先、`screening_id` 次之；无标的/无信号 409 | “去回测”直接复用，不新增端点 |
+| 回测 | `POST /backtest/run` | `require_editor`；先查配额；`codes` 指定标的；无标的/无信号 409 | “去回测”直接复用，不新增端点 |
 | 预警类型 | `GET /alerts/types` | 返回规则类型与参数 schema | 加预警时动态生成参数表单 |
 | 预警预览 | `POST /alerts/preview` | 只读求值；viewer 可用；`watchlist` scope 按工作区解析 | 加预警弹层可“先预览命中” |
 | 预警创建 | `POST /alerts/rules` | `require_editor`；参数校验 422；配额 409 | 复用，不新增端点 |
@@ -214,18 +212,17 @@
 ### 3.1 目标导航（与总纲 §4.2 一致）
 
 ```text
-总览  行情  自选  分析  策略  预测  回测  预警  设置  [工作区]  [用户]
+总览  行情  自选  分析  预测  回测  预警  设置  [工作区]  [用户]
               ↑ 新增一级入口，位于「行情」之后
 ```
 
 | 项 | 现状 | 目标【增量】 |
 |---|---|---|
-| 一级导航 | `App.tsx:81-92`：总览/行情/分析/策略/预测/回测/预警/设置 | 在“行情”与“分析”之间插入 `{ to: "/watchlist", label: "自选" }` |
+| 一级导航 | `App.tsx:81-92`：总览/行情/分析/预测/回测/预警/设置 | 在“行情”与“分析”之间插入 `{ to: "/watchlist", label: "自选" }` |
 | 路由 | `App.tsx:137-150` 无 `/watchlist` | 新增 `<Route path="/watchlist" element={<Watchlist />} />` |
 | 总览自选卡片 | “管理”→`/market` | “管理”→`/watchlist`；卡片本身升级见 §4.9 |
 | 行情页加自选 | 只加入 `default` | 保留快捷按钮；点击后可选清单（P1），默认 `default`；无清单时可直接新建 |
 | 分析页选股结果 | 无动作 | 行级 `+ 加入自选` + 工具栏 `全部加入自选`（§4.8） |
-| 策略页选股运行结果 | 无动作 | 同上（§4.8） |
 | 设置页自选区 | 添加/移除默认清单 | 保留兼容入口，增加“前往自选页管理 →”，并显示当前清单名（避免用户以为只有一份清单） |
 
 导航规则沿用总纲：登录前不渲染导航；移动端导航横向滚动；工作区切换后整棵路由子树重挂载，
@@ -238,7 +235,6 @@
 | `/watchlist` | 自选清单 + 行情看板 | `frontend/src/pages/Watchlist.tsx`（**新文件**） | 门禁通过（`SessionGate`） | 新增 |
 | `/market` | 行情 K 线 | `Market.tsx` | 门禁通过 | 加自选支持选清单 |
 | `/analyze` | 分析 | `Analyze.tsx` | 门禁通过 | 选股结果加入自选 |
-| `/strategy` | 策略 | `StrategyConfigs.tsx` | 门禁通过 | 选股运行结果加入自选 |
 | `/alerts` | 预警 | `Alerts.tsx` | 门禁通过 | 接收“自选预填”并一次消费 |
 | `/backtest` | 回测 | `Backtest.tsx` | 门禁通过 | 接收“自选预填代码”（view store 已具备） |
 | `/` | 总览 | `Dashboard.tsx` | 门禁通过 | 自选卡片升级 + 跳转修正 |
@@ -554,11 +550,11 @@ Backtest 页逻辑；但要在 Backtest 页展示来源提示（P2：“代码�
 | 非法代码 | 不写入，进入 `invalid[]` | 同左 |
 | 配额 | 一次校验“本次真正新增”的条数；不足则整批 409，不部分写入 | 同左 |
 
-### 4.8 选股结果 → 自选（分析页 / 策略页）
+### 4.8 选股结果 → 自选（分析页）
 
 #### 4.8.1 页面改动
 
-分析页（`Analyze.tsx:197-239`）与策略页运行结果（`StrategyConfigs.tsx:473-508`）做同样两处改动：
+分析页（`Analyze.tsx:197-239`）做两处改动：
 
 ```text
 ┌ 多因子选股 ───────────────────────────────────────────┐
@@ -569,7 +565,7 @@ Backtest 页逻辑；但要在 Backtest 页展示来源提示（P2：“代码�
 └───────────────────────────────────────────────────────┘
 ```
 
-策略页同理：结果表上方右侧 `[全部加入自选]`，表尾加“操作”列 `[+]`；两处共用同一个
+结果表上方右侧加 `[全部加入自选]`，表尾加“操作”列 `[+]`，复用同一个
 `AddToWatchlistDialog` 组件。
 
 交互：
@@ -583,7 +579,7 @@ Backtest 页逻辑；但要在 Backtest 页展示来源提示（P2：“代码�
 | 提交 | `POST /watchlist/import`【拟新增】；按钮显示“加入 N 只”，pending 时禁用 |
 | 成功反馈 | 弹层原地替换为结果：`新增 3 · 更新 0 · 跳过 1 · 非法 0`；主按钮 `[查看清单 →]` 跳 `/watchlist` 并选中该清单；次按钮 `[继续挑选]` 关闭弹层 |
 | 无结果 | 结果表本来就为空时不显示“加入自选”按钮 |
-| viewer | 两处按钮禁用 + `title="查看者无法修改自选"`；页面顶部沿用现有只读提示（策略页已有 `StrategyConfigs.tsx:106-110`） |
+| viewer | 按钮禁用 + `title="查看者无法修改自选"`；页面顶部沿用现有只读提示 |
 
 弹层内容：勾选清单（前 3–5 只展示代码/名称）+ `(●) 已有清单 ▾ / (○) 新建 [___]` + `[x] 已存在的
 股票跳过` + `[取消] [加入 N 只]`；提交后原地替换为结果与 `[查看清单 →]`。
@@ -623,11 +619,11 @@ P1 前降级（无 `import` 端点时）：前端按当前清单预取一次代�
 | 7 | 批量评分 | `GET /analysis/factors/{code}` 单只 | N 次 HTTP；评分列无法低成本展示 | `GET /analysis/factors?codes=` 或隐藏评分列 | P2 |
 | 8 | 备注更新 | **幂等 `POST /watchlist` 已足够**（同 list+code 更新 note） | 状态码恒 201，前后端靠预判区分 | 不新增端点；前端预判 + 说明 | P0 |
 | 9 | 加预警 | `GET /alerts/types`、`POST /alerts/preview`、`POST /alerts/rules` | 无“自选预填”入口 | 前端预填（§4.4），**不新增端点** | P0 |
-| 10 | 回测 | `POST /backtest/run`（`codes`/`screening_id`） | 无“从自选带入” | 前端预填 `codes`，**不新增端点** | P0 |
-| 11 | 选股结果 | `POST /analysis/screen`、`POST /strategy/screenings/{id}/run` | 无“加入自选”动作 | 复用现有查询 + `import` | P1 |
+| 10 | 回测 | `POST /backtest/run`（`codes`） | 无“从自选带入” | 前端预填 `codes`，**不新增端点** | P0 |
+| 11 | 选股结果 | `POST /analysis/screen` | 无“加入自选”动作 | 复用现有查询 + `import` | P1 |
 | 12 | 数据日期/行情状态 | `GET /system/status`、`GET /market/overview` | 无个股 stale 标记 | P0 按 bars 日期推算；P2 quotes 提供 | P0/P2 |
 | 13 | 配额展示 | `GET /workspaces/{id}/stats`（`usage/limits`） | 仅在隔离开启时可用 | 复用；隔离关闭不展示配额 | P1 |
-| 14 | 清单引用检查 | `GET /alerts/rules`、`GET /strategy/samples` | 无服务端引用计数 | 前端读两类配置做提示（best effort） | P1 |
+| 14 | 清单引用检查 | `GET /alerts/rules` | 无服务端引用计数 | 前端读预警规则做提示（best effort） | P1 |
 
 **明确不新增**：导出端点（前端生成 CSV）、备注 PATCH、清单计数单独端点、预警/回测的“自选专用”端点。
 理由分别是：数据已在内存；幂等 POST 已覆盖语义；计数随 lists 返回；后两者只是预填，不改变写入契约。
@@ -813,7 +809,7 @@ P1 前降级（无 `import` 端点时）：前端按当前清单预取一次代�
 | 运行选股 | ✅ | ✅ | ✅ | ✅ | ❌ 401 |
 
 依据【现状】：`require_editor` 拒绝 viewer（`workspace_deps.py:139-147`）；`GET /watchlist` 用
-`current_workspace`；`POST /alerts/preview`、`POST /strategy/screenings/{id}/run` 刻意保持只读；
+`current_workspace`；`POST /alerts/preview` 刻意保持只读；
 `POST /backtest/run`、`POST /alerts/rules` 为写操作。前端 `canWriteWorkspace()` 只做显隐/禁用，
 服务端仍必须返回 403。
 
@@ -908,7 +904,7 @@ P1 前降级（无 `import` 端点时）：前端按当前清单预取一次代�
 | 阶段 | 交付 | 前端文件 | 后端文件 | 验收（可观察行为） |
 |---|---|---|---|---|
 | **P0** | `/watchlist` 最小可用：单清单（default + 本地已知名）、行情列（日线兜底）、备注内联编辑、单条移出、K线/预警/回测跳转、Dashboard 链接修正 | `pages/Watchlist.tsx`（新）、`App.tsx`、`api.ts`、`types.ts`、`view.ts`、`Dashboard.tsx` | 无 | `pnpm build` 通过；加入→刷新仍在；备注保存后重进一致；viewer 按钮禁用；`/market` 加入自选仍可用 |
-| **P1** | 多清单管理（枚举/计数/新建/重命名/删除/引用提示）、批量选择+删除、选股结果入自选（分析页+策略页） | `Watchlist.tsx`、`components/AddToWatchlistDialog.tsx`（新）、`Analyze.tsx`、`StrategyConfigs.tsx`、`Market.tsx`、`Settings.tsx` | `plugins/system/routers/system.py`、`schemas/__init__.py` | lists 返回计数；改名后条目全在新名；删除清单后 lists 消失且配额释放；选股 50 只一次加入，反馈 added/skipped；viewer 403 不出现半写 |
+| **P1** | 多清单管理（枚举/计数/新建/重命名/删除/引用提示）、批量选择+删除、选股结果入自选（分析页） | `Watchlist.tsx`、`components/AddToWatchlistDialog.tsx`（新）、`Analyze.tsx`、`Market.tsx`、`Settings.tsx` | `plugins/system/routers/system.py`、`schemas/__init__.py` | lists 返回计数；改名后条目全在新名；删除清单后 lists 消失且配额释放；选股 50 只一次加入，反馈 added/skipped；viewer 403 不出现半写 |
 | **P2** | 批量行情与评分列、CSV 导入/导出、Dashboard 行情升级、回测整个清单 | `Watchlist.tsx`、`Dashboard.tsx`、`csv.ts`（新）、`types.ts` | `plugins/market/routers/market.py`、`plugins/analysis/routers/analysis.py`、`schemas/__init__.py` | 20 只行情 1 次请求；供应商不可用时回退日线并标 stale；评分列与因子日一致；导出再导入 round-trip 无重复、非法行逐行报告 |
 
 > 与总纲 §12 的关系：总纲按本文结论统一为「P1 只做清单/批量写端点，P2 再做批量行情与导入导出」，

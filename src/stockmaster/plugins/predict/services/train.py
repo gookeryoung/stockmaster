@@ -60,9 +60,9 @@ def train_model(
     purged of rows whose labels overlap it (see
     :func:`app.model.dataset.chronological_split`).
 
-    ``algo_params`` overrides the estimator's defaults (validated by the caller:
-    ``app.strategy.algorithm.validate_algo_params``), and is recorded in
-    ``model_registry.params_json`` so a configured model can be reproduced.
+    ``algo_params`` overrides the estimator's defaults (validated by the caller),
+    and is recorded in ``model_registry.params_json`` so a configured model can be
+    reproduced.
     """
     if algo not in AVAILABLE_ALGOS:
         raise ValueError(f"unknown algo {algo!r}; expected {AVAILABLE_ALGOS}")

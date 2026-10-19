@@ -2,7 +2,7 @@
 
 为什么单开一套 fixture
 ---------------------
-配额是**进程级配置**（``SM_WORKSPACE_MAX_*``），要验证超限行为就必须把 6 个上限都
+配额是**进程级配置**（``SM_WORKSPACE_MAX_*``），要验证超限行为就必须把 5 个上限都
 调到很小（大多是 1）。这与 ``test_workspace.py`` 的「默认不限」前提相反，所以照抄
 其账号/工作区 fixture，但额外用 ``monkeypatch.setenv`` 覆盖配额并清掉 settings 缓存。
 
@@ -31,19 +31,15 @@ QUOTA_ENV = {
     "SM_WORKSPACE_MAX_WATCHLIST_ITEMS": "1",
     "SM_WORKSPACE_MAX_ALERT_RULES": "1",
     "SM_WORKSPACE_MAX_BACKTEST_RUNS": "1",
-    "SM_WORKSPACE_MAX_STRATEGY_CONFIGS": "1",
     "SM_WORKSPACE_MAX_CHANNELS": "1",
 }
 
-#: 与上面 env 一一对应的 ``limits()`` 结果（三类策略配置共享一个上限）。
+#: 与上面 env 一一对应的 ``limits()`` 结果。
 EXPECTED_LIMITS = {
     "members": 2,
     "watchlist_items": 1,
     "alert_rules": 1,
     "backtest_runs": 1,
-    "screening_configs": 1,
-    "sample_configs": 1,
-    "algorithm_configs": 1,
     "channels": 1,
 }
 
@@ -145,13 +141,6 @@ def _create_channel(client: TestClient, who: dict, ws_id: int, name: str = "主�
         headers=_h(who, ws_id),
         json={"name": name, "kind": "webhook", "url": "https://example.com/hook?token=secret1234"},
     )
-
-
-def _create_config(client: TestClient, who: dict, ws_id: int, kind: str, name: str):
-    payload = {"name": name}
-    if kind == "screenings":
-        payload = {"name": name, "params": {}}
-    return client.post(f"/api/v1/strategy/{kind}", headers=_h(who, ws_id), json=payload)
 
 
 def _insert_backtest_run(ws_id: int) -> str:
@@ -279,24 +268,6 @@ def test_member_quota(quota_client):
     assert "上限" in third.json()["detail"]
 
 
-def test_strategy_config_quota_counts_each_table(quota_client):
-    client = quota_client
-    ws_id = _create_workspace(client, client.alice)
-
-    # 三类配置共享同一个上限，但各自按表计数
-    assert _create_config(client, client.alice, ws_id, "screenings", "选股 A").status_code == 201
-    assert _create_config(client, client.alice, ws_id, "screenings", "选股 B").status_code == 409
-    assert _create_config(client, client.alice, ws_id, "samples", "样本 A").status_code == 201
-    assert _create_config(client, client.alice, ws_id, "samples", "样本 B").status_code == 409
-    assert _create_config(client, client.alice, ws_id, "algorithms", "算法 A").status_code == 201
-    assert _create_config(client, client.alice, ws_id, "algorithms", "算法 B").status_code == 409
-
-
-# --------------------------------------------------------------------------- #
-# 统计与写路径的一致性 + 回测配额
-# --------------------------------------------------------------------------- #
-
-
 def test_usage_counts_and_backtest_quota(quota_client):
     client = quota_client
     ws_id = _create_workspace(client, client.alice)
@@ -305,9 +276,6 @@ def test_usage_counts_and_backtest_quota(quota_client):
     assert _add_watchlist(client, client.alice, ws_id, "600519.SH").status_code == 201
     assert _create_alert(client, client.alice, ws_id, "预警").status_code == 201
     assert _create_channel(client, client.alice, ws_id).status_code == 201
-    assert _create_config(client, client.alice, ws_id, "screenings", "选股").status_code == 201
-    assert _create_config(client, client.alice, ws_id, "samples", "样本").status_code == 201
-    assert _create_config(client, client.alice, ws_id, "algorithms", "算法").status_code == 201
     _insert_backtest_run(ws_id)
 
     expected_usage = {
@@ -315,9 +283,6 @@ def test_usage_counts_and_backtest_quota(quota_client):
         "watchlist_items": 1,
         "alert_rules": 1,
         "backtest_runs": 1,
-        "screening_configs": 1,
-        "sample_configs": 1,
-        "algorithm_configs": 1,
         "channels": 1,
     }
     body = _stats(client, client.alice, ws_id).json()

@@ -20,13 +20,6 @@ describe("默认视图状态", () => {
     expect(state.analyze.code).toBe("600519.SH");
     expect(state.backtest.strategy).toBe("buy_hold");
     expect(state.backtest.start < state.backtest.end).toBe(true);
-    expect(state.strategy.tab).toBe("screening");
-    expect(state.strategy.algorithm.params.max_iter).toBe("300");
-    // 预测页默认选满全部特征、带上当前算法的默认超参。
-    const { ALL_FEATURES } = await import("./predictModules");
-    expect(state.predict.features).toEqual(ALL_FEATURES);
-    expect(state.predict.params.max_iter).toBe("300");
-    expect(state.predict.testFraction).toBe("");
   });
 });
 
@@ -53,24 +46,6 @@ describe("状态更新", () => {
     expect(alerts.statusFilter).toBe("triggered");
     expect(alerts.form.min_amount).toBe(5000);
     expect(alerts.form.rule_type).toBe("price_cross");
-  });
-
-  it("setStrategy 与三个表单互不覆盖", async () => {
-    const { useViewState } = await load();
-    const { setStrategy, setScreeningForm, setSampleForm, setAlgorithmForm } = useViewState.getState();
-
-    setStrategy({ tab: "algorithm" });
-    setScreeningForm({ name: "高分红" });
-    setSampleForm({ horizon: 20 });
-    setAlgorithmForm({ algo: "logistic" });
-
-    const strategy = useViewState.getState().strategy;
-    expect(strategy.tab).toBe("algorithm");
-    expect(strategy.screening.name).toBe("高分红");
-    expect(strategy.sample.horizon).toBe(20);
-    expect(strategy.algorithm.algo).toBe("logistic");
-    // 未修改的超参必须保留
-    expect(strategy.algorithm.params.learning_rate).toBe("0.05");
   });
 
   it("setBacktest 只覆盖传入字段", async () => {

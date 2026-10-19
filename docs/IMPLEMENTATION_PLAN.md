@@ -219,17 +219,17 @@ editor 不可管成员、最后 owner 保护、跨工作区 404、转让）；`t
 
 | 文件 | 改动 |
 |---|---|
-| `src/stockmaster/core/quota.py` | 8 类资源与 ORM 映射、`limits()`（读 env）、`usage()`、`enforce()`（409 + `X-Auth-Error: quota_exceeded`） |
-| `src/stockmaster/config.py` | 6 个 `SM_WORKSPACE_MAX_*`（非负校验，0=不限） |
+| `src/stockmaster/core/quota.py` | 5 类资源与 ORM 映射、`limits()`（读 env）、`usage()`、`enforce()`（409 + `X-Auth-Error: quota_exceeded`） |
+| `src/stockmaster/config.py` | 5 个 `SM_WORKSPACE_MAX_*`（非负校验，0=不限） |
 | `plugins/workspaces/{schemas/workspace.py,routers/workspaces.py}` | `WorkspaceUsageOut` + `GET /workspaces/{id}/stats`；成员与通道创建前配额校验 |
 | `plugins/system/routers/system.py` | 新增自选前校验（幂等更新已有条目不占额度） |
-| `plugins/alerts/routers/alerts.py` / `plugins/backtest/routers/backtest.py` / `plugins/strategy/routers/strategy.py` | 规则/回测/三类策略配置创建前校验 |
+| `plugins/alerts/routers/alerts.py` / `plugins/backtest/routers/backtest.py` | 规则/回测创建前校验 |
 | frontend | 「工作区」页新增「用量与配额」卡片（资源、用量、上限、合计；所有成员只读） |
-| `.env.example` / `docker-compose.prod.yml` | 同步 6 个配额变量（compose 不会自动透传 `.env`） |
+| `.env.example` / `docker-compose.prod.yml` | 同步 5 个配额变量（compose 不会自动透传 `.env`） |
 
-**验收**：`tests/test_workspace_stats_quota.py`（stats 字段与权限；自选/规则/通道/成员/
-策略配置超限 409；删除释放额度；0 与隔离关闭不限制）；默认配额 0 下既有
-`test_workspace.py` / `test_strategy_configs.py` / `test_alerts.py` / `test_isolation.py`
+**验收**：`tests/test_workspace_stats_quota.py`（stats 字段与权限；自选/规则/通道/成员
+超限 409；删除释放额度；0 与隔离关闭不限制）；默认配额 0 下既有
+`test_workspace.py` / `test_alerts.py` / `test_isolation.py`
 全部保持通过。
 
 **回滚**：把所有 `SM_WORKSPACE_MAX_*` 置回 0 即完全恢复无配额行为；`stats` 端点可保留。
@@ -242,8 +242,8 @@ editor 不可管成员、最后 owner 保护、跨工作区 404、转让）；`t
 
 | 文件 | 改动 |
 |---|---|
-| `src/stockmaster/core/quota.py` | `DATA_COUNTERS`（仅 6 类业务数据）、`data_total()`、`data_totals()`（批量 `GROUP BY`） |
-| `plugins/workspaces/{schemas,router}` | `WorkspaceOut.data_total`；`GET /workspaces` 批量填充，避免 N×6 查询 |
+| `src/stockmaster/core/quota.py` | `DATA_COUNTERS`（仅 3 类业务数据）、`data_total()`、`data_totals()`（批量 `GROUP BY`） |
+| `plugins/workspaces/{schemas,router}` | `WorkspaceOut.data_total`；`GET /workspaces` 批量填充，避免 N×3 查询 |
 | `plugins/auth/schemas/auth.py` | `AdminUserOut(UserOut)`：`workspace_count` / `owned_workspace_count` / `personal_data_total`；`UserPage.items` 改用该类型 |
 | `plugins/auth/routers/users.py` | `GET /users` 批量计算三个统计字段（成员关系、owner 计数、个人工作区数据量） |
 | frontend | `/account` 新增「我的数据概览」；`/users` 表格新增「工作区」「个人数据量」两列 |

@@ -176,7 +176,7 @@ export default function OverviewSection({
           </p>
         )}
         <p className="mt-1 text-xs text-slate-500">
-          数据量口径：自选 + 预警规则 + 回测 + 三类策略配置，不含成员与通知通道。
+          数据量口径：自选 + 预警规则 + 回测，不含成员与通知通道。
         </p>
 
         <div className="mt-3 border-t border-slate-800 pt-3">
@@ -187,7 +187,7 @@ export default function OverviewSection({
           ) : canManage && current.kind === "shared" ? (
             <div className="flex flex-wrap items-center gap-2">
               <p className="flex-1 text-xs text-slate-500">
-                危险区：删除会同时清空本工作区的自选、预警规则、回测、策略配置与通知通道，
+                危险区：删除会同时清空本工作区的自选、预警规则、回测与通知通道，
                 且不可撤销；数据不会并入个人工作区。
               </p>
               <button
@@ -212,7 +212,7 @@ export default function OverviewSection({
         title={`删除工作区「${current.name}」`}
         description={
           <>
-            本工作区现有 {current.data_total} 条数据（自选、预警规则、回测、策略配置）与全部通知通道。
+            本工作区现有 {current.data_total} 条数据（自选、预警规则、回测）与全部通知通道。
             删除会将这些数据连同工作区一起清空，<strong className="text-rose-300">不可恢复</strong>，
             且数据不会并入个人工作区。
           </>

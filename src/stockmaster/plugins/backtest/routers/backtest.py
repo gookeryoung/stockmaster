@@ -172,26 +172,13 @@ def run(
     # 配额先于任何取数与计算：被拒绝的请求不应该先花几分钟跑引擎再报 409。
     quota.enforce(session, ws.id, "backtest_runs")
     codes = [c.strip() for c in payload.codes if c.strip()]
-    if not codes and payload.screening_id is not None:
-        # 显式 codes 优先；只有为空时才用工作区的选股配置解析标的池。
-        from stockmaster.plugins.strategy.services.service import run_screening_config
-
-        screening = run_screening_config(session, payload.screening_id, ws.id)
-        codes = [item.code for item in screening.items]
-        if not codes:
-            # 明确指定了选股配置却一只都没命中：静默回退默认宇宙会让用户以为在测
-            # 自己的策略，实际测的是别的东西。宁可 409。
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="the screening config produced no candidates; adjust its filters or sync analytics first",
-            )
     if not codes:
         # 不指定标的时，「默认宇宙」在隔离模式下是本工作区的自选，而不是全站并集。
         codes = _default_codes(session, limit=50, workspace_id=ws.id if settings.data_isolation else None)
     if not codes:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="no universe available; sync data first or check the screening config",
+            detail="no universe available; sync data first",
         )
 
     adjust = "qfq"

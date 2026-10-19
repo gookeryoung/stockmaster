@@ -7,9 +7,6 @@
  */
 
 import type {
-  AlgorithmConfig,
-  AlgorithmConfigInput,
-  AlgorithmTrainResult,
   AlertPolicy,
   AlertRule,
   AlertTrigger,
@@ -30,13 +27,7 @@ import type {
   QuotesResponse,
   RestoreInspection,
   RuleTypeInfo,
-  SampleConfig,
-  SampleConfigInput,
-  SampleResolveResult,
   ScreenRow,
-  ScreeningConfig,
-  ScreeningConfigInput,
-  ScreeningRunResult,
   SystemStatus,
   TokenResponse,
   TradeOut,
@@ -555,41 +546,6 @@ export const api = {
   /** 批量因子评分：取最新因子日的 score。 */
   factorScores: (codes: string[]) =>
     request<FactorScoresResponse>(`/analysis/factors?codes=${encodeURIComponent(codes.join(","))}`),
-
-  // --- strategy configuration (workspace-scoped 选股 / 样本 / 算法) ---
-  screeningConfigs: () => request<ScreeningConfig[]>("/strategy/screenings"),
-  screeningConfig: (id: number) => request<ScreeningConfig>(`/strategy/screenings/${id}`),
-  createScreeningConfig: (payload: ScreeningConfigInput) =>
-    request<ScreeningConfig>("/strategy/screenings", { method: "POST", body: JSON.stringify(payload) }),
-  updateScreeningConfig: (id: number, payload: Partial<ScreeningConfigInput>) =>
-    request<ScreeningConfig>(`/strategy/screenings/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }),
-  deleteScreeningConfig: (id: number) => request<void>(`/strategy/screenings/${id}`, { method: "DELETE" }),
-  runScreeningConfig: (id: number) =>
-    request<ScreeningRunResult>(`/strategy/screenings/${id}/run`, { method: "POST" }),
-  sampleConfigs: () => request<SampleConfig[]>("/strategy/samples"),
-  sampleConfig: (id: number) => request<SampleConfig>(`/strategy/samples/${id}`),
-  createSampleConfig: (payload: SampleConfigInput) =>
-    request<SampleConfig>("/strategy/samples", { method: "POST", body: JSON.stringify(payload) }),
-  updateSampleConfig: (id: number, payload: Partial<SampleConfigInput>) =>
-    request<SampleConfig>(`/strategy/samples/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
-  deleteSampleConfig: (id: number) => request<void>(`/strategy/samples/${id}`, { method: "DELETE" }),
-  resolveSampleConfig: (id: number) =>
-    request<SampleResolveResult>(`/strategy/samples/${id}/resolve`, { method: "POST" }),
-  algorithmConfigs: () => request<AlgorithmConfig[]>("/strategy/algorithms"),
-  algorithmConfig: (id: number) => request<AlgorithmConfig>(`/strategy/algorithms/${id}`),
-  createAlgorithmConfig: (payload: AlgorithmConfigInput) =>
-    request<AlgorithmConfig>("/strategy/algorithms", { method: "POST", body: JSON.stringify(payload) }),
-  updateAlgorithmConfig: (id: number, payload: Partial<AlgorithmConfigInput>) =>
-    request<AlgorithmConfig>(`/strategy/algorithms/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }),
-  deleteAlgorithmConfig: (id: number) => request<void>(`/strategy/algorithms/${id}`, { method: "DELETE" }),
-  trainAlgorithmConfig: (id: number) =>
-    request<AlgorithmTrainResult>(`/strategy/algorithms/${id}/train`, { method: "POST" }),
 
   // --- system ---
   status: () => request<SystemStatus>("/system/status"),

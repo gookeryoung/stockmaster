@@ -11,8 +11,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { todayISO, yearsAgoISO } from "./format";
-import { ALL_FEATURES, DEFAULT_ALGO_PARAMS } from "./predictModules";
-import type { SampleUniverseType } from "./types";
 
 export interface MarketView {
   search: string;
@@ -26,19 +24,10 @@ export interface AnalyzeView {
   screenMinScore: string;
 }
 
-/** 预测页的模块化自定义草稿：特征子集、算法超参、测试集占比。
- *
- * 三者都作为「操作状态」持久化，刷新后原样恢复；训练时随请求即时发往后端，
- * 不新增配置记录。``params`` 与 ``testFraction`` 用字符串保存，便于输入框绑定与
- * 留空语义（留空=用后端默认）。
- */
 export interface PredictView {
   algo: string;
   horizon: number;
   detailCode: string;
-  features: string[];
-  params: Record<string, string>;
-  testFraction: string;
 }
 
 export interface BacktestView {
@@ -73,57 +62,6 @@ export interface SettingsView {
   newWatchCode: string;
 }
 
-/** 策略配置页的三个 tab 与各自的表单草稿。
- *
- * ``conditions`` 用纯文本维护（每行 ``field op value``），提交前解析成
- * ``ScreeningCondition[]``：用 JSON 文本框对普通用户太不友好，而结构化条件行
- * 编辑器在表单里会占掉半屏。``params`` 同理保存超参的字符串草稿。
- */
-export interface ScreeningConfigForm {
-  name: string;
-  description: string;
-  min_score: string;
-  max_vol: string;
-  min_amount_log: string;
-  exclude_st: boolean;
-  boards: string;
-  conditions: string;
-  order_by: string;
-  direction: "asc" | "desc";
-  limit: number;
-}
-
-export interface SampleConfigForm {
-  name: string;
-  description: string;
-  universe_type: SampleUniverseType;
-  universe_value: string;
-  start: string;
-  end: string;
-  lookback_days: number;
-  horizon: number;
-  min_bars: number;
-}
-
-export interface AlgorithmConfigForm {
-  name: string;
-  description: string;
-  algo: string;
-  sample_id: string;
-  horizon: number;
-  test_fraction: string;
-  params: Record<string, string>;
-}
-
-export type StrategyTab = "screening" | "sample" | "algorithm";
-
-export interface StrategyView {
-  tab: StrategyTab;
-  screening: ScreeningConfigForm;
-  sample: SampleConfigForm;
-  algorithm: AlgorithmConfigForm;
-}
-
 interface ViewState {
   market: MarketView;
   analyze: AnalyzeView;
@@ -131,7 +69,6 @@ interface ViewState {
   backtest: BacktestView;
   alerts: AlertsView;
   settings: SettingsView;
-  strategy: StrategyView;
 
   setMarket: (patch: Partial<MarketView>) => void;
   setAnalyze: (patch: Partial<AnalyzeView>) => void;
@@ -140,10 +77,6 @@ interface ViewState {
   setAlerts: (patch: Partial<Omit<AlertsView, "form">>) => void;
   setAlertForm: (patch: Partial<AlertRuleForm>) => void;
   setSettings: (patch: Partial<SettingsView>) => void;
-  setStrategy: (patch: Partial<Omit<StrategyView, "screening" | "sample" | "algorithm">>) => void;
-  setScreeningForm: (patch: Partial<ScreeningConfigForm>) => void;
-  setSampleForm: (patch: Partial<SampleConfigForm>) => void;
-  setAlgorithmForm: (patch: Partial<AlgorithmConfigForm>) => void;
 }
 
 const DEFAULT_MARKET: MarketView = { search: "", selected: "600519.SH", adjust: "qfq" };
@@ -152,14 +85,7 @@ const DEFAULT_ANALYZE: AnalyzeView = {
   correlationInput: "600519.SH,000001.SZ,300750.SZ",
   screenMinScore: "",
 };
-const DEFAULT_PREDICT: PredictView = {
-  algo: "hist_gbdt",
-  horizon: 1,
-  detailCode: "",
-  features: [...ALL_FEATURES],
-  params: { ...DEFAULT_ALGO_PARAMS.hist_gbdt },
-  testFraction: "",
-};
+const DEFAULT_PREDICT: PredictView = { algo: "hist_gbdt", horizon: 1, detailCode: "" };
 const DEFAULT_BACKTEST: BacktestView = {
   strategy: "buy_hold",
   codes: "600519.SH",
@@ -185,42 +111,6 @@ const DEFAULT_ALERTS: AlertsView = {
   params: { threshold: "100", direction: "above" },
 };
 const DEFAULT_SETTINGS: SettingsView = { newWatchCode: "" };
-const DEFAULT_STRATEGY: StrategyView = {
-  tab: "screening",
-  screening: {
-    name: "",
-    description: "",
-    min_score: "60",
-    max_vol: "",
-    min_amount_log: "",
-    exclude_st: true,
-    boards: "",
-    conditions: "",
-    order_by: "score",
-    direction: "desc",
-    limit: 50,
-  },
-  sample: {
-    name: "",
-    description: "",
-    universe_type: "watchlist",
-    universe_value: "default",
-    start: "",
-    end: "",
-    lookback_days: 730,
-    horizon: 5,
-    min_bars: 60,
-  },
-  algorithm: {
-    name: "",
-    description: "",
-    algo: "hist_gbdt",
-    sample_id: "",
-    horizon: 5,
-    test_fraction: "0.2",
-    params: { max_iter: "300", learning_rate: "0.05", max_depth: "4", min_samples_leaf: "50" },
-  },
-};
 
 export const useViewState = create<ViewState>()(
   persist(
@@ -235,12 +125,6 @@ export const useViewState = create<ViewState>()(
         params: { ...DEFAULT_ALERTS.params },
       },
       settings: { ...DEFAULT_SETTINGS },
-      strategy: {
-        ...DEFAULT_STRATEGY,
-        screening: { ...DEFAULT_STRATEGY.screening },
-        sample: { ...DEFAULT_STRATEGY.sample },
-        algorithm: { ...DEFAULT_STRATEGY.algorithm, params: { ...DEFAULT_STRATEGY.algorithm.params } },
-      },
 
       setMarket: (patch) => set((state) => ({ market: { ...state.market, ...patch } })),
       setAnalyze: (patch) => set((state) => ({ analyze: { ...state.analyze, ...patch } })),
@@ -250,34 +134,10 @@ export const useViewState = create<ViewState>()(
       setAlertForm: (patch) =>
         set((state) => ({ alerts: { ...state.alerts, form: { ...state.alerts.form, ...patch } } })),
       setSettings: (patch) => set((state) => ({ settings: { ...state.settings, ...patch } })),
-      setStrategy: (patch) => set((state) => ({ strategy: { ...state.strategy, ...patch } })),
-      setScreeningForm: (patch) =>
-        set((state) => ({ strategy: { ...state.strategy, screening: { ...state.strategy.screening, ...patch } } })),
-      setSampleForm: (patch) =>
-        set((state) => ({ strategy: { ...state.strategy, sample: { ...state.strategy.sample, ...patch } } })),
-      setAlgorithmForm: (patch) =>
-        set((state) => ({
-          strategy: { ...state.strategy, algorithm: { ...state.strategy.algorithm, ...patch } },
-        })),
     }),
     {
       name: "stockmaster.view",
       version: 1,
-      // 预测页现在多了 features/params/testFraction。对 predict 做一层深合并，
-      // 让缺这些字段的旧本地草稿回落到默认值，而不是变成 undefined 让页面读取时崩溃。
-      merge: (persisted, current) => {
-        const saved = (persisted ?? {}) as Partial<ViewState>;
-        return {
-          ...current,
-          market: saved.market ?? current.market,
-          analyze: saved.analyze ?? current.analyze,
-          predict: { ...current.predict, ...(saved.predict ?? {}) },
-          backtest: saved.backtest ?? current.backtest,
-          alerts: saved.alerts ?? current.alerts,
-          settings: saved.settings ?? current.settings,
-          strategy: saved.strategy ?? current.strategy,
-        };
-      },
       partialize: (state) => ({
         market: state.market,
         analyze: state.analyze,
@@ -285,7 +145,6 @@ export const useViewState = create<ViewState>()(
         backtest: state.backtest,
         alerts: state.alerts,
         settings: state.settings,
-        strategy: state.strategy,
       }),
     },
   ),

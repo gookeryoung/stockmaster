@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict
 class WorkspaceUsagePointOut(BaseModel):
     """趋势图上的一个点：某个工作区在某一天的用量快照。
 
-    分项与 ``quota.USAGE_COUNTERS`` 的键一一对应，``data_total``/``config_total``
-    是派生的聚合值，前端不需要自己再相加。
+    分项与 ``quota.USAGE_COUNTERS`` 的键一一对应，``data_total`` 是派生的聚合值，
+    前端不需要自己再相加。
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -22,7 +22,6 @@ class WorkspaceUsagePointOut(BaseModel):
     watchlist_items: int
     alert_rules: int
     backtest_runs: int
-    config_total: int
 
 
 __all__ = ["WorkspaceUsagePointOut"]
