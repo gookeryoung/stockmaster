@@ -22,7 +22,7 @@ htmlcov
 .tox
 coverage.xml
 
-# 前端依赖与构建产物（Dockerfile 只复制 src/，无需送入构建上下文）
+# 前端依赖与构建产物
 frontend/node_modules
 frontend/dist
 frontend/.vite
@@ -34,7 +34,7 @@ frontend/playwright-report
 .e2e
 reports
 
-# 本地研究数据与模型产物（体积可达数百 MB，绝不进入镜像）
+# 本地研究数据与模型产物
 data
 *.db
 *.db-wal
@@ -46,10 +46,11 @@ data
 logs
 *.log
 
-# 运行期配置与备份归档（绝不打进镜像；配置由 compose 的 environment 注入）
+# 运行期配置与备份归档
 .env
 .env.*
 backups
+
 
 # 工作区元数据
 .workbuddy
