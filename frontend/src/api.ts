@@ -456,7 +456,13 @@ export const api = {
   // --- prediction ---
   models: (horizon?: number) =>
     request<ModelCard[]>(`/predict/models${horizon ? `?horizon=${horizon}` : ""}`),
-  train: (payload: { algo: string; horizon?: number }) =>
+  train: (payload: {
+    algo: string;
+    horizon?: number;
+    features?: string[];
+    algo_params?: Record<string, number>;
+    test_fraction?: number;
+  }) =>
     request<Record<string, unknown>>("/predict/train", {
       method: "POST",
       body: JSON.stringify(payload),

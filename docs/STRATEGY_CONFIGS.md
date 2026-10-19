@@ -142,6 +142,10 @@
 抛异常。不传的键用代码内置默认值，`random_state` 由服务端统一注入以保证可复现
 （不允许在配置里覆盖随机种子）。
 
+> 预测页的「页面内即时自定义」复用**同一份** `PARAM_SPECS` 白名单：`POST /predict/train`
+> 接受可选的 `algo_params` / `features` / `test_fraction`，在训练前完成同样的校验后透传，
+> 但不写入 `algorithm_configs`（一次性试算，不落库）。不传这三项时行为与旧版一致。
+
 | 算法 | 可用超参（类型，范围） | 内置默认（未配置时） |
 |---|---|---|
 | `hist_gbdt` | `max_iter`(int, 10–5000)、`learning_rate`(float, 0.0001–1.0)、`max_depth`(int, 1–32)、`min_samples_leaf`(int, 1–10000)、`l2_regularization`(float, 0–100) | `300 / 0.05 / 4 / 50 / 1.0` |

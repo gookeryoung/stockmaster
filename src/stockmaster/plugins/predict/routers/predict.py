@@ -14,7 +14,11 @@ from stockmaster.core.errors import InsufficientData, ModelNotTrained
 from stockmaster.core.logging import get_logger
 from stockmaster.db.models import Instrument, ModelRegistry, Prediction
 from stockmaster.db.session import session_scope
-from stockmaster.plugins.predict.services.dataset import load_bars_by_symbol
+from stockmaster.plugins.predict.services.dataset import (
+    FEATURE_COLUMNS,
+    MIN_FEATURES_PRESENT,
+    load_bars_by_symbol,
+)
 from stockmaster.plugins.predict.services.train import load_active_model, score_symbols
 from stockmaster.schemas import (
     ModelCard,
@@ -62,6 +66,35 @@ def list_models(
     return [_card(row) for row in session.execute(stmt).scalars()]
 
 
+def _resolve_features(requested: list[str] | None) -> tuple[tuple[str, ...], int]:
+    """把页面选择的特征子集规范成 ``build_dataset`` 的入参。
+
+    未指定（``None``）时用全部特征，保持既有默认行为；显式空集合或含未知特征名
+    直接 422，而不是悄悄用一个被裁剪过的输入训练出一个无法解释的模型。
+    """
+    if requested is None:
+        return FEATURE_COLUMNS, MIN_FEATURES_PRESENT
+
+    unknown = sorted({name for name in requested if name not in FEATURE_COLUMNS})
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"unknown features: {', '.join(unknown)}",
+        )
+    if not requested:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="select at least one feature",
+        )
+
+    chosen = set(requested)
+    # 按 FEATURE_COLUMNS 的规范顺序去重，保证同一选择可复现。
+    selected = tuple(name for name in FEATURE_COLUMNS if name in chosen)
+    # 子集不可能满足全量缺失门槛，按比例收紧，否则所有行都会因「缺失过多」被丢弃。
+    min_present = max(1, min(MIN_FEATURES_PRESENT, round(len(selected) / 2)))
+    return selected, min_present
+
+
 @router.post("/predict/train", response_model=TrainResponse)
 def train(payload: TrainRequest, session: Session = Depends(db_session)):
     """Train a model on the stored universe.
@@ -69,8 +102,12 @@ def train(payload: TrainRequest, session: Session = Depends(db_session)):
     Runs synchronously because the default universe is small enough (a few
     hundred symbols) to finish in seconds; a full-market train belongs in the
     scheduler rather than an HTTP request.
+
+    预测页会按请求即时自定义流水线（特征子集、算法超参、测试集占比），这里统一
+    校验并透传；三者都不传时行为与从前完全一致。
     """
     from stockmaster.jobs.tasks import _default_universe
+    from stockmaster.plugins.strategy.services.algorithm import validate_algo_params
 
     codes = payload.codes or _default_universe()
     if not codes:
@@ -86,13 +123,28 @@ def train(payload: TrainRequest, session: Session = Depends(db_session)):
             detail="no stored daily bars for the requested universe",
         )
 
+    feature_columns, min_features_present = _resolve_features(payload.features)
+    # 复用算法超参白名单：未知键/越界/类型错误在训练前就以 422 拒绝。
+    algo_params = validate_algo_params(payload.algo, payload.algo_params or {})
+
     try:
         if payload.horizon is not None:
             from stockmaster.plugins.predict.services.dataset import build_dataset
             from stockmaster.plugins.predict.services.train import train_model
 
-            dataset = build_dataset(bars, horizon=payload.horizon)
-            model = train_model(dataset, algo=payload.algo, persist=True)
+            dataset = build_dataset(
+                bars,
+                horizon=payload.horizon,
+                feature_columns=feature_columns,
+                min_features_present=min_features_present,
+            )
+            model = train_model(
+                dataset,
+                algo=payload.algo,
+                test_fraction=payload.test_fraction,
+                algo_params=algo_params,
+                persist=True,
+            )
             return TrainResponse(
                 model_id=model.model_id,
                 horizon=payload.horizon,
@@ -103,7 +155,15 @@ def train(payload: TrainRequest, session: Session = Depends(db_session)):
 
         from stockmaster.plugins.predict.services.train import train_all_horizons
 
-        models = train_all_horizons(bars, algo=payload.algo, persist=True)
+        models = train_all_horizons(
+            bars,
+            algo=payload.algo,
+            feature_columns=feature_columns,
+            min_features_present=min_features_present,
+            test_fraction=payload.test_fraction,
+            algo_params=algo_params,
+            persist=True,
+        )
     except InsufficientData as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 

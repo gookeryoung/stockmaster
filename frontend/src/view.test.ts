@@ -22,6 +22,11 @@ describe("默认视图状态", () => {
     expect(state.backtest.start < state.backtest.end).toBe(true);
     expect(state.strategy.tab).toBe("screening");
     expect(state.strategy.algorithm.params.max_iter).toBe("300");
+    // 预测页默认选满全部特征、带上当前算法的默认超参。
+    const { ALL_FEATURES } = await import("./predictModules");
+    expect(state.predict.features).toEqual(ALL_FEATURES);
+    expect(state.predict.params.max_iter).toBe("300");
+    expect(state.predict.testFraction).toBe("");
   });
 });
 
@@ -76,6 +81,40 @@ describe("状态更新", () => {
 
     expect(useViewState.getState().backtest.cash).toBe(500_000);
     expect(useViewState.getState().backtest.topN).toBe(before.topN);
+  });
+});
+
+describe("预测页模块化自定义草稿", () => {
+  it("setPredict 浅合并：改特征子集不影响超参与周期", async () => {
+    const { useViewState } = await load();
+
+    useViewState.getState().setPredict({ features: ["ret_1", "rsi_14"] });
+
+    const predict = useViewState.getState().predict;
+    expect(predict.features).toEqual(["ret_1", "rsi_14"]);
+    expect(predict.params.learning_rate).toBe("0.05");
+    expect(predict.horizon).toBe(1);
+  });
+
+  it("v1 旧草稿缺失的新字段被 migrate 补成默认值", async () => {
+    localStorage.setItem(
+      PERSIST_KEY,
+      JSON.stringify({
+        version: 1,
+        state: { predict: { algo: "logistic", horizon: 5, detailCode: "600519.SH" } },
+      }),
+    );
+
+    const { useViewState } = await load();
+    const predict = useViewState.getState().predict;
+    // 已有字段保留
+    expect(predict.algo).toBe("logistic");
+    expect(predict.horizon).toBe(5);
+    expect(predict.detailCode).toBe("600519.SH");
+    // 新增字段回落默认，而不是 undefined（否则页面读取 features 会崩溃）
+    expect(Array.isArray(predict.features)).toBe(true);
+    expect(predict.features.length).toBeGreaterThan(0);
+    expect(predict.testFraction).toBe("");
   });
 });
 

@@ -15,6 +15,8 @@ from stockmaster.core.logging import get_logger
 from stockmaster.db.models import ModelRegistry, Prediction
 from stockmaster.db.session import session_scope
 from stockmaster.plugins.predict.services.dataset import (
+    FEATURE_COLUMNS,
+    MIN_FEATURES_PRESENT,
     Dataset,
     Split,
     build_dataset,
@@ -297,17 +299,37 @@ def train_all_horizons(
     *,
     horizons: list[int] | None = None,
     algo: str = "hist_gbdt",
+    feature_columns: tuple[str, ...] = FEATURE_COLUMNS,
+    min_features_present: int = MIN_FEATURES_PRESENT,
+    test_fraction: float | None = None,
+    algo_params: dict | None = None,
     persist: bool = True,
 ) -> dict[int, TrainedModel]:
-    """Train one model per horizon."""
+    """Train one model per horizon.
+
+    ``feature_columns`` / ``min_features_present`` / ``test_fraction`` /
+    ``algo_params`` are forwarded so a caller can customise the pipeline for every
+    horizon in one call; the defaults reproduce the historical behaviour.
+    """
     horizons = horizons or settings.horizons
     models: dict[int, TrainedModel] = {}
     for horizon in horizons:
-        dataset = build_dataset(bars_by_symbol, horizon=horizon)
+        dataset = build_dataset(
+            bars_by_symbol,
+            horizon=horizon,
+            feature_columns=feature_columns,
+            min_features_present=min_features_present,
+        )
         if dataset.frame.empty:
             log.warning("skipping horizon=%d: empty dataset", horizon)
             continue
-        models[horizon] = train_model(dataset, algo=algo, persist=persist)
+        models[horizon] = train_model(
+            dataset,
+            algo=algo,
+            test_fraction=test_fraction,
+            algo_params=algo_params,
+            persist=persist,
+        )
     if not models:
         raise InsufficientData("no horizon produced a trainable dataset")
     return models

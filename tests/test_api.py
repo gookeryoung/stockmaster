@@ -296,6 +296,38 @@ class TestPrediction:
         response = client.post("/api/v1/predict/train", json={"algo": "bogus"})
         assert response.status_code == 422
 
+    def test_train_with_custom_modules(self, client):
+        """预测页即时自定义：特征子集 + 超参 + 测试集占比要真正透传到训练。"""
+        response = client.post(
+            "/api/v1/predict/train",
+            json={
+                "algo": "hist_gbdt",
+                "horizon": 1,
+                "features": ["ret_1", "ret_5", "rsi_14"],
+                "algo_params": {"max_iter": 150, "learning_rate": 0.1},
+                "test_fraction": 0.3,
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["model_id"]
+        # 只保留所选特征，且顺序规范化为 FEATURE_COLUMNS 的定义顺序。
+        assert body["metrics"]["dataset"]["feature_columns"] == ["ret_1", "ret_5", "rsi_14"]
+
+    def test_train_rejects_unknown_feature(self, client):
+        response = client.post(
+            "/api/v1/predict/train",
+            json={"algo": "hist_gbdt", "horizon": 1, "features": ["not_a_feature"]},
+        )
+        assert response.status_code == 422
+
+    def test_train_rejects_out_of_range_param(self, client):
+        response = client.post(
+            "/api/v1/predict/train",
+            json={"algo": "hist_gbdt", "horizon": 1, "algo_params": {"max_iter": 10_000_000}},
+        )
+        assert response.status_code == 422
+
 
 class TestBacktest:
     def test_buy_and_hold_runs(self, client):

@@ -217,6 +217,11 @@ class TrainRequest(BaseModel):
     algo: Literal["hist_gbdt", "random_forest", "logistic"] = "hist_gbdt"
     horizon: int | None = Field(default=None, ge=1, le=60)
     codes: list[str] | None = None
+    # 预测页的「模块化即时自定义」。留空即沿用服务端默认（全部特征、内置超参、
+    # settings.test_fraction），因此老调用方不受影响。
+    features: list[str] | None = None
+    algo_params: dict[str, int | float] | None = None
+    test_fraction: float | None = Field(default=None, gt=0, lt=1)
 
 
 class TrainResponse(BaseModel):

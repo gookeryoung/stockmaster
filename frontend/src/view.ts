@@ -11,6 +11,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { todayISO, yearsAgoISO } from "./format";
+import { ALL_FEATURES, DEFAULT_ALGO_PARAMS } from "./predictModules";
 import type { SampleUniverseType } from "./types";
 
 export interface MarketView {
@@ -25,10 +26,19 @@ export interface AnalyzeView {
   screenMinScore: string;
 }
 
+/** 预测页的模块化自定义草稿：特征子集、算法超参、测试集占比。
+ *
+ * 三者都作为「操作状态」持久化，刷新后原样恢复；训练时随请求即时发往后端，
+ * 不新增配置记录。``params`` 与 ``testFraction`` 用字符串保存，便于输入框绑定与
+ * 留空语义（留空=用后端默认）。
+ */
 export interface PredictView {
   algo: string;
   horizon: number;
   detailCode: string;
+  features: string[];
+  params: Record<string, string>;
+  testFraction: string;
 }
 
 export interface BacktestView {
@@ -142,7 +152,14 @@ const DEFAULT_ANALYZE: AnalyzeView = {
   correlationInput: "600519.SH,000001.SZ,300750.SZ",
   screenMinScore: "",
 };
-const DEFAULT_PREDICT: PredictView = { algo: "hist_gbdt", horizon: 1, detailCode: "" };
+const DEFAULT_PREDICT: PredictView = {
+  algo: "hist_gbdt",
+  horizon: 1,
+  detailCode: "",
+  features: [...ALL_FEATURES],
+  params: { ...DEFAULT_ALGO_PARAMS.hist_gbdt },
+  testFraction: "",
+};
 const DEFAULT_BACKTEST: BacktestView = {
   strategy: "buy_hold",
   codes: "600519.SH",
@@ -246,6 +263,21 @@ export const useViewState = create<ViewState>()(
     {
       name: "stockmaster.view",
       version: 1,
+      // 预测页现在多了 features/params/testFraction。对 predict 做一层深合并，
+      // 让缺这些字段的旧本地草稿回落到默认值，而不是变成 undefined 让页面读取时崩溃。
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<ViewState>;
+        return {
+          ...current,
+          market: saved.market ?? current.market,
+          analyze: saved.analyze ?? current.analyze,
+          predict: { ...current.predict, ...(saved.predict ?? {}) },
+          backtest: saved.backtest ?? current.backtest,
+          alerts: saved.alerts ?? current.alerts,
+          settings: saved.settings ?? current.settings,
+          strategy: saved.strategy ?? current.strategy,
+        };
+      },
       partialize: (state) => ({
         market: state.market,
         analyze: state.analyze,
