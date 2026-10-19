@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import type { EChartsOption } from "echarts";
 import { api } from "../api";
 import EChart from "../components/EChart";
+import SymbolInput from "../components/SymbolInput";
 import KlineChart, { type KlineMarker } from "../components/KlineChart";
 import { formatNumber, formatPct, sideColor } from "../format";
 import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
@@ -181,7 +182,13 @@ export default function Backtest() {
           </div>
           <div className="sm:col-span-2">
             <label className="label">标的（逗号分隔）</label>
-            <input className="input w-full" value={codes} onChange={(e) => setBacktest({ codes: e.target.value })} />
+            <SymbolInput
+              multiple
+              value={codes}
+              onChange={(next) => setBacktest({ codes: next })}
+              placeholder="输入代码或名称联想，如 600519 / 茅台"
+              aria-label="回测标的"
+            />
           </div>
           <div>
             <label className="label">开始日期</label>

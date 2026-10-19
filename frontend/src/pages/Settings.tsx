@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import BackupPanel from "../components/BackupPanel";
+import SymbolInput from "../components/SymbolInput";
 import { formatCompact } from "../format";
 import { useViewState } from "../view";
 
@@ -125,11 +126,12 @@ export default function Settings() {
       <div className="card space-y-3">
         <div className="text-sm font-medium text-slate-300">自选股</div>
         <div className="flex flex-wrap items-center gap-2">
-          <input
-            className="input w-full sm:w-40"
+          <SymbolInput
+            className="w-full sm:w-40"
             placeholder="如 600519.SH"
             value={newWatchCode}
-            onChange={(event) => setSettings({ newWatchCode: event.target.value })}
+            onChange={(next) => setSettings({ newWatchCode: next })}
+            aria-label="新增自选代码"
           />
           <button
             className="btn"

@@ -23,7 +23,7 @@ test.describe("backtest", () => {
   });
 
   test("empty codes falls back to the default universe", async ({ page }) => {
-    await page.locator("label:has-text('标的（逗号分隔）') + input").fill("");
+    await page.getByLabel("回测标的").fill("");
     await page.getByRole("button", { name: "开始回测" }).click();
 
     // 空清单由后端回落到默认池，页面不应崩在空白态
@@ -31,7 +31,7 @@ test.describe("backtest", () => {
   });
 
   test("unknown symbol surfaces a readable error", async ({ page }) => {
-    await page.locator("label:has-text('标的（逗号分隔）') + input").fill("NOT-A-CODE");
+    await page.getByLabel("回测标的").fill("NOT-A-CODE");
     await page.getByRole("button", { name: "开始回测" }).click();
 
     await expect(page.getByText(/no stored bars|没有|无|失败/i).first()).toBeVisible({ timeout: 30_000 });
