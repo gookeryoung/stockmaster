@@ -1,32 +1,31 @@
-# --- Python-generated ---
+# Python-generated files
 __pycache__/
-*.py[cod]
-*.egg-info/
+*.py[ocd]
 build/
 dist/
 wheels/
+*.egg-info
 
-# --- Virtual environments ---
-.venv/
-venv/
+# Virtual environments
+.venv
 
-# --- 测试与覆盖率 ---
-.pytest_cache/
+# 测试与覆盖率
 .coverage
 .coverage.*
-coverage.json
-coverage.xml
 htmlcov/
+coverage.xml
+.tox/
 
-# --- 文档构建输出 ---
-docs/_build/
-
-# --- 工具缓存 ---
-.ruff_cache/
+# 工具缓存
+.eslintcache/
 .mypy_cache/
-.pyreflex_cache/
-.uv-cache/
+.pnpm-store/
 .pytmp/
+.pytest_cache/
+.pyrefly_cache/
+.ruff_cache/
+.uv-cache/
+.vitest-cache/
 
 # --- Node / frontend ---
 node_modules/
@@ -35,10 +34,16 @@ frontend/dist/
 frontend/.vite/
 frontend/coverage/
 frontend/.eslintcache
-*.tsbuildinfo
-# 已使用 pnpm，不再使用 npm 的冗余 lock 文件
 frontend/package-lock.json
+*.tsbuildinfo
 package-lock.json
+
+# --- E2E（Playwright）---
+.e2e/
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e-report/
+reports/
 
 # --- Data & artifacts（绝不提交）---
 # 数据库为本地研究数据，体积可达数百 MB
@@ -53,28 +58,16 @@ data/
 *.log
 logs/
 
-# --- 本地环境与凭证 ---
-.env
-.env.local
-.env.*
-# 示例配置必须入库（.env.* 会误伤它）
-!.env.example
-!deploy/.env.prod.example
+# IDE
+.idea/
+*_profile.html
 
-# --- 本地协作产物 ---
-# 规则文件入库（团队共享的开发约定），其余工作区内容不入库
+# 本地协作产物一律不入库
 .trae/*
 !.trae/rules/
 !.trae/skills/
 .claude/
 .workbuddy/
-
-# --- E2E（Playwright）---
-.e2e/
-frontend/test-results/
-frontend/playwright-report/
-frontend/e2e-report/
-reports/
 
 # --- OS / editor ---
 Thumbs.db
@@ -85,3 +78,15 @@ desktop.ini
 *.bak
 *backup-*.tar.gz
 pytest-of-*
+
+# --- 本地环境与凭证 ---
+.env
+.env.local
+.env.*
+# 示例配置必须入库（.env.* 会误伤它）
+!.env.example
+!deploy/.env.prod.example
+
+# Sphinx 文档构建输出
+docs/_build/
+.preview
