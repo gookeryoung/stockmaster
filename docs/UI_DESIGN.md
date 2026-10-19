@@ -117,6 +117,9 @@ StockMaster 是单机可部署的 A 股日线量化研究工作台，闭环是
   wechat_mode / has_users / workspace_enabled / version`，前端据此决定入口显隐。
 - **状态栏**：`frontend/src/StatusBar.tsx` 每 30s 轮询 `/system/status`，展示版本、日线行数、
   调度器、数据源熔断；后端不可达时降级为黄色横幅。
+- **代码输入联想**：`frontend/src/components/SymbolInput.tsx` 统一提供「代码 / 名称」联想
+  （复用 `GET /stocks?q=`）；`multiple` 支持逗号分隔的多标的、只替换光标所在段并保留已录入
+  代码。回测标的、分析因子/相关性、策略样本代码、预警范围代码与设置页新增自选均复用该组件。
 - **查询失效**：TanStack Query；切换工作区通过 `<Routes key={currentId}>` 整树重挂载。
 
 ### 2.4 现状问题清单（设计要解决的）

@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import AddToWatchlistDialog from "../components/AddToWatchlistDialog";
 import EChart from "../components/EChart";
+import SymbolInput from "../components/SymbolInput";
 import { formatNumber, formatPct, changeColor } from "../format";
 import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
 import { useViewState } from "../view";
@@ -126,11 +127,12 @@ export default function Analyze() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <input
-          className="input w-full sm:w-48"
+        <SymbolInput
+          className="w-full sm:w-48"
           value={code}
-          onChange={(event) => setAnalyze({ code: event.target.value.trim().toUpperCase() })}
+          onChange={(next) => setAnalyze({ code: next.toUpperCase() })}
           placeholder="证券代码"
+          aria-label="因子标的代码"
         />
         <span className="text-xs text-slate-500">
           因子由“设置 → 运行分析任务”批量计算后存入数据库
@@ -287,10 +289,12 @@ export default function Analyze() {
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-0 flex-1 sm:min-w-[280px]">
             <label className="label">代码（逗号分隔，最多 30 个）</label>
-            <input
-              className="input w-full"
+            <SymbolInput
+              multiple
               value={correlationInput}
-              onChange={(event) => setAnalyze({ correlationInput: event.target.value })}
+              onChange={(next) => setAnalyze({ correlationInput: next })}
+              placeholder="输入代码或名称联想，如 600519 / 茅台"
+              aria-label="相关性标的代码"
             />
           </div>
           <button

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import SymbolInput from "../components/SymbolInput";
 import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
 import { useViewState } from "../view";
 import type { RuleTypeInfo } from "../types";
@@ -176,11 +177,26 @@ export default function Alerts() {
                   ? "指数代码"
                   : "代码（逗号分隔）"}
             </label>
-            <input
-              className="input w-full"
-              value={form.scope_value}
-              onChange={(e) => setAlertForm({ scope_value: e.target.value })}
-            />
+            {form.scope_type === "watchlist" ? (
+              <input
+                className="input w-full"
+                value={form.scope_value}
+                onChange={(e) => setAlertForm({ scope_value: e.target.value })}
+              />
+            ) : (
+              <SymbolInput
+                multiple={form.scope_type !== "index"}
+                includeIndices={form.scope_type === "index"}
+                value={form.scope_value}
+                onChange={(next) => setAlertForm({ scope_value: next })}
+                placeholder={
+                  form.scope_type === "index"
+                    ? "如 000300.SH"
+                    : "输入代码或名称联想，如 600519 / 茅台"
+                }
+                aria-label={form.scope_type === "index" ? "指数代码" : "范围代码"}
+              />
+            )}
           </div>
           <div>
             <label className="label">最低成交额（元）</label>

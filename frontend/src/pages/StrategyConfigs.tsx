@@ -19,6 +19,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import AddToWatchlistDialog from "../components/AddToWatchlistDialog";
+import SymbolInput from "../components/SymbolInput";
 import { formatDateTime, formatNumber } from "../format";
 import { canWriteWorkspace, useCurrentWorkspace } from "../workspace";
 import { useViewState } from "../view";
@@ -817,11 +818,12 @@ function SamplePanel() {
             {form.universe_type === "codes" && (
               <>
                 <label className="label">代码（逗号分隔）</label>
-                <input
-                  className="input w-full"
+                <SymbolInput
+                  multiple
                   value={form.universe_value}
-                  onChange={(event) => setSampleForm({ universe_value: event.target.value })}
+                  onChange={(next) => setSampleForm({ universe_value: next })}
                   placeholder="600519.SH,000001.SZ"
+                  aria-label="样本标的代码"
                 />
               </>
             )}
