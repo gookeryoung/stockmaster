@@ -73,4 +73,35 @@ describe("runOneClickSync", () => {
     expect(final.find((s) => s.key === "calendar")!.status).toBe("done");
     expect(final.find((s) => s.key === "daily")!.status).toBe("done");
   });
+
+  it("signal 已中止时不启动任何环节，整条链路标为已停止", async () => {
+    const runJob = vi.fn(async (job: string) => ({ job, detail: { message: `${job} 完成`, failed: 0 } }));
+    const controller = new AbortController();
+    controller.abort();
+
+    const final = await runOneClickSync(runJob, () => {}, { signal: controller.signal });
+
+    expect(runJob).not.toHaveBeenCalled();
+    expect(final.every((s) => s.status === "stopped")).toBe(true);
+  });
+
+  it("执行中被中止：当前与后续环节标为已停止，已完成环节保留", async () => {
+    const controller = new AbortController();
+    const runJob = vi.fn(async (job: string) => {
+      if (job === "instruments") {
+        // 模拟点击「停止」：中止在途请求后抛出 AbortError。
+        controller.abort();
+        throw new Error("已中止");
+      }
+      return { job, detail: { message: `${job} 完成`, failed: 0 } };
+    });
+
+    const final = await runOneClickSync(runJob, () => {}, { signal: controller.signal });
+
+    expect(runJob).toHaveBeenCalledTimes(2);
+    expect(final.find((s) => s.key === "calendar")!.status).toBe("done");
+    expect(final.find((s) => s.key === "instruments")!.status).toBe("stopped");
+    expect(final.find((s) => s.key === "index_daily")!.status).toBe("stopped");
+    expect(final.find((s) => s.key === "daily")!.status).toBe("stopped");
+  });
 });

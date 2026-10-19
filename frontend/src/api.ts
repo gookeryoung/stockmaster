@@ -549,13 +549,13 @@ export const api = {
 
   // --- system ---
   status: () => request<SystemStatus>("/system/status"),
-  runJob: (job: string, params: Record<string, string | number | boolean> = {}) => {
+  runJob: (job: string, params: Record<string, string | number | boolean> = {}, signal?: AbortSignal) => {
     const search = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => search.set(key, String(value)));
     const query = search.toString();
     return request<{ job: string; detail: Record<string, unknown> }>(
       `/system/jobs/${job}${query ? `?${query}` : ""}`,
-      { method: "POST" },
+      { method: "POST", signal },
     );
   },
 };

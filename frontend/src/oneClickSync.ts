@@ -23,7 +23,7 @@ export const SYNC_STEPS: SyncStep[] = [
   { key: "daily", label: "同步个股日线", hint: "按自选股/指数成分增量拉取" },
 ];
 
-export type StepStatus = "pending" | "running" | "done" | "failed";
+export type StepStatus = "pending" | "running" | "done" | "failed" | "stopped";
 
 export interface StepState extends SyncStep {
   status: StepStatus;
@@ -35,7 +35,11 @@ export interface JobRunResult {
   detail: Record<string, unknown>;
 }
 
-export type RunJob = (job: string, params?: Record<string, string | number | boolean>) => Promise<JobRunResult>;
+export type RunJob = (
+  job: string,
+  params?: Record<string, string | number | boolean>,
+  signal?: AbortSignal,
+) => Promise<JobRunResult>;
 
 export function initialStepStates(steps: SyncStep[] = SYNC_STEPS): StepState[] {
   return steps.map((step) => ({ ...step, status: "pending", message: "等待中" }));
@@ -58,27 +62,44 @@ export function stepMessage(detail: Record<string, unknown>): string {
   return parts.join("，");
 }
 
+/** 把从 ``from`` 起（含当前）的未完成环节统一标记为「已停止」。 */
+function markStopped(states: StepState[], from: number): void {
+  for (let index = from; index < states.length; index += 1) {
+    states[index] = { ...states[index], status: "stopped", message: "已停止" };
+  }
+}
+
 /** 顺序执行各环节，每步开始/结束都回调最新状态，供 UI 实时渲染。
  *
  * 某一步失败不会中断后续环节：链路是有依赖的，让用户一次看到全部环节的结果
  * （哪一步真的坏了、哪些是连带失败）比只跑一半更有用。
+ *
+ * 传 ``signal`` 时支持外部中止：链路只在被显式 ``abort`` 时停止，自身不会自行中断；
+ * 中止后当前环节与后续环节都标记为「已停止」，已完成的结果保留。
  */
 export async function runOneClickSync(
   runJob: RunJob,
   onUpdate: (steps: StepState[]) => void,
-  options: { steps?: SyncStep[]; params?: Record<string, string | number | boolean> } = {},
+  options: { steps?: SyncStep[]; params?: Record<string, string | number | boolean>; signal?: AbortSignal } = {},
 ): Promise<StepState[]> {
   const steps = options.steps ?? SYNC_STEPS;
   const params = options.params ?? {};
+  const signal = options.signal;
   const states = initialStepStates(steps);
   const emit = () => onUpdate(states.map((state) => ({ ...state })));
 
   emit();
   for (let index = 0; index < states.length; index += 1) {
+    // 上一步结束后才收到停止请求：不再启动新环节。
+    if (signal?.aborted) {
+      markStopped(states, index);
+      emit();
+      return states;
+    }
     states[index] = { ...states[index], status: "running", message: "进行中…" };
     emit();
     try {
-      const result = await runJob(states[index].key, params);
+      const result = await runJob(states[index].key, params, signal);
       const detail = result?.detail ?? {};
       const failed = Number(detail.failed ?? 0);
       states[index] = {
@@ -87,6 +108,12 @@ export async function runOneClickSync(
         message: stepMessage(detail),
       };
     } catch (error) {
+      // 中止导致的请求失败不算真的失败：整条链路标为已停止。
+      if (signal?.aborted) {
+        markStopped(states, index);
+        emit();
+        return states;
+      }
       states[index] = { ...states[index], status: "failed", message: `失败：${(error as Error).message}` };
     }
     emit();
