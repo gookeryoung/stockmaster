@@ -34,6 +34,8 @@ frontend/dist/
 frontend/.vite/
 frontend/coverage/
 frontend/.eslintcache
+*.tsbuildinfo
+# 已使用 pnpm，不再使用 npm 的冗余 lock 文件
 frontend/package-lock.json
 *.tsbuildinfo
 package-lock.json

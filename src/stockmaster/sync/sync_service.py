@@ -64,6 +64,20 @@ class SyncReport:
             "error_count": len(self.errors),
         }
 
+    def summary(self) -> str:
+        """One-line Chinese outcome for job results and the UI.
+
+        Kept generic across job types: ``processed`` counts whatever unit the job
+        handles (symbols for daily, days for calendar) and ``bars_written`` is the
+        row count that actually landed. Unlike a bare counter dump, a failed run
+        never reads as success — the user must be able to tell what to retry.
+        """
+        if self.failed and not self.bars_written:
+            return f"同步失败：{self.failed} 项失败，未写入任何数据，请稍后重试。"
+        if self.failed:
+            return f"部分完成：成功 {self.processed} 项、写入 {self.bars_written} 行，另有 {self.failed} 项失败，建议稍后重试。"
+        return f"同步完成：处理 {self.processed} 项，写入 {self.bars_written} 行。"
+
 
 class SyncService:
     """Coordinates provider reads and database writes."""
@@ -245,10 +259,16 @@ class SyncService:
         adjusts: tuple[str, ...] = (ADJUST_RAW, ADJUST_QFQ),
         workers: int | None = None,
         resume: bool = True,
+        full: bool = True,
         retries: int = 2,
         retry_delay: float = 1.0,
     ) -> SyncReport:
         """Backfill many symbols with checkpointing and bounded retries.
+
+        ``full=True`` (default) re-fetches the whole requested window for every
+        symbol — the backfill/rebuild path. ``full=False`` resumes each symbol
+        from its own last stored date, which is what the daily job wants: a repeat
+        run then only pulls the sessions that are actually new.
 
         Each symbol is committed independently, so an interruption loses at most
         one symbol's work and ``resume=True`` skips the ones already recorded.
@@ -284,7 +304,7 @@ class SyncService:
             """Sync each symbol once; return the ones that failed."""
             bad: list[str] = []
             for index, code in enumerate(symbols, start=1):
-                sub = self.sync_symbol_daily(code, start=start, end=end, adjusts=adjusts, full=True)
+                sub = self.sync_symbol_daily(code, start=start, end=end, adjusts=adjusts, full=full)
                 report.bars_written += sub.bars_written
                 report.errors.extend(sub.errors)
                 report.processed += 1

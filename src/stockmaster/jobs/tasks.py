@@ -48,7 +48,9 @@ def job_sync_calendar(lookahead_days: int = 400) -> dict:
     service = get_sync_service()
     today = date.today()
     report = service.sync_calendar(today - timedelta(days=30), today + timedelta(days=lookahead_days))
-    return report.as_dict()
+    payload = report.as_dict()
+    payload["message"] = report.summary()
+    return payload
 
 
 def job_sync_instruments() -> dict:
@@ -60,69 +62,106 @@ def job_sync_instruments() -> dict:
         sub = service.sync_index_members(index_code)
         index_reports.append(sub.as_dict())
     payload = report.as_dict()
+    payload["message"] = report.summary()
     payload["indices"] = index_reports
     return payload
 
 
 def job_sync_daily(full: bool = False, codes: list[str] | None = None) -> dict:
-    """Incrementally sync daily bars for a universe (watchlist or core pool)."""
+    """Incrementally sync daily bars for a universe (watchlist or core pool).
+
+    ``full=False`` (the default) resumes every symbol from its own last stored
+    date, so re-running the job only pulls the sessions that are actually new.
+    ``full=True`` forces a complete re-fetch of the window.
+
+    ``resume=False`` is deliberate: the backfill cursor is meant to let a
+    multi-hour *full-market* run be interrupted and continued, not to make a
+    daily run skip everything it did yesterday — which is exactly what pinned the
+    universe to "nothing to do" forever before.
+    """
     service = get_sync_service()
     if codes is None:
-        codes = _default_universe()
+        # require_bars=False：这个任务本身就是「生产日线」的。若沿用「只保留已有
+        # 日线」的过滤，全新安装（自选有标的但库里还没有任何日线）会得到空宇宙，
+        # 于是永远拉不到第一根日线；分析/预测类任务仍用默认的保护。
+        codes = _default_universe(require_bars=False)
     if not codes:
-        return {"job": "daily", "processed": 0, "message": "no universe available"}
+        return {
+            "job": "daily",
+            "total": 0,
+            "processed": 0,
+            "bars_written": 0,
+            "failed": 0,
+            "skipped": 0,
+            "errors": [],
+            "message": (
+                "没有可同步的标的：自选股为空，且尚未同步证券主数据。"
+                "请先执行「同步证券主数据」，或先在下方「自选股」中添加标的。"
+            ),
+        }
 
     started = monotonic()
-    report = service.sync_universe_daily(codes, end=date.today(), resume=not full)
+    report = service.sync_universe_daily(codes, end=date.today(), resume=False, full=full)
     payload = report.as_dict()
     payload["elapsed_seconds"] = round(monotonic() - started, 2)
+    payload["message"] = report.summary()
     return payload
 
 
-def _default_universe(workspace_id: int | None = None) -> list[str]:
+def _default_universe(workspace_id: int | None = None, *, require_bars: bool = True) -> list[str]:
     """The set of symbols the daily pipeline processes.
 
     Preference order: explicit watchlist, then index members, then all known
-    instruments — always restricted to symbols that actually have stored bars.
+    instruments.
+
+    ``require_bars=True`` (the default) additionally keeps only symbols that
+    already have stored bars. That guard belongs to the *consumers* of the
+    universe — analytics, predictions and the snapshot poll can only work on
+    symbols with history, and a cloud-sourced index-constituent list can contain
+    codes that were never synced (or were mis-parsed), which would make every
+    downstream job report "no data".
+
+    ``require_bars=False`` is for the daily sync itself: that job's whole purpose
+    is to *create* bars, so restricting it to symbols that already have bars is a
+    chicken-and-egg trap — a fresh install with a populated watchlist would return
+    an empty universe and never fetch the first bar.
 
     ``workspace_id=None`` means "every workspace's watchlists, merged". That is
     what the scheduled jobs want: market data is shared, so syncing the union once
     is both cheaper and more correct than keeping one copy per workspace. Passing
     an id narrows it to a single workspace, which is what the backtest API uses
     when isolation is on.
-
-    That last constraint matters: a cloud-sourced index-constituent list can
-    contain codes that were never synced (or were mis-parsed). Returning them
-    would make every downstream job find "no data" and fail with a confusing
-    message instead of falling back to a usable universe.
     """
     with session_scope() as session:
         from sqlalchemy import select
 
         from stockmaster.db.models import DailyBar, Instrument, WatchlistItem
 
-        def with_bars(candidates: list[str]) -> list[str]:
-            if not candidates:
+        def keep(candidates: list[str]) -> list[str]:
+            # 并集去重且保序：多个工作区把同一只股票加进自选是常态，重复的 code 会让
+            # 下游同步任务对同一个标的跑两遍。
+            unique = list(dict.fromkeys(candidates))
+            if not require_bars:
+                return unique
+            if not unique:
                 return []
             stored = set(
-                session.execute(select(DailyBar.code).where(DailyBar.code.in_(candidates)).distinct()).scalars().all()
+                session.execute(select(DailyBar.code).where(DailyBar.code.in_(unique)).distinct()).scalars().all()
             )
-            return [c for c in candidates if c in stored]
+            return [c for c in unique if c in stored]
 
         watched_stmt = select(WatchlistItem.code)
         if workspace_id is not None:
             watched_stmt = watched_stmt.where(WatchlistItem.workspace_id == workspace_id)
-        # 并集去重：多个工作区把同一只股票加进自选是常态，重复的 code 会让下游
-        # 同步任务对同一个标的跑两遍。
-        watched = with_bars(list(session.execute(watched_stmt.distinct()).scalars().all()))
+        watched = keep(list(session.execute(watched_stmt).scalars().all()))
         if watched:
             return watched
 
-        members = with_bars(repo.index_members(session, "000300.SH"))
+        members = keep(repo.index_members(session, "000300.SH"))
         if members:
             return members
 
-        known = with_bars(
+        known = keep(
             list(
                 session.execute(select(Instrument.code).where(Instrument.status == 1, Instrument.is_index.is_(False)))
                 .scalars()
@@ -153,7 +192,19 @@ def job_sync_index_daily(index_codes: tuple[str, ...] | None = None) -> dict:
         except Exception as exc:
             errors.append(f"{code}: {exc}")
             continue
-    return {"job": "index_daily", "bars_written": written, "errors": errors}
+    if errors:
+        message = f"部分完成：写入 {written} 行，{len(errors)} 个指数失败：{'、'.join(errors[:5])}"
+    else:
+        message = f"同步完成：写入 {written} 行指数日线。"
+    return {
+        "job": "index_daily",
+        "total": len(index_codes),
+        "processed": len(index_codes) - len(errors),
+        "bars_written": written,
+        "failed": len(errors),
+        "errors": errors,
+        "message": message,
+    }
 
 
 # --------------------------------------------------------------------------- #
