@@ -50,7 +50,7 @@ docs = [
 ]
 # ruff 固定精确版本：本地 `uv run ruff` 必须与 .pre-commit-config.yaml 的 rev 一致，
 # 否则同一提交在本地 hook 与 CI 会得到不同的 lint 结果。
-lint = ["ruff==0.16.8"]
+lint = ["ruff==0.17.1"]
 test = [
     "pytest>=8.3",
     "pytest-cov>=5.0.0",
